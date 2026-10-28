@@ -11,7 +11,7 @@ import {
   CCTContractTypeInvalidError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { type TokenPoolVersion, TOKEN_POOL_INTERFACES } from '../contracts.ts'
 import {
@@ -179,16 +179,16 @@ describe('ProvideSiloedLiquidity (cct/evm)', () => {
       for (const data of rest) assert.equal(data, first)
     })
 
-    it('reads the lane, then the silo rebalancer, then the funding, in that order', async () => {
+    it('reads the lane and the funding together, then the silo rebalancer', async () => {
       const seen = newSeen()
       await generate(stubChain({ seen }))
       assert.deepEqual(seen.calls, [
         'typeAndVersion',
-        'isSiloed',
-        'getChainRebalancer',
         'getToken',
+        'isSiloed',
         'balanceOf',
         'allowance',
+        'getChainRebalancer',
       ])
     })
 
@@ -284,6 +284,20 @@ describe('ProvideSiloedLiquidity (cct/evm)', () => {
         )
     })
 
+    it('reports an unsiloed lane without reading the silo rebalancer, still carrying the tx', async () => {
+      const seen = newSeen()
+      await assert.rejects(
+        () => generate(stubChain({ seen }), { remoteChainSelector: UNSILOED_SEL }),
+        (err: unknown) =>
+          err instanceof CCTPreconditionError &&
+          err.errors.length === 1 &&
+          err.errors[0]!.param === 'remoteChainSelector' &&
+          err.unsigned.family === ChainFamily.EVM &&
+          err.unsigned.transactions[0]!.to === POOL,
+      )
+      assert.ok(!seen.calls.includes('getChainRebalancer'))
+    })
+
     it('rejects the unsiloed rebalancer, which the silo does not accept', async () => {
       await assert.rejects(
         () => generate(stubChain(), { sender: UNSILOED_REBALANCER }),
@@ -317,7 +331,7 @@ describe('ProvideSiloedLiquidity (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ balance: AMOUNT - 1n })),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
+          err instanceof CCTPreconditionError &&
           err.context.operation === 'provideSiloedLiquidity' &&
           /holds 999999999999999999 of/.test(err.message),
       )
@@ -327,7 +341,7 @@ describe('ProvideSiloedLiquidity (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ allowance: 0n })),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
+          err instanceof CCTPreconditionError &&
           /has approved 0 of/.test(err.message) &&
           err.message.includes(`spender: '${POOL}'`) &&
           /approveToken\(\{ tokenAddress:/.test(err.message),

@@ -21,11 +21,12 @@ import type { Interface } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { EVMOperation, callTx } from '../../operation.ts'
+import type { PreconditionError } from '../../../errors.ts'
+import { EVMOperation, callTx, unmet } from '../../operation.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
+  checkPoolOwner,
   getTokenPoolInterface,
   resolveEncoder,
   resolveTokenPool,
@@ -88,18 +89,10 @@ export class SetRateLimitAdmin extends EVMOperation<SetRateLimitAdminParams> {
   }
 
   /**
-   * Resolves the pool's type/version, confirms `sender` (when given) is the pool owner, then
-   * floor-matches the encoder against that version.
-   * @remarks The owner check lives here, not only in {@link execute}, so the offline / multisig
-   * path gets it too: `generateUnsignedSetRateLimitAdmin` with an unauthorized `sender` would
-   * otherwise hand back a fully-formed transaction that reverts `Unauthorized` only after being
-   * reviewed and signed. Every sibling owner-gated pool write gates in `buildUnsigned` for the
-   * same reason.
-   * @remarks Ordered *after* the encoder so a 2.0.0 pool reports the real problem (removed
-   * selector) rather than spending a round trip and failing on an authorization detail.
+   * Resolves the pool's type/version and floor-matches the encoder against it. The owner
+   * requirement is reported by {@link SetRateLimitAdmin.preconditions}.
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool — the selector was removed;
    * use {@link SetDynamicConfig}
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner
    */
   protected async buildUnsigned(
     chain: EVMChain,
@@ -107,9 +100,22 @@ export class SetRateLimitAdmin extends EVMOperation<SetRateLimitAdminParams> {
   ): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
-    return unsigned
+    return encode(getTokenPoolInterface(type, version), params)
+  }
+
+  /**
+   * Confirms `sender` (when given) is the pool owner.
+   * @remarks Reported rather than thrown outright, so a plan that appoints this owner in an
+   * earlier step can still build this transaction — and reported here rather than only in
+   * {@link execute}, so the offline / multisig path is covered too:
+   * `generateUnsignedSetRateLimitAdmin` with an unauthorized `sender` would otherwise hand back a
+   * fully-formed transaction that reverts `Unauthorized` only after being reviewed and signed.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    params: SetRateLimitAdminParams,
+  ): Promise<PreconditionError[]> {
+    if (params.sender === undefined) return []
+    return unmet(await checkPoolOwner(chain, params.poolAddress, params.sender))
   }
 }

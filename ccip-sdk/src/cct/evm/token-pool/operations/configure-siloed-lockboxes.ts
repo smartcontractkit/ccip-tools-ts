@@ -19,10 +19,10 @@ import { type Interface, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import { assertLockbox, readLockboxToken } from '../../lockbox/contracts.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import {
   parseRecord,
   validateArray,
@@ -32,8 +32,8 @@ import {
 import {
   type LockboxConfig,
   TokenPoolVersion,
-  assertPoolOwner,
   assertSiloedLockReleasePool,
+  checkPoolOwner,
   getTokenPoolInterface,
   readTokenPoolLockboxConfigs,
   readTokenPoolToken,
@@ -117,16 +117,13 @@ export class ConfigureSiloedLockboxes extends EVMOperation<ConfigureSiloedLockbo
   }
 
   /**
-   * Resolves the pool's type/version, confirms `sender` (when given) is the pool owner, then
-   * pre-flights every binding against the pool and its lockboxes.
+   * Resolves the pool's type/version, then checks every lockbox is an `ERC20LockBox` for the
+   * pool's token: once per distinct lockbox ({@link assertLockbox}, then its `getToken()`), since
+   * lanes may share one. The pool itself reverts `InvalidToken` on a mismatch.
    *
-   * Two state preconditions:
-   * - **no binding may already be in place**: `EnumerableMap.set` stores the same value again
-   *   silently, so such an entry is a no-op; mirrors `applyAllowlistUpdates`.
-   * - **every lockbox must be an `ERC20LockBox` for the pool's token**: checked once per distinct
-   *   lockbox ({@link assertLockbox}, then its `getToken()`), since lanes may share one. The pool
-   *   itself reverts `InvalidToken` on a mismatch.
-   *
+   * @remarks Fatal rather than reported: a lockbox's contract type and token are fixed when it is
+   * deployed, so no earlier step makes a wrong lockbox right. The owner and already-bound
+   * requirements are reported by {@link ConfigureSiloedLockboxes.preconditions}.
    * @remarks Deliberately not checked: that the lane is a supported chain (the documented
    * sequence binds lockboxes before configuring lanes), and that the pool is an authorized caller
    * of each lockbox (see the module remarks).
@@ -134,10 +131,9 @@ export class ConfigureSiloedLockboxes extends EVMOperation<ConfigureSiloedLockbo
    * or a lockbox address is some other contract
    * @throws {@link CCTOperationUnsupportedError} below v2.0.0, where a siloed pool holds its silos
    * itself (see `updateSiloDesignations`)
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner, a
-   * binding is already in place, nothing at a lockbox address answers `typeAndVersion()`, or a
-   * lockbox escrows another token (both reported as the first `lockboxConfigs[i].lockbox` naming
-   * it)
+   * @throws {@link CCTParamsInvalidError} if nothing at a lockbox address answers
+   * `typeAndVersion()`, or a lockbox escrows another token (both reported as the first
+   * `lockboxConfigs[i].lockbox` naming it)
    * @throws {@link CCTContractVersionUnsupportedError} if the pool or a lockbox reports an
    * unknown version
    */
@@ -145,26 +141,13 @@ export class ConfigureSiloedLockboxes extends EVMOperation<ConfigureSiloedLockbo
     chain: EVMChain,
     params: ConfigureSiloedLockboxesParams,
   ): Promise<UnsignedEVMTx> {
-    const { poolAddress, sender } = params
+    const { poolAddress } = params
     const { type, version } = await resolveTokenPool(chain, poolAddress)
     assertSiloedLockReleasePool(this.name, poolAddress, type)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    if (sender !== undefined) await assertPoolOwner(this.name, chain, poolAddress, sender)
 
     const configs = params.lockboxConfigs.map((c) => ({ ...c, lockbox: getAddress(c.lockbox) }))
-    const [{ token }, current] = await Promise.all([
-      readTokenPoolToken(chain, poolAddress),
-      readTokenPoolLockboxConfigs(chain, poolAddress),
-    ])
-    const bound = new Map(current.map((c) => [c.remoteChainSelector, c.lockbox]))
-    configs.forEach(({ remoteChainSelector, lockbox }, i) => {
-      if (bound.get(remoteChainSelector) !== lockbox) return
-      throw new CCTParamsInvalidError(
-        this.name,
-        `lockboxConfigs[${i}]`,
-        `lane ${remoteChainSelector} is already bound to ${lockbox}; the tx would change nothing (a no-op)`,
-      )
-    })
+    const { token } = await readTokenPoolToken(chain, poolAddress)
 
     const lockboxes = [...new Set(configs.map((c) => c.lockbox))]
     await Promise.all(
@@ -182,14 +165,43 @@ export class ConfigureSiloedLockboxes extends EVMOperation<ConfigureSiloedLockbo
     )
 
     chain.logger.debug(
-      `${this.name}: pool = ${poolAddress}, bound = ${current.length}, configuring = ${configs.length}, lockboxes = ${lockboxes.length}`,
+      `${this.name}: pool = ${poolAddress}, configuring = ${configs.length}, lockboxes = ${lockboxes.length}`,
     )
     return encode(getTokenPoolInterface(type, version), { ...params, lockboxConfigs: configs })
   }
 
   /**
+   * Confirms `sender` (when given) is the pool owner and that no binding is already in place:
+   * `EnumerableMap.set` stores the same value again silently, so such an entry is a no-op;
+   * mirrors `applyAllowlistUpdates`.
+   * @remarks Both reported rather than thrown outright: an ownership transfer can make `sender`
+   * the owner, and a binding can be replaced by an earlier step.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { poolAddress, lockboxConfigs, sender }: ConfigureSiloedLockboxesParams,
+  ): Promise<PreconditionError[]> {
+    const [owner, current] = await Promise.all([
+      sender === undefined ? undefined : checkPoolOwner(chain, poolAddress, sender),
+      readTokenPoolLockboxConfigs(chain, poolAddress),
+    ])
+    const bound = new Map(current.map((c) => [c.remoteChainSelector, c.lockbox]))
+    return unmet(
+      owner,
+      ...lockboxConfigs.map(({ remoteChainSelector, lockbox }, i): PreconditionError | undefined =>
+        bound.get(remoteChainSelector) === getAddress(lockbox)
+          ? {
+              param: `lockboxConfigs[${i}]`,
+              reason: `lane ${remoteChainSelector} is already bound to ${getAddress(lockbox)}; the tx would change nothing (a no-op)`,
+            }
+          : undefined,
+      ),
+    )
+  }
+
+  /**
    * Signs and submits as the pool owner, defaulting `sender` to the signing wallet: the only
-   * address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx. See
+   * address that can satisfy {@link preconditions}' owner check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
    * than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

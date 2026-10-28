@@ -22,9 +22,9 @@ import { type Interface, getAddress } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { type PreconditionError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
-import { type EVMExecuteParams, EVMOperation, callTx } from '../../operation.ts'
+import { type EVMExecuteParams, EVMOperation, callTx, unmet } from '../../operation.ts'
 import {
   parseRecord,
   validateArray,
@@ -33,8 +33,8 @@ import {
 } from '../../validate.ts'
 import {
   TokenPoolVersion,
-  assertPoolOwner,
   assertSiloedLockReleasePool,
+  checkPoolOwner,
   getTokenPoolInterface,
   readTokenPoolIsSiloed,
   readTokenPoolIsSupportedChain,
@@ -184,61 +184,21 @@ export class UpdateSiloDesignations extends EVMOperation<
   }
 
   /**
-   * Resolves the pool's type/version, confirms `sender` (when given) is the pool owner, then
-   * pre-flights every lane against the pool in one parallel batch.
-   *
-   * Three state preconditions, each of which reverts the whole batch:
-   * - **every `removes` lane must be siloed**: else `ChainNotSiloed`.
-   * - **no `adds` lane may already be siloed**: else `InvalidChainSelector`.
-   * - **every `adds` lane must be a supported chain**: else `InvalidChainSelector`.
-   *
-   * @remarks The lane checks do not depend on the signer and always run; the owner check is
-   * skipped without a `sender`. All of them live here, not in {@link execute}, so the offline /
-   * multisig path gets them too.
+   * Resolves the pool's type/version and floor-matches the encoder.
+   * @remarks The owner and per-lane requirements are reported by
+   * {@link UpdateSiloDesignations.preconditions}.
    * @throws {@link CCTContractTypeInvalidError} if the pool is not a `SiloedLockReleaseTokenPool`
    * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool
-   * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner, or a
-   * lane fails a precondition above
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
    */
   protected async buildUnsigned(
     chain: EVMChain,
     params: ParsedUpdateSiloDesignationsParams,
   ): Promise<UnsignedEVMTx> {
-    const { poolAddress, removes, adds, sender } = params
+    const { poolAddress, removes, adds } = params
     const { type, version } = await resolveTokenPool(chain, poolAddress)
     assertSiloedLockReleasePool(this.name, poolAddress, type)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    if (sender !== undefined) await assertPoolOwner(this.name, chain, poolAddress, sender)
-
-    const added = adds.map((a) => a.remoteChainSelector)
-    const [removedSiloed, addedSiloed, addedSupported] = await Promise.all([
-      Promise.all(removes.map((sel) => readTokenPoolIsSiloed(chain, poolAddress, sel))),
-      Promise.all(added.map((sel) => readTokenPoolIsSiloed(chain, poolAddress, sel))),
-      Promise.all(added.map((sel) => readTokenPoolIsSupportedChain(chain, poolAddress, sel))),
-    ])
-    const notSiloed = removedSiloed.indexOf(false)
-    if (notSiloed !== -1)
-      throw new CCTParamsInvalidError(
-        this.name,
-        `removes[${notSiloed}]`,
-        `lane ${removes[notSiloed]} is not siloed on ${poolAddress}; it would revert ChainNotSiloed`,
-      )
-    const alreadySiloed = addedSiloed.indexOf(true)
-    if (alreadySiloed !== -1)
-      throw new CCTParamsInvalidError(
-        this.name,
-        `adds[${alreadySiloed}].remoteChainSelector`,
-        `lane ${added[alreadySiloed]} is already siloed on ${poolAddress}; it would revert InvalidChainSelector; change its rebalancer with setSiloRebalancer`,
-      )
-    const unsupported = addedSupported.indexOf(false)
-    if (unsupported !== -1)
-      throw new CCTParamsInvalidError(
-        this.name,
-        `adds[${unsupported}].remoteChainSelector`,
-        `lane ${added[unsupported]} is not a supported chain on ${poolAddress}; add the lane with applyChainUpdates first, as it would revert InvalidChainSelector`,
-      )
-
     chain.logger.debug(
       `${this.name}: pool = ${poolAddress}, removes = ${removes.length}, adds = ${adds.length}`,
     )
@@ -246,8 +206,58 @@ export class UpdateSiloDesignations extends EVMOperation<
   }
 
   /**
+   * Confirms `sender` (when given) is the pool owner, then checks every lane against the pool in
+   * one parallel batch.
+   *
+   * Three per-lane requirements, any one of which reverts the whole batch:
+   * - **every `removes` lane must be siloed**: else `ChainNotSiloed`.
+   * - **no `adds` lane may already be siloed**: else `InvalidChainSelector`.
+   * - **every `adds` lane must be a supported chain**: else `InvalidChainSelector`.
+   *
+   * @remarks All reported rather than thrown outright, and every failing lane rather than the
+   * first: an earlier plan step can transfer ownership, add the lane with `applyChainUpdates`, or
+   * change what is siloed. The lane checks do not depend on the signer and always run.
+   */
+  protected override async preconditions(
+    chain: EVMChain,
+    { poolAddress, removes, adds, sender }: ParsedUpdateSiloDesignationsParams,
+  ): Promise<PreconditionError[]> {
+    const added = adds.map((a) => a.remoteChainSelector)
+    const [owner, removedSiloed, addedSiloed, addedSupported] = await Promise.all([
+      sender === undefined ? undefined : checkPoolOwner(chain, poolAddress, sender),
+      Promise.all(removes.map((sel) => readTokenPoolIsSiloed(chain, poolAddress, sel))),
+      Promise.all(added.map((sel) => readTokenPoolIsSiloed(chain, poolAddress, sel))),
+      Promise.all(added.map((sel) => readTokenPoolIsSupportedChain(chain, poolAddress, sel))),
+    ])
+    return unmet(
+      owner,
+      ...removes.map((sel, i): PreconditionError | undefined =>
+        removedSiloed[i]
+          ? undefined
+          : {
+              param: `removes[${i}]`,
+              reason: `lane ${sel} is not siloed on ${poolAddress}; it would revert ChainNotSiloed`,
+            },
+      ),
+      ...added.map((sel, i): PreconditionError | undefined =>
+        addedSiloed[i]
+          ? {
+              param: `adds[${i}].remoteChainSelector`,
+              reason: `lane ${sel} is already siloed on ${poolAddress}; it would revert InvalidChainSelector; change its rebalancer with setSiloRebalancer`,
+            }
+          : addedSupported[i]
+            ? undefined
+            : {
+                param: `adds[${i}].remoteChainSelector`,
+                reason: `lane ${sel} is not a supported chain on ${poolAddress}; add the lane with applyChainUpdates first, as it would revert InvalidChainSelector`,
+              },
+      ),
+    )
+  }
+
+  /**
    * Signs and submits as the pool owner, defaulting `sender` to the signing wallet: the only
-   * address that can satisfy {@link buildUnsigned}'s owner check for a broadcast tx. See
+   * address that can satisfy {@link preconditions}' owner check for a broadcast tx. See
    * {@link EVMOperation.resolveWalletSender} for why a divergent `sender` is rejected rather
    * than signed.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer

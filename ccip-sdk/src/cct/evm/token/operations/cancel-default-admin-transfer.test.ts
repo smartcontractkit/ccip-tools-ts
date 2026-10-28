@@ -6,7 +6,7 @@ import { Interface, ZeroAddress } from 'ethers'
 import { CCIPWalletInvalidError } from '../../../../errors/index.ts'
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError, CCTPreconditionError } from '../../../errors.ts'
 import {
   type CancelDefaultAdminTransferParams,
   CancelDefaultAdminTransfer,
@@ -123,7 +123,10 @@ describe('CancelDefaultAdminTransfer (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ admin: ZeroAddress })),
         (err: unknown) =>
-          err instanceof CCTParamsInvalidError && err.context.param === 'tokenAddress',
+          // Thrown, not reported: no earlier plan step can restore a renounced admin.
+          err instanceof CCTParamsInvalidError &&
+          !(err instanceof CCTPreconditionError) &&
+          err.context.param === 'tokenAddress',
       )
     })
 

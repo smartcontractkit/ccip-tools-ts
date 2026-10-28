@@ -11,7 +11,7 @@ import {
   CCTContractTypeInvalidError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { type TokenPoolVersion, TOKEN_POOL_INTERFACES } from '../contracts.ts'
 import { type WithdrawLiquidityParams, WithdrawLiquidity } from './withdraw-liquidity.ts'
@@ -175,14 +175,23 @@ describe('WithdrawLiquidity (cct/evm)', () => {
       const unsigned = await generate(stubChain({ seen }), { sender: undefined })
 
       assert.equal(unsigned.transactions[0]!.from, undefined)
-      // no rebalancer read (nothing to compare against), but the pool balance still holds
-      assert.deepEqual(seen.calls, ['typeAndVersion', 'getToken', 'balanceOf'])
+      // no rebalancer read (nothing to compare against), but the pool balance still holds.
+      // typeAndVersion twice: buildUnsigned and preconditions each resolve the pool — EVMChain
+      // memoizes it, this stub does not
+      assert.deepEqual(seen.calls, ['typeAndVersion', 'typeAndVersion', 'getToken', 'balanceOf'])
     })
 
     it('pre-flights the rebalancer, then the pool balance', async () => {
       const seen = newSeen()
       await generate(stubChain({ seen }))
-      assert.deepEqual(seen.calls, ['typeAndVersion', 'getRebalancer', 'getToken', 'balanceOf'])
+      // typeAndVersion twice — see above
+      assert.deepEqual(seen.calls, [
+        'typeAndVersion',
+        'typeAndVersion',
+        'getRebalancer',
+        'getToken',
+        'balanceOf',
+      ])
     })
   })
 
@@ -250,7 +259,7 @@ describe('WithdrawLiquidity (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ poolBalance: AMOUNT - 1n })),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
+          err instanceof CCTPreconditionError &&
           err.context.operation === 'withdrawLiquidity' &&
           /holds 999999999999999999 of/.test(err.message) &&
           err.message.includes(TOKEN) &&
@@ -266,7 +275,7 @@ describe('WithdrawLiquidity (cct/evm)', () => {
         await assert.rejects(
           () => generate(stubChain({ ...siloed, unsiloedLiquidity: AMOUNT - 1n, seen })),
           (err: unknown) =>
-            err instanceof CCTTxFailedError &&
+            err instanceof CCTPreconditionError &&
             err.context.operation === 'withdrawLiquidity' &&
             /has 999999999999999999 of .* in unsiloed liquidity/.test(err.message) &&
             /InsufficientLiquidity/.test(err.message),

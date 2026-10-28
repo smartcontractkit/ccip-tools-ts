@@ -11,6 +11,7 @@ import {
   CCTContractTypeInvalidError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { type TokenPoolVersion, TOKEN_POOL_INTERFACES } from '../contracts.ts'
 import {
@@ -332,6 +333,24 @@ describe('UpdateSiloDesignations (cct/evm)', () => {
           err instanceof CCTParamsInvalidError &&
           err.context.param === 'adds[0].remoteChainSelector' &&
           /applyChainUpdates/.test(err.message),
+      )
+    })
+
+    it('reports every failing lane at once, alongside the owner', async () => {
+      await assert.rejects(
+        () =>
+          generate(stubChain(), {
+            removes: [FREE_B],
+            adds: [
+              { ...ADD_A, remoteChainSelector: SILOED },
+              { ...ADD_B, remoteChainSelector: UNSUPPORTED },
+            ],
+            sender: REBALANCER_B,
+          }),
+        (err: unknown) =>
+          err instanceof CCTPreconditionError &&
+          err.errors.map((e) => e.param).join() ===
+            'sender,removes[0],adds[0].remoteChainSelector,adds[1].remoteChainSelector',
       )
     })
 

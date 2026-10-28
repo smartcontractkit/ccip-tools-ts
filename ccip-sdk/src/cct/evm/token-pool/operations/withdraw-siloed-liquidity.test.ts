@@ -11,7 +11,7 @@ import {
   CCTContractTypeInvalidError,
   CCTOperationUnsupportedError,
   CCTParamsInvalidError,
-  CCTTxFailedError,
+  CCTPreconditionError,
 } from '../../../errors.ts'
 import { type TokenPoolVersion, TOKEN_POOL_INTERFACES } from '../contracts.ts'
 import {
@@ -184,14 +184,14 @@ describe('WithdrawSiloedLiquidity (cct/evm)', () => {
       for (const data of rest) assert.equal(data, first)
     })
 
-    it('reads the lane, the silo rebalancer, then the silo liquidity', async () => {
+    it('reads the lane, then the silo rebalancer and liquidity', async () => {
       const seen = newSeen()
       await generate(stubChain({ seen }))
       assert.deepEqual(seen.calls, [
         'typeAndVersion',
         'isSiloed',
-        'getChainRebalancer',
         'getToken',
+        'getChainRebalancer',
         'getAvailableTokens',
       ])
     })
@@ -281,7 +281,7 @@ describe('WithdrawSiloedLiquidity (cct/evm)', () => {
       await assert.rejects(
         () => generate(stubChain({ available: AMOUNT - 1n, unsiloed: AMOUNT * 10n })),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
+          err instanceof CCTPreconditionError &&
           err.context.operation === 'withdrawSiloedLiquidity' &&
           err.message.includes(`silo ${SEL}`) &&
           /holds 999999999999999999 of/.test(err.message) &&
@@ -306,10 +306,7 @@ describe('WithdrawSiloedLiquidity (cct/evm)', () => {
     it('propagates any other failure of the balance read rather than skipping it', async () => {
       await assert.rejects(
         () => generate(stubChain({ supported: [], revert: 'ChainNotAllowed' })),
-        (err: unknown) =>
-          isError(err, 'CALL_EXCEPTION') &&
-          !(err instanceof CCTParamsInvalidError) &&
-          !(err instanceof CCTTxFailedError),
+        (err: unknown) => isError(err, 'CALL_EXCEPTION') && !(err instanceof CCTParamsInvalidError),
       )
     })
   })
