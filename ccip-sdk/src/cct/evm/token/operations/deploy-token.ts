@@ -7,14 +7,8 @@
 
 import { type Interface, ZeroAddress } from 'ethers'
 
-import { CCTParamsInvalidError } from '../../../errors.ts'
 import { type DeployArtifact, EVMDeployOperation } from '../../operation.ts'
-import {
-  validateAddress,
-  validateNonEmptyString,
-  validateUint256,
-  validateUint8,
-} from '../../validate.ts'
+import { validateAddress, validateBaseERC20Params } from '../../validate.ts'
 import { TokenVersion, getTokenArtifact } from '../contracts.ts'
 
 /** Parameters for {@link DeployToken} — deploys `CrossChainToken` (v2.0.0). */
@@ -61,42 +55,8 @@ export class DeployToken extends EVMDeployOperation<DeployTokenParams> {
 
   /** Validates the constructor params before building init-code. */
   protected override prepare(params: DeployTokenParams): DeployTokenParams {
-    validateNonEmptyString(this.name, 'name', params.name)
-    validateNonEmptyString(this.name, 'symbol', params.symbol)
-    validateUint8(this.name, 'decimals', params.decimals)
-    validateUint256(this.name, 'maxSupply', params.maxSupply)
-    const preMint = params.preMint ?? 0n
-    validateUint256(this.name, 'preMint', preMint)
+    validateBaseERC20Params(this.name, params)
     validateAddress(this.name, 'owner', params.owner)
-    if (params.maxSupply !== 0n && preMint > params.maxSupply)
-      throw new CCTParamsInvalidError(
-        this.name,
-        'preMint',
-        `must be <= maxSupply (${params.maxSupply}), got ${preMint}`,
-      )
-    // Mirror CrossChainToken's ctor: preMintRecipient is set (and non-zero) iff preMint > 0.
-    if (preMint > 0n) {
-      if (params.preMintRecipient === undefined)
-        throw new CCTParamsInvalidError(
-          this.name,
-          'preMintRecipient',
-          'must be set when preMint > 0',
-        )
-      validateAddress(this.name, 'preMintRecipient', params.preMintRecipient)
-      if (params.preMintRecipient === ZeroAddress)
-        throw new CCTParamsInvalidError(
-          this.name,
-          'preMintRecipient',
-          'must be non-zero when preMint > 0',
-        )
-    } else if (params.preMintRecipient !== undefined) {
-      throw new CCTParamsInvalidError(
-        this.name,
-        'preMintRecipient',
-        'must be unset when preMint is 0',
-      )
-    }
-    if (params.ccipAdmin !== undefined) validateAddress(this.name, 'ccipAdmin', params.ccipAdmin)
     if (params.burnMintRoleAdmin !== undefined)
       validateAddress(this.name, 'burnMintRoleAdmin', params.burnMintRoleAdmin)
     return params

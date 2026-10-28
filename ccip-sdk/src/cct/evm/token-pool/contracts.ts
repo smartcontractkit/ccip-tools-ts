@@ -2,7 +2,7 @@
  * EVM token-pool contract layer for CCT: cached {@link Interface}s + on-chain type/version
  * resolution ({@link resolveTokenPool}, {@link getTokenPoolInterface}, floor-matched via
  * {@link resolveEncoder}) for read/write ops, plus the deployable pools' creation artifacts
- * ({@link getTokenPoolArtifact}), the narrow role reads every owner-gated write pre-flights
+ * ({@link getTokenPoolArtifact}, {@link getCrossChainPoolTokenArtifact}), the narrow role reads every owner-gated write pre-flights
  * `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}), the allowlist
  * resolution and read ({@link resolveAllowlistHolder}, {@link readTokenPoolAllowlist}) plus the
  * owner-only guard built on the first of them ({@link assertPoolOwner}), and the LockRelease
@@ -42,11 +42,13 @@ import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-t
 import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/siloed-lock-release-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-mint-token-pool.ts'
+import CROSS_CHAIN_POOL_TOKEN_V2_0_0_ABI from '../artifacts/abi/V2_0_0/cross-chain-pool-token.ts'
 import LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/siloed-lock-release-token-pool.ts'
 import BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
 import BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
+import CROSS_CHAIN_POOL_TOKEN_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/cross-chain-pool-token.ts'
 import LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/siloed-lock-release-token-pool.ts'
 import type { DeployArtifact } from '../operation.ts'
@@ -55,10 +57,11 @@ import { getTypedContract } from '../query.ts'
 /**
  * ABI families for pool resolution. The burn-* variants are interface-compatible for CCT
  * ops (identical constructor + `transferOwnership`, shared TokenPool surface), so they share
- * the `BurnMint` ABI. `LockRelease` (with its liquidity functions) is distinct, and
- * `SiloedLockRelease` is distinct again because it escrows per remote chain: at 1.6.x it adds the
- * silo functions and lacks `transferLiquidity`; at 2.0.0 it binds a lockbox per lane
- * (`getLockBox(uint64)`, `configureLockBoxes`) instead of taking one `lockBox` in its constructor.
+ * the `BurnMint` ABI, as does `CrossChainPoolToken` (a superset). `LockRelease` (with its
+ * liquidity functions) is distinct, and `SiloedLockRelease` is distinct again because it escrows
+ * per remote chain: at 1.6.x it adds the silo functions and lacks `transferLiquidity`; at 2.0.0 it
+ * binds a lockbox per lane (`getLockBox(uint64)`, `configureLockBoxes`) instead of taking one
+ * `lockBox` in its constructor.
  *
  * @remarks Both lock/release families satisfy {@link isLockReleaseTokenPoolType}; test that, not
  * `family === 'LockRelease'`, to ask whether a pool escrows liquidity.
@@ -74,6 +77,8 @@ export type TokenPoolFamily = (typeof TOKEN_POOL_FAMILIES)[number]
  * `SiloedLockReleaseTokenPool` each have their own (see {@link getTokenPoolFamily}). Unsupported
  * values fail in {@link parseTokenPoolVersion}, which also normalizes v1.5.0's `*AndProxy` shims
  * onto these base names.
+ *
+ * @remarks `CrossChainPoolToken` is an ERC20 that is its own burn/mint pool, at 2.0.0 only.
  */
 export const TOKEN_POOL_TYPES = [
   'BurnMintTokenPool',
@@ -83,13 +88,14 @@ export const TOKEN_POOL_TYPES = [
   'BurnMintWithLockReleaseFlagTokenPool',
   'LockReleaseTokenPool',
   'SiloedLockReleaseTokenPool',
+  'CrossChainPoolToken',
 ] as const
 
 /** A supported EVM token-pool contract type. */
 export type TokenPoolType = (typeof TOKEN_POOL_TYPES)[number]
 
-/** The burn-* mint pool types, which share the `BurnMint` ABI. */
-export type BurnMintTokenPoolType = Extract<TokenPoolType, `Burn${string}`>
+/** The burn/mint pool types, which share the `BurnMint` ABI. */
+export type BurnMintTokenPoolType = Extract<TokenPoolType, `Burn${string}`> | 'CrossChainPoolToken'
 
 /** The lock/release pool types: the `LockRelease` and `SiloedLockRelease` families. */
 export type LockReleaseTokenPoolType = Exclude<TokenPoolType, BurnMintTokenPoolType>
@@ -102,12 +108,12 @@ export function isTokenPoolType(v: string): v is TokenPoolType {
 /**
  * Classifies a supported pool type into its ABI {@link TokenPoolFamily} by name: every burn-* pool
  * shares the `BurnMint` ABI (hence the anchored `^Burn`, which also covers
- * `BurnMintWithLockReleaseFlagTokenPool`), `SiloedLockReleaseTokenPool` is `SiloedLockRelease`,
- * and `LockReleaseTokenPool` is `LockRelease`. {@link TOKEN_POOL_TYPES} is the gate, so only
- * allowlisted, ABI-compatible names reach here.
+ * `BurnMintWithLockReleaseFlagTokenPool`) and `CrossChainPoolToken`, `SiloedLockReleaseTokenPool`
+ * is `SiloedLockRelease`, and `LockReleaseTokenPool` is `LockRelease`. {@link TOKEN_POOL_TYPES} is
+ * the gate, so only allowlisted, ABI-compatible names reach here.
  */
 export function getTokenPoolFamily(type: TokenPoolType): TokenPoolFamily {
-  if (/^Burn/.test(type)) return 'BurnMint'
+  if (/^Burn/.test(type) || type === 'CrossChainPoolToken') return 'BurnMint'
   return type === 'SiloedLockReleaseTokenPool' ? 'SiloedLockRelease' : 'LockRelease'
 }
 
@@ -152,7 +158,7 @@ export function isTokenPoolVersion(v: string): v is TokenPoolVersion {
  * {@link TokenPoolVersion}. A v1.5.0 `*AndProxy` type normalizes to its base pool type.
  * @throws {@link CCTContractTypeInvalidError} if `contractType` is not a supported pool type
  * @throws {@link CCTContractVersionUnsupportedError} if `version` is not a known pool version, or
- * not one the type's family shipped at (see {@link TOKEN_POOL_INTERFACES})
+ * not one the type shipped at (see {@link TOKEN_POOL_INTERFACES})
  */
 export function parseTokenPoolVersion({
   address,
@@ -176,6 +182,11 @@ export function parseTokenPoolVersion({
   // a version the type's family never shipped at (1.6.0 shipped only the siloed pool, which first
   // shipped at 1.6.0) is not a contract we know
   if (!TOKEN_POOL_INTERFACE_LOOKUP[getTokenPoolFamily(type)][version])
+    throw new CCTContractVersionUnsupportedError(contractType, version, {
+      context: { address },
+    })
+  // the BurnMint family table would also accept the versions before CrossChainPoolToken shipped
+  if (type === 'CrossChainPoolToken' && version !== TokenPoolVersion.V2_0_0)
     throw new CCTContractVersionUnsupportedError(contractType, version, {
       context: { address },
     })
@@ -1205,6 +1216,21 @@ export function getTokenPoolArtifact(type: DeployableTokenPoolType): DeployArtif
     contract: type,
     iface: getTokenPoolInterface(type, TokenPoolVersion.V2_0_0),
     bytecode: TOKEN_POOL_BYTECODE[type],
+  }
+}
+
+/** Cached `CrossChainPoolToken` (v2.0.0) interface, for the ctor and `setCCIPAdmin` `BurnMint` lacks. */
+export const CROSS_CHAIN_POOL_TOKEN_INTERFACE = new Interface(CROSS_CHAIN_POOL_TOKEN_V2_0_0_ABI)
+
+/**
+ * `CrossChainPoolToken` (v2.0.0) deploy artifact: contract name + ctor {@link Interface} +
+ * creation bytecode. Not a {@link DeployableTokenPoolType}: it deploys no separate token.
+ */
+export function getCrossChainPoolTokenArtifact(): DeployArtifact {
+  return {
+    contract: 'CrossChainPoolToken',
+    iface: CROSS_CHAIN_POOL_TOKEN_INTERFACE,
+    bytecode: CROSS_CHAIN_POOL_TOKEN_V2_0_0_BYTECODE,
   }
 }
 
