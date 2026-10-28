@@ -10,6 +10,7 @@ import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
 import SILOED_LOCK_RELEASE_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/siloed-lock-release-token-pool.ts'
 import BURN_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
 import BURN_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
+import BURN_TO_ADDRESS_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-to-address-mint-token-pool.ts'
 import BURN_WITH_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
 import LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/siloed-lock-release-token-pool.ts'
@@ -22,6 +23,7 @@ const RMN_PROXY = '0x' + '33'.repeat(20)
 const ROUTER = '0x' + '44'.repeat(20)
 const HOOKS = '0x' + '55'.repeat(20)
 const LOCKBOX = '0x' + '66'.repeat(20)
+const BURN_ADDRESS = '0x' + '77'.repeat(20)
 const DEPLOYED = getCreateAddress({ from: SENDER, nonce: 0 })
 const HASH = '0x' + 'ab'.repeat(32)
 
@@ -34,19 +36,24 @@ const W_RMN = '0000000000000000000000003333333333333333333333333333333333333333'
 const W_ROUTER = '0000000000000000000000004444444444444444444444444444444444444444'
 const W_HOOKS = '0000000000000000000000005555555555555555555555555555555555555555'
 const W_LOCKBOX = '0000000000000000000000006666666666666666666666666666666666666666'
+const W_BURN_ADDRESS = '0000000000000000000000007777777777777777777777777777777777777777'
 
 // Golden vectors: pinned 2.0.0 constructor-arg encodings for the fixed inputs above. Independent
 // of the SDK encoder — they guard each pool's init-code against drift. The burn-* variants share
 // the `BurnMint` constructor (token, decimals, advancedPoolHooks, rmnProxy, router); LockRelease
-// adds `lockbox`. `SiloedLockReleaseTokenPool` takes the burn-* constructor unchanged (no `lockbox`).
+// adds `lockbox`, BurnToAddress adds `burnAddress`. `SiloedLockReleaseTokenPool` takes the burn-*
+// constructor unchanged (no `lockbox`).
 const BURN_MINT_ARGS = W_TOKEN + W_DECIMALS + W_HOOKS + W_RMN + W_ROUTER
 const LOCK_RELEASE_ARGS = W_TOKEN + W_DECIMALS + W_HOOKS + W_RMN + W_ROUTER + W_LOCKBOX
+const BURN_TO_ADDRESS_ARGS = BURN_MINT_ARGS + W_BURN_ADDRESS
 
 const CASES: {
   label: string
   params: DeployTokenPoolParams
   bytecode: string
   ctorArgs: string
+  /** Compiled contract name, for verification, where it differs from the `typeAndVersion` type. */
+  compiledName?: string
 }[] = [
   {
     label: 'BurnMintTokenPool',
@@ -65,6 +72,18 @@ const CASES: {
     params: { ...COMMON, type: 'BurnWithFromMintTokenPool', advancedPoolHooks: HOOKS },
     bytecode: BURN_WITH_FROM_MINT_V2_0_0,
     ctorArgs: BURN_MINT_ARGS,
+  },
+  {
+    label: 'BurnToAddressTokenPool',
+    params: {
+      ...COMMON,
+      type: 'BurnToAddressTokenPool',
+      advancedPoolHooks: HOOKS,
+      burnAddress: BURN_ADDRESS,
+    },
+    bytecode: BURN_TO_ADDRESS_MINT_V2_0_0,
+    ctorArgs: BURN_TO_ADDRESS_ARGS,
+    compiledName: 'BurnToAddressMintTokenPool',
   },
   {
     label: 'LockReleaseTokenPool',
@@ -173,6 +192,23 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
       )
     })
 
+    it('appends burnAddress as the sixth constructor arg, per an independent BurnToAddress signature', async () => {
+      // Built from the Solidity signature, not the SDK's vendored ABI, so a wrong arg order fails.
+      const iface = new Interface([
+        'constructor(address token, uint8 localTokenDecimals, address advancedPoolHooks, address rmnProxy, address router, address burnAddress)',
+      ])
+      const unsigned = await new DeployTokenPool().generate(stubChain(), {
+        ...COMMON,
+        type: 'BurnToAddressTokenPool',
+        burnAddress: BURN_ADDRESS,
+      })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        BURN_TO_ADDRESS_MINT_V2_0_0 +
+          iface.encodeDeploy([TOKEN, 18, ZeroAddress, RMN_PROXY, ROUTER, BURN_ADDRESS]).slice(2),
+      )
+    })
+
     it('omits `from` when no sender is given', async () => {
       const unsigned = await new DeployTokenPool().generate(stubChain(), {
         ...COMMON,
@@ -247,7 +283,7 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
         () =>
           new DeployTokenPool().generate(stubChain(), {
             ...COMMON,
-            type: 'BurnToAddressTokenPool',
+            type: 'NotATokenPool',
           } as unknown as DeployTokenPoolParams),
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'type',
       )
@@ -277,6 +313,37 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
           }),
         (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
       )
+    })
+
+    // The contract accepts a zero burnAddress, but OpenZeppelin ERC20s revert ERC20InvalidReceiver on
+    // a transfer to it, so every lockOrBurn would revert and the immutable address can't be fixed.
+    it('rejects the zero address for a BurnToAddress burnAddress, which would brick lockOrBurn', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(stubChain(), {
+            ...COMMON,
+            type: 'BurnToAddressTokenPool',
+            burnAddress: ZeroAddress,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'burnAddress',
+      )
+    })
+
+    it('rejects an invalid or missing burnAddress for an untyped caller', async () => {
+      for (const burnAddress of ['nope', undefined]) {
+        await assert.rejects(
+          () =>
+            new DeployTokenPool().generate(stubChain(), {
+              ...COMMON,
+              type: 'BurnToAddressTokenPool',
+              burnAddress,
+            } as unknown as DeployTokenPoolParams),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError && err.context.param === 'burnAddress',
+          String(burnAddress),
+        )
+      }
     })
 
     it('runs the shared validation for a SiloedLockReleaseTokenPool', async () => {
@@ -313,6 +380,17 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
         lockbox: LOCKBOX,
       }
     })
+
+    it('requires `burnAddress` at compile time on BurnToAddressTokenPool and rejects it elsewhere', () => {
+      // @ts-expect-error -- BurnToAddressTokenPool requires burnAddress
+      const _missing: DeployTokenPoolParams = { ...COMMON, type: 'BurnToAddressTokenPool' }
+      const _burnMint: DeployTokenPoolParams = {
+        ...COMMON,
+        type: 'BurnMintTokenPool',
+        // @ts-expect-error -- only BurnToAddressTokenPool takes a burnAddress
+        burnAddress: BURN_ADDRESS,
+      }
+    })
   })
 
   describe('execute', () => {
@@ -337,13 +415,13 @@ describe('DeployTokenPool (cct/evm token-pool operation)', () => {
       })
     })
 
-    for (const { label, params: caseParams, ctorArgs } of CASES) {
+    for (const { label, params: caseParams, ctorArgs, compiledName } of CASES) {
       it(`carries the verification handle for ${label}`, async () => {
         const result = await new DeployTokenPool().execute(stubChain(), {
           ...caseParams,
           wallet: fakeSigner({ contractAddress: DEPLOYED }),
         })
-        assert.equal(result.verification.contract, caseParams.type)
+        assert.equal(result.verification.contract, compiledName ?? caseParams.type)
         assert.equal(result.verification.encodedConstructorArgs, '0x' + ctorArgs)
       })
     }
