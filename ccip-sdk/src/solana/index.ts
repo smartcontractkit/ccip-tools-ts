@@ -33,9 +33,10 @@ import {
   type LogFilter,
   type TokenInfo,
   type TokenPoolConfig,
+  type TokenPoolConfigOpts,
   type TokenPoolRemote,
+  type TokenPoolRemotesOpts,
   type TokenPrice,
-  type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
 import {
@@ -1996,13 +1997,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *
    * @remarks
    * 2.0 pools configure their allowed finality per remote chain (EVM pools, pool-wide), so
-   * `finalityDepth`/`finalitySafe` are only returned with `feeOpts`, for its `destChainSelector`,
+   * `finalityDepth`/`finalitySafe` are only returned with `opts.destChainSelector`, for that lane,
    * along with `tokenTransferFeeConfig`. A lane without a 2.0 config allows only finalized
    * transfers, without fees (`finalityDepth: 0`, `tokenTransferFeeConfig.isEnabled: false`).
    */
   async getTokenPoolConfig(
     tokenPool: string,
-    feeOpts?: TokenTransferFeeOpts,
+    opts?: TokenPoolConfigOpts,
   ): Promise<TokenPoolConfig & { tokenPoolProgram: string }> {
     const { tokenPoolProgram, config } = await this._getTokenPoolState(tokenPool)
 
@@ -2020,10 +2021,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       typeAndVersion,
     }
     // 2.0 configs only exist on 2.0 pools; probe them on pools of unknown version too
-    if (!feeOpts || (version != null && version < CCIPVersion.V2_0)) return poolConfig
+    if (opts?.destChainSelector == null || (version != null && version < CCIPVersion.V2_0))
+      return poolConfig
 
     const chainConfigV2 = await this.connection.getAccountInfo(
-      deriveTokenPoolChainConfigV2Pda(tokenPoolProgram, feeOpts.destChainSelector, config.mint),
+      deriveTokenPoolChainConfigV2Pda(tokenPoolProgram, opts.destChainSelector, config.mint),
     )
     // a pool of unknown version without a 2.0 config may not be a 2.0 pool
     if (!chainConfigV2 && version == null) return poolConfig
@@ -2082,11 +2084,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   protected override async getTokenPoolFinality(
     tokenPool: string,
     destChainSelector: bigint,
+    token?: string,
   ): Promise<Partial<FinalityAllowed>> {
     const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool, {
+      token,
       destChainSelector,
-      finality: 'finalized',
-      tokenArgs: '0x',
     })
     return { finalityDepth, finalitySafe }
   }
@@ -2106,6 +2108,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
+    _opts?: TokenPoolRemotesOpts,
   ): Promise<Record<string, TokenPoolRemote>> {
     const { tokenPoolProgram, config } = await this._getTokenPoolState(tokenPool)
 

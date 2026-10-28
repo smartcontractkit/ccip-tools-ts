@@ -18,6 +18,7 @@ import FeeQuoter_2_0_ABI from './abi/FeeQuoter_2_0.ts'
 import TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
 import TokenPool_1_5_1_ABI from './abi/LockReleaseTokenPool_1_5_1.ts'
 import TokenPool_1_6_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
+import MultiTokenPool_2_1_ABI from './abi/MultiTokenPool_2_1.ts'
 import EVM2EVMOffRamp_1_2_ABI from './abi/OffRamp_1_2.ts'
 import EVM2EVMOffRamp_1_5_ABI from './abi/OffRamp_1_5.ts'
 import OffRamp_1_6_ABI from './abi/OffRamp_1_6.ts'
@@ -27,6 +28,7 @@ import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
 import * as poolErrorAbis from './abi/pool-errors.ts'
+import PoolConfigManager_2_1_ABI from './abi/PoolConfigManager_2_1.ts'
 import PriceRegistry_1_2_ABI from './abi/PriceRegistry_1_2.ts'
 import RMNProxy_ABI from './abi/RMNProxy.ts'
 import Router_ABI from './abi/Router.ts'
@@ -73,6 +75,8 @@ export const interfaces = {
   TokenPool_v1_5_1: new Interface(TokenPool_1_5_1_ABI),
   TokenPool_v1_5: new Interface(TokenPool_1_5_ABI),
   TokenPoolAndProxy: new Interface(TokenPoolAndProxyABI),
+  MultiTokenPool_v2_1: new Interface(MultiTokenPool_2_1_ABI),
+  PoolConfigManager_v2_1: new Interface(PoolConfigManager_2_1_ABI),
   CommitStore_v1_5: new Interface(CommitStore_1_5_ABI),
   CommitStore_v1_2: new Interface(CommitStore_1_2_ABI),
   Receiver_v2_0: new Interface(CCIPReceiver_2_0_ABI),

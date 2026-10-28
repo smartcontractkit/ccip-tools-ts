@@ -181,7 +181,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     registryConfig = await source.getRegistryTokenConfig(registry, info.token)
     tokenPool = registryConfig.tokenPool
     if (!tokenPool) throw new CCIPTokenNotConfiguredError(info.token, registry)
-    poolConfig = await source.getTokenPoolConfig(tokenPool)
+    poolConfig = await source.getTokenPoolConfig(tokenPool, { token: info.token })
   } else {
     if (!argv.token) {
       // tokenPool
@@ -200,7 +200,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       registryConfig = await source.getRegistryTokenConfig(registry, argv.token)
       tokenPool = registryConfig.tokenPool
       if (!tokenPool) throw new CCIPTokenNotConfiguredError(argv.token, registry)
-      poolConfig = await source.getTokenPoolConfig(tokenPool)
+      poolConfig = await source.getTokenPoolConfig(tokenPool, { token: argv.token })
     }
 
     if (argv.format === Format.json) {
@@ -223,7 +223,9 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
       return
     }
   }
-  const remotes = await source.getTokenPoolRemotes(tokenPool)
+  const remotes = await source.getTokenPoolRemotes(tokenPool, undefined, {
+    token: poolConfig.token,
+  })
 
   prettyTable.call(ctx, {
     network: `${source.network.name} [${source.network.chainSelector}]`,

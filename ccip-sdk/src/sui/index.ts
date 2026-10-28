@@ -22,8 +22,9 @@ import {
   type GetBalanceOpts,
   type TokenInfo,
   type TokenPoolConfig,
+  type TokenPoolConfigOpts,
   type TokenPoolRemote,
-  type TokenTransferFeeOpts,
+  type TokenPoolRemotesOpts,
   Chain,
   withSinceStart,
 } from '../chain.ts'
@@ -2251,7 +2252,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   /** {@inheritDoc Chain.getTokenPoolConfig} */
   async getTokenPoolConfig(
     tokenPool: string,
-    _feeOpts?: TokenTransferFeeOpts,
+    _opts?: TokenPoolConfigOpts,
   ): Promise<TokenPoolConfig> {
     return withLookupRetry(() => this.getTokenPoolConfig_(tokenPool))
   }
@@ -2314,6 +2315,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
+    _opts?: TokenPoolRemotesOpts,
   ): Promise<Record<string, TokenPoolRemote>> {
     return withLookupRetry(() => this.getTokenPoolRemotes_(tokenPool, remoteChainSelector))
   }
