@@ -2,7 +2,7 @@ export default [
   // generate:
   // (() => {
   //   const abi = require('@chainlink/contracts-ccip/abi/v2_0_0/cross_chain_pool_token.json')
-  //   return require('util').inspect(Array.isArray(abi) ? abi : abi.abi, { depth: 99, maxArrayLength: Infinity }).split('\n').slice(1, -1)
+  //   return require('util').inspect(Array.isArray(abi) ? abi : abi.abi, { depth: 99, maxArrayLength: null }).split('\n').slice(1, -1)
   // })()
   {
     type: 'constructor',

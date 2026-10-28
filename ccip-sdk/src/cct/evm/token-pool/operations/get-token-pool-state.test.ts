@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { getAddress, makeError, toBeHex } from 'ethers'
+import { Interface, getAddress, makeError, toBeHex } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
@@ -10,6 +10,12 @@ import {
   CCTContractVersionUnsupportedError,
   CCTParamsInvalidError,
 } from '../../../errors.ts'
+import USDC_TOKEN_POOL_V1_5_1_ABI from '../../artifacts/abi/V1_5_1/usdc-token-pool.ts'
+import USDC_TOKEN_POOL_V1_6_2_ABI from '../../artifacts/abi/V1_6_2/usdc-token-pool.ts'
+import USDC_TOKEN_POOL_CCTP_V2_V1_6_5_ABI from '../../artifacts/abi/V1_6_5/usdc-token-pool-cctp-v2.ts'
+import USDC_TOKEN_POOL_V1_6_5_ABI from '../../artifacts/abi/V1_6_5/usdc-token-pool.ts'
+import CCTP_THROUGH_CCV_TOKEN_POOL_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/cctp-through-ccv-token-pool.ts'
+import SILOED_USDC_TOKEN_POOL_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/siloed-usdc-token-pool.ts'
 import {
   type TokenPoolFamily,
   type TokenPoolType,
@@ -53,6 +59,7 @@ function stubChain({
   typeAndVersion = 'BurnMintTokenPool 2.0.0',
   family = 'BurnMint',
   version = TokenPoolVersion.V2_0_0,
+  iface = getTokenPoolInterface(POOL_TYPE[family], version),
   reads = {},
   tokenDecimals = 18,
 }: {
@@ -60,11 +67,12 @@ function stubChain({
   family?: TokenPoolFamily
   /** ABI the stub encodes results with — must match the version `typeAndVersion` reports. */
   version?: TokenPoolVersion
+  /** Interface the stub encodes results with, when not the family's at `version`. */
+  iface?: Interface
   reads?: Reads
   /** Decimals `getTokenInfo` reports, which pre-v2.0.0 pools read instead of a pool getter. */
   tokenDecimals?: number
 } = {}): EVMChain {
-  const iface = getTokenPoolInterface(POOL_TYPE[family], version)
   const responses = new Map(
     Object.entries(reads).map(([fn, values]) => [
       iface.getFunction(fn)!.selector,
@@ -181,7 +189,7 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
 
   it('never calls getLockBox() on a siloed pool, whose escrow is keyed per remote chain', async () => {
     const noArgLockBox =
-      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V2_0_0].getFunction(
+      TOKEN_POOL_INTERFACES.LockReleaseTokenPool[TokenPoolVersion.V2_0_0].getFunction(
         'getLockBox()',
       )!.selector
     const seen: string[] = []
@@ -361,6 +369,64 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
     })
   })
 
+  describe('USDC/CCTP pools', () => {
+    // each USDC ABI declares the base getters identically, so the stub encodes through the USDC
+    // ABI and the reader decodes through BurnMint's
+    const testCases = [
+      { type: 'USDCTokenPool', version: '1.5.1', abi: USDC_TOKEN_POOL_V1_5_1_ABI },
+      // also a HybridLockReleaseUSDCTokenPool, whose bytecode reports "USDCTokenPool 1.6.2"
+      { type: 'USDCTokenPool', version: '1.6.2', abi: USDC_TOKEN_POOL_V1_6_2_ABI },
+      { type: 'USDCTokenPool', version: '1.6.5', abi: USDC_TOKEN_POOL_V1_6_5_ABI },
+      { type: 'USDCTokenPoolCCTPV2', version: '1.6.5', abi: USDC_TOKEN_POOL_CCTP_V2_V1_6_5_ABI },
+      { type: 'SiloedUSDCTokenPool', version: '2.0.0', abi: SILOED_USDC_TOKEN_POOL_V2_0_0_ABI },
+      {
+        type: 'CCTPThroughCCVTokenPool',
+        version: '2.0.0',
+        abi: CCTP_THROUGH_CCV_TOKEN_POOL_V2_0_0_ABI,
+      },
+    ] as const
+
+    for (const { type, version, abi } of testCases)
+      it(`reads the base state of a ${type} ${version}, with no USDC fields or lockBox`, async () => {
+        const v2 = version === TokenPoolVersion.V2_0_0
+        const chain = stubChain({
+          typeAndVersion: `${type} ${version}`,
+          iface: new Interface(abi),
+          reads: v2 ? READS : LEGACY_READS,
+        })
+
+        const state = await new GetTokenPoolState().query(chain, { poolAddress: POOL })
+
+        assert.deepEqual(state, {
+          poolAddress: POOL,
+          version,
+          type,
+          token: TOKEN,
+          tokenDecimals: 18,
+          router: ROUTER,
+          owner: OWNER,
+          rmnProxy: RMN_PROXY,
+          rateLimitAdmin: RATE_LIMIT_ADMIN,
+          supportedChains: CHAINS,
+          ...(v2 && { feeAdmin: FEE_ADMIN, finalityDepth: 10, finalitySafe: false }),
+        })
+      })
+
+    it('rejects a USDC type at a version it never shipped at as unsupported', async () => {
+      // 1.4.0 has getArmProxy, not the getRmnProxy the legacy reader calls
+      for (const typeAndVersion of [
+        'USDCTokenPool 1.4.0',
+        'USDCTokenPoolCCTPV2 1.6.2',
+        'CCTPThroughCCVTokenPool 1.6.5',
+      ])
+        await assert.rejects(
+          () => new GetTokenPoolState().query(stubChain({ typeAndVersion }), { poolAddress: POOL }),
+          CCTContractVersionUnsupportedError,
+          typeAndVersion,
+        )
+    })
+  })
+
   it('checksums the returned pool address', async () => {
     const lowercase = '0x' + 'ab'.repeat(20)
 
@@ -390,12 +456,13 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
       assert.equal(probed, false, 'validation fails before the typeAndVersion probe')
     })
 
-    it('rejects a pool type outside the supported CCT set', async () => {
+    it('rejects a USDCTokenPoolProxy as not a pool, pointing at the pools it routes to', async () => {
       const chain = stubChain({ typeAndVersion: 'USDCTokenPoolProxy 2.0.0', reads: READS })
 
       await assert.rejects(
         () => new GetTokenPoolState().query(chain, { poolAddress: POOL }),
-        (err: unknown) => err instanceof CCTContractTypeInvalidError,
+        (err: unknown) =>
+          err instanceof CCTContractTypeInvalidError && /getPools/.test(err.message),
       )
     })
 

@@ -84,7 +84,7 @@ describe('GetAdvancedPoolHooks (cct/evm)', () => {
     const seen: (string | undefined)[] = []
     await op.query(stubChain({ onCall: (s) => seen.push(s) }), { poolAddress: POOL })
     const selector =
-      TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V2_0_0].getFunction(
+      TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V2_0_0].getFunction(
         'getAdvancedPoolHooks',
       )!.selector
     assert.deepEqual(seen, [undefined, selector])

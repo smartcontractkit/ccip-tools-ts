@@ -11,8 +11,8 @@ import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
 import { EVMOperation, callTx } from '../../operation.ts'
 import {
-  CROSS_CHAIN_POOL_TOKEN_INTERFACE,
   assertPoolOwner,
+  getTokenPoolInterface,
   resolveTokenPool,
 } from '../../token-pool/contracts.ts'
 import { validateAddress, validateNonZeroAddress } from '../../validate.ts'
@@ -65,12 +65,14 @@ export class SetCCIPAdmin extends EVMOperation<SetCCIPAdminParams> {
   ): Promise<UnsignedEVMTx> {
     const [contractType] = await chain.typeAndVersion(tokenAddress)
     if (contractType === 'CrossChainPoolToken') {
-      // version gate only: the pool token's override is onlyOwner, not the CCIP admin
-      await resolveTokenPool(chain, tokenAddress)
+      // the pool token's override is onlyOwner, not the CCIP admin
+      const pool = await resolveTokenPool(chain, tokenAddress)
       if (sender !== undefined) await assertPoolOwner(this.name, chain, tokenAddress, sender)
       return callTx(
         tokenAddress,
-        CROSS_CHAIN_POOL_TOKEN_INTERFACE.encodeFunctionData('setCCIPAdmin', [newAdmin]),
+        getTokenPoolInterface(pool.type, pool.version).encodeFunctionData('setCCIPAdmin', [
+          newAdmin,
+        ]),
       )
     }
     const version = await resolveCrossChainToken(chain, tokenAddress)

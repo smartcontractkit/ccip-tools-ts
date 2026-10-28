@@ -1,9 +1,11 @@
 /**
- * EVM token-pool contract layer for CCT: cached {@link Interface}s + on-chain type/version
+ * EVM token-pool contract layer for CCT: one vendored ABI table keyed by type then
+ * version (`TOKEN_POOL_ABIS`, unexported) that types the `read*` helpers and builds the cached
+ * {@link Interface}s ({@link TOKEN_POOL_INTERFACES}) + on-chain type/version
  * resolution ({@link resolveTokenPool}, {@link getTokenPoolInterface}, floor-matched via
  * {@link resolveEncoder}) for read/write ops, plus the deployable pools' creation artifacts
- * ({@link getTokenPoolArtifact}, {@link getCrossChainPoolTokenArtifact}), the narrow role reads every owner-gated write pre-flights
- * `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}), the allowlist
+ * ({@link getTokenPoolArtifact}, {@link getCrossChainPoolTokenArtifact}), the narrow role reads
+ * every owner-gated write pre-flights `sender` against ({@link readTokenPoolOwner}, {@link readTokenPoolRateLimitAdmin}), the allowlist
  * resolution and read ({@link resolveAllowlistHolder}, {@link readTokenPoolAllowlist}) plus the
  * owner-only guard built on the first of them ({@link assertPoolOwner}), and the LockRelease
  * liquidity layer: the rebalancer and liquidity reads plus the guards the liquidity ops pre-flight
@@ -13,13 +15,15 @@
  * {@link assertSiloedChain}, {@link assertSiloRebalancer}, {@link assertSiloLiquidity}) and the
  * v2.0.0 lane → lockbox reads ({@link readTokenPoolLockboxConfigs},
  * {@link readTokenPoolSiloedLockbox}), with {@link isTokenPoolRevert} to tell a named pool revert
- * from any other failure. The write-side rate-limit shape lane-config ops share lives in
- * `rate-limit.ts`. Mirrors `token/contracts.ts`.
+ * from any other failure, and the BurnToAddress burn-address read
+ * ({@link readTokenPoolBurnAddress}). The write-side rate-limit shape lane-config ops share lives
+ * in `rate-limit.ts`. Mirrors `token/contracts.ts`.
  *
  * @packageDocumentation
  */
 
-import { Interface, ZeroAddress, getAddress, isError } from 'ethers'
+import type { Abi } from 'abitype'
+import { type InterfaceAbi, Interface, ZeroAddress, getAddress, isError } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { TokenTransferFeeConfig } from '../../../chain.ts'
@@ -35,18 +39,29 @@ import {
 import BURN_MINT_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/burn-mint-token-pool-and-proxy.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI from '../artifacts/abi/V1_5_0/lock-release-token-pool-and-proxy.ts'
 import BURN_MINT_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/burn-mint-token-pool.ts'
+import BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/burn-to-address-mint-token-pool.ts'
 import FACTORY_BURN_MINT_ERC20_V1_5_1_ABI from '../artifacts/abi/V1_5_1/factory-burn-mint-erc20.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/lock-release-token-pool.ts'
+import USDC_TOKEN_POOL_V1_5_1_ABI from '../artifacts/abi/V1_5_1/usdc-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI from '../artifacts/abi/V1_6_0/siloed-lock-release-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-mint-token-pool.ts'
+import BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/burn-to-address-mint-token-pool.ts'
 import LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI from '../artifacts/abi/V1_6_1/siloed-lock-release-token-pool.ts'
+import USDC_TOKEN_POOL_V1_6_2_ABI from '../artifacts/abi/V1_6_2/usdc-token-pool.ts'
+import USDC_TOKEN_POOL_CCTP_V2_V1_6_5_ABI from '../artifacts/abi/V1_6_5/usdc-token-pool-cctp-v2.ts'
+import USDC_TOKEN_POOL_V1_6_5_ABI from '../artifacts/abi/V1_6_5/usdc-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-mint-token-pool.ts'
+import BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/burn-to-address-mint-token-pool.ts'
+import CCTP_THROUGH_CCV_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/cctp-through-ccv-token-pool.ts'
 import CROSS_CHAIN_POOL_TOKEN_V2_0_0_ABI from '../artifacts/abi/V2_0_0/cross-chain-pool-token.ts'
 import LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/lock-release-token-pool.ts'
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/siloed-lock-release-token-pool.ts'
+import SILOED_USDC_TOKEN_POOL_V2_0_0_ABI from '../artifacts/abi/V2_0_0/siloed-usdc-token-pool.ts'
 import BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
 import BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
+import BURN_MINT_WITH_LOCK_RELEASE_FLAG_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-mint-with-lock-release-flag-token-pool.ts'
+import BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-to-address-mint-token-pool.ts'
 import BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
 import CROSS_CHAIN_POOL_TOKEN_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/cross-chain-pool-token.ts'
 import LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
@@ -55,13 +70,12 @@ import type { DeployArtifact } from '../operation.ts'
 import { getTypedContract } from '../query.ts'
 
 /**
- * ABI families for pool resolution. The burn-* variants are interface-compatible for CCT
- * ops (identical constructor + `transferOwnership`, shared TokenPool surface), so they share
- * the `BurnMint` ABI, as does `CrossChainPoolToken` (a superset). `LockRelease` (with its
- * liquidity functions) is distinct, and `SiloedLockRelease` is distinct again because it escrows
- * per remote chain: at 1.6.x it adds the silo functions and lacks `transferLiquidity`; at 2.0.0 it
- * binds a lockbox per lane (`getLockBox(uint64)`, `configureLockBoxes`) instead of taking one
- * `lockBox` in its constructor.
+ * Pool families, grouping types by how CCT ops treat them; the ABI and version allowlist are per
+ * type, in {@link TOKEN_POOL_INTERFACES}. The burn-* variants are interface-compatible for CCT ops
+ * (shared TokenPool surface), so they share the `BurnMint` family. `LockRelease` (with its liquidity functions) is distinct, and
+ * `SiloedLockRelease` is distinct again because it escrows per remote chain: at 1.6.x it adds the
+ * silo functions and lacks `transferLiquidity`; at 2.0.0 it binds a lockbox per lane
+ * (`getLockBox(uint64)`, `configureLockBoxes`) instead of taking one `lockBox` in its constructor.
  *
  * @remarks Both lock/release families satisfy {@link isLockReleaseTokenPoolType}; test that, not
  * `family === 'LockRelease'`, to ask whether a pool escrows liquidity.
@@ -106,11 +120,32 @@ export function isTokenPoolType(v: string): v is TokenPoolType {
 }
 
 /**
- * Classifies a supported pool type into its ABI {@link TokenPoolFamily} by name: every burn-* pool
- * shares the `BurnMint` ABI (hence the anchored `^Burn`, which also covers
- * `BurnMintWithLockReleaseFlagTokenPool`) and `CrossChainPoolToken`, `SiloedLockReleaseTokenPool`
- * is `SiloedLockRelease`, and `LockReleaseTokenPool` is `LockRelease`. {@link TOKEN_POOL_TYPES} is
- * the gate, so only allowlisted, ABI-compatible names reach here.
+ * The USDC/CCTP pool types: recognized so `getTokenPoolState` reads them (through
+ * {@link resolveAnyTokenPool}), but no other op supports them, so they are not
+ * {@link TokenPoolType}s. A `HybridLockReleaseUSDCTokenPool` reports `USDCTokenPool 1.6.2`.
+ */
+export const USDC_TOKEN_POOL_TYPES = [
+  'USDCTokenPool',
+  'USDCTokenPoolCCTPV2',
+  'SiloedUSDCTokenPool',
+  'CCTPThroughCCVTokenPool',
+] as const
+
+/** A USDC/CCTP pool contract type. */
+export type USDCTokenPoolType = (typeof USDC_TOKEN_POOL_TYPES)[number]
+
+/** Type guard for {@link USDC_TOKEN_POOL_TYPES}. */
+function isUSDCTokenPoolType(v: string): v is USDCTokenPoolType {
+  return (USDC_TOKEN_POOL_TYPES as readonly string[]).includes(v)
+}
+
+/**
+ * Classifies a supported pool type into its {@link TokenPoolFamily} by name: every burn-* pool is
+ * `BurnMint` (hence the anchored `^Burn`, which also covers
+ * `BurnMintWithLockReleaseFlagTokenPool`), as is `CrossChainPoolToken`,
+ * `SiloedLockReleaseTokenPool` is `SiloedLockRelease`,
+ * and `LockReleaseTokenPool` is `LockRelease`. {@link TOKEN_POOL_TYPES} is the gate, so only
+ * allowlisted, ABI-compatible names reach here.
  */
 export function getTokenPoolFamily(type: TokenPoolType): TokenPoolFamily {
   if (/^Burn/.test(type) || type === 'CrossChainPoolToken') return 'BurnMint'
@@ -154,9 +189,33 @@ export function isTokenPoolVersion(v: string): v is TokenPoolVersion {
 }
 
 /**
+ * Versions only the legacy USDC pools shipped at. Kept out of {@link TokenPoolVersion} so no
+ * generic op resolves to them.
+ */
+export const LegacyUSDCTokenPoolVersion = {
+  V1_6_2: '1.6.2',
+  V1_6_5: '1.6.5',
+} as const
+
+/** A version only the legacy USDC pools shipped at. */
+export type LegacyUSDCTokenPoolVersion =
+  (typeof LegacyUSDCTokenPoolVersion)[keyof typeof LegacyUSDCTokenPoolVersion]
+
+/** Every version a {@link USDCTokenPoolType} reports: the shared ones plus the legacy USDC-only ones. */
+export type USDCTokenPoolVersion = TokenPoolVersion | LegacyUSDCTokenPoolVersion
+
+/** Type guard for {@link USDCTokenPoolVersion}. */
+function isUSDCTokenPoolVersion(v: string): v is USDCTokenPoolVersion {
+  return (
+    isTokenPoolVersion(v) || Object.values(LegacyUSDCTokenPoolVersion).some((known) => known === v)
+  )
+}
+
+/**
  * Narrows raw `typeAndVersion` strings to a known {@link TokenPoolType} and
  * {@link TokenPoolVersion}. A v1.5.0 `*AndProxy` type normalizes to its base pool type.
- * @throws {@link CCTContractTypeInvalidError} if `contractType` is not a supported pool type
+ * @throws {@link CCTContractTypeInvalidError} if `contractType` is not a supported pool type,
+ * including a recognized USDC/CCTP pool ({@link USDCTokenPoolType}) or a `USDCTokenPoolProxy`
  * @throws {@link CCTContractVersionUnsupportedError} if `version` is not a known pool version, or
  * not one the type shipped at (see {@link TOKEN_POOL_INTERFACES})
  */
@@ -169,6 +228,22 @@ export function parseTokenPoolVersion({
   contractType: string
   version: string
 }): { type: TokenPoolType; version: TokenPoolVersion } {
+  // before the version gates, so a USDC pool at any version fails as the type it is
+  if (isUSDCTokenPoolType(contractType))
+    throw new CCTContractTypeInvalidError(
+      address,
+      TOKEN_POOL_TYPES.join(', '),
+      contractType,
+      `recognized USDC pool type ${contractType}; this op does not support it, use getTokenPoolState`,
+    )
+  // the TokenAdminRegistry can return a USDCTokenPoolProxy as USDC's pool, so name the way out
+  if (contractType === 'USDCTokenPoolProxy')
+    throw new CCTContractTypeInvalidError(
+      address,
+      TOKEN_POOL_TYPES.join(', '),
+      contractType,
+      'a USDCTokenPoolProxy is not a TokenPool: it routes each lane to a USDC pool; pass one of the pools its getPools() returns',
+    )
   // v1.5.0's `*AndProxy` shims override only lockOrBurn/releaseOrMint, so every function a CCT op
   // encodes is the base pool's — and the vendored v1.5.0 ABIs are the `*_and_proxy` ones already.
   const type =
@@ -179,19 +254,31 @@ export function parseTokenPoolVersion({
     throw new CCTContractVersionUnsupportedError(contractType, version, {
       context: { address },
     })
-  // a version the type's family never shipped at (1.6.0 shipped only the siloed pool, which first
-  // shipped at 1.6.0) is not a contract we know
-  if (!TOKEN_POOL_INTERFACE_LOOKUP[getTokenPoolFamily(type)][version])
-    throw new CCTContractVersionUnsupportedError(contractType, version, {
-      context: { address },
-    })
-  // the BurnMint family table would also accept the versions before CrossChainPoolToken shipped
-  if (type === 'CrossChainPoolToken' && version !== TokenPoolVersion.V2_0_0)
+  // a version the type never shipped at (1.6.0 shipped only the siloed pool, which first shipped
+  // at 1.6.0) is not a contract we know
+  if (!TOKEN_POOL_INTERFACE_LOOKUP[type][version])
     throw new CCTContractVersionUnsupportedError(contractType, version, {
       context: { address },
     })
 
   return { type, version }
+}
+
+/** {@link parseTokenPoolVersion} with the USDC/CCTP pools accepted, for `getTokenPoolState`. */
+function parseAnyTokenPoolVersion(raw: {
+  address: string
+  contractType: string
+  version: string
+}):
+  | { type: TokenPoolType; version: TokenPoolVersion }
+  | { type: USDCTokenPoolType; version: USDCTokenPoolVersion } {
+  const { address, contractType, version } = raw
+  if (!isUSDCTokenPoolType(contractType)) return parseTokenPoolVersion(raw)
+  if (!isUSDCTokenPoolVersion(version) || !USDC_TOKEN_POOL_ABIS[contractType][version])
+    throw new CCTContractVersionUnsupportedError(contractType, version, {
+      context: { address },
+    })
+  return { type: contractType, version }
 }
 
 /**
@@ -209,8 +296,28 @@ export async function resolveTokenPool(
   return parseTokenPoolVersion({ address, contractType, version })
 }
 
+/**
+ * {@link resolveTokenPool} with the USDC/CCTP pools accepted. Only for reads that hold for every
+ * recognized pool (`getTokenPoolState`); every other op uses {@link resolveTokenPool}.
+ * @throws {@link CCTContractTypeInvalidError} if the reported type is not a recognized pool type
+ * @throws {@link CCTContractVersionUnsupportedError} if the reported version is not a known pool version
+ */
+export async function resolveAnyTokenPool(
+  chain: EVMChain,
+  address: string,
+): Promise<
+  | { type: TokenPoolType; version: TokenPoolVersion }
+  | { type: USDCTokenPoolType; version: USDCTokenPoolVersion }
+> {
+  const [contractType, version] = await chain.typeAndVersion(address)
+  return parseAnyTokenPoolVersion({ address, contractType, version })
+}
+
 /** `Ownable2Step.owner()`, identical across all supported pool types and versions. */
-type PoolOwnerGetter = Pick<TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>, 'owner'>
+type PoolOwnerGetter = Pick<
+  TypedContract<(typeof TOKEN_POOL_ABIS)['BurnMintTokenPool'][typeof TokenPoolVersion.V1_5_0]>,
+  'owner'
+>
 
 /**
  * Pre-flights `sender` against the pool's on-chain `owner()` for an owner-gated write, so an
@@ -361,51 +468,133 @@ export function assertSiloedLockReleasePool(
   )
 }
 
-/**
- * Cached pool {@link Interface}s per {@link TokenPoolFamily}, for exactly the
- * {@link TokenPoolVersion}s that family shipped at, built once from the vendored `artifacts/` ABIs
- * (no per-call `new Interface`). `V1_5_0` uses the `*_and_proxy` variants — the only form
- * `@chainlink/contracts-ccip` ships at 1.5.0.
- *
- * @remarks The table is the allowlist of pool versions: 1.6.0 shipped only the siloed pool, and the
- * siloed pool first shipped at 1.6.0, so `BurnMint` and `LockRelease` have no 1.6.0 entry and
- * `SiloedLockRelease` no 1.5.x one. {@link parseTokenPoolVersion} rejects a pool claiming a missing
- * pair, so every resolved pool has an entry.
- */
-export const TOKEN_POOL_INTERFACES = {
-  BurnMint: {
-    [TokenPoolVersion.V1_5_0]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_0_ABI),
-    [TokenPoolVersion.V1_5_1]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_1_ABI),
-    [TokenPoolVersion.V1_6_1]: new Interface(BURN_MINT_TOKEN_POOL_V1_6_1_ABI),
-    [TokenPoolVersion.V2_0_0]: new Interface(BURN_MINT_TOKEN_POOL_V2_0_0_ABI),
-  },
-  LockRelease: {
-    [TokenPoolVersion.V1_5_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI),
-    [TokenPoolVersion.V1_5_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI),
-    [TokenPoolVersion.V1_6_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI),
-    [TokenPoolVersion.V2_0_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI),
-  },
-  SiloedLockRelease: {
-    [TokenPoolVersion.V1_6_0]: new Interface(SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI),
-    [TokenPoolVersion.V1_6_1]: new Interface(SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI),
-    [TokenPoolVersion.V2_0_0]: new Interface(SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI),
-  },
-} satisfies Record<TokenPoolFamily, Partial<Record<TokenPoolVersion, Interface>>>
+/** `BurnMint` ABI per version it shipped at, shared by every burn-* type that declares nothing more. */
+const BURN_MINT_ABIS = {
+  [TokenPoolVersion.V1_5_0]: BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
+  [TokenPoolVersion.V1_5_1]: BURN_MINT_TOKEN_POOL_V1_5_1_ABI,
+  [TokenPoolVersion.V1_6_1]: BURN_MINT_TOKEN_POOL_V1_6_1_ABI,
+  [TokenPoolVersion.V2_0_0]: BURN_MINT_TOKEN_POOL_V2_0_0_ABI,
+} as const
 
-/** {@link TOKEN_POOL_INTERFACES} widened for lookup by any family and version. */
+/**
+ * Vendored pool ABI per {@link TokenPoolType}, at exactly the {@link TokenPoolVersion}s that type
+ * shipped at: the one source for {@link TOKEN_POOL_INTERFACES} and the typed `read*` helpers.
+ * Adding a pool type needs a row here (the `satisfies` fails the build if the row or its
+ * {@link TOKEN_POOL_TYPES} entry is missing) and its family in {@link getTokenPoolFamily}.
+ *
+ * @remarks Kept unexported: an exported reference makes the declaration emitter inline every ABI
+ * literal into the published `.d.ts`.
+ */
+const TOKEN_POOL_ABIS = {
+  BurnMintTokenPool: BURN_MINT_ABIS,
+  BurnFromMintTokenPool: {
+    [TokenPoolVersion.V1_5_1]: BURN_MINT_ABIS[TokenPoolVersion.V1_5_1],
+    [TokenPoolVersion.V1_6_1]: BURN_MINT_ABIS[TokenPoolVersion.V1_6_1],
+    [TokenPoolVersion.V2_0_0]: BURN_MINT_ABIS[TokenPoolVersion.V2_0_0],
+  },
+  BurnWithFromMintTokenPool: BURN_MINT_ABIS,
+  BurnToAddressTokenPool: {
+    [TokenPoolVersion.V1_5_1]: BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_5_1_ABI,
+    [TokenPoolVersion.V1_6_1]: BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_6_1_ABI,
+    [TokenPoolVersion.V2_0_0]: BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_ABI,
+  },
+  BurnMintWithLockReleaseFlagTokenPool: {
+    [TokenPoolVersion.V2_0_0]: BURN_MINT_ABIS[TokenPoolVersion.V2_0_0],
+  },
+  LockReleaseTokenPool: {
+    [TokenPoolVersion.V1_5_0]: LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI,
+    [TokenPoolVersion.V1_5_1]: LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI,
+    [TokenPoolVersion.V1_6_1]: LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI,
+    [TokenPoolVersion.V2_0_0]: LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI,
+  },
+  CrossChainPoolToken: {
+    [TokenPoolVersion.V2_0_0]: CROSS_CHAIN_POOL_TOKEN_V2_0_0_ABI,
+  },
+  SiloedLockReleaseTokenPool: {
+    [TokenPoolVersion.V1_6_0]: SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI,
+    [TokenPoolVersion.V1_6_1]: SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI,
+    [TokenPoolVersion.V2_0_0]: SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI,
+  },
+} as const satisfies Record<TokenPoolType, Partial<Record<TokenPoolVersion, Abi & InterfaceAbi>>>
+
+/**
+ * Maps an ABI table to its {@link Interface}s, building one per distinct ABI so types that share
+ * an ABI share the instance.
+ *
+ * @remarks The return type stays inline: a named alias makes the declaration emitter print the
+ * whole ABI table into the `.d.ts`.
+ */
+function toTokenPoolInterfaces<A extends Record<TokenPoolType, Record<string, InterfaceAbi>>>(
+  abis: A,
+): { -readonly [T in keyof A]: { -readonly [V in keyof A[T]]: Interface } } {
+  const built = new Map<InterfaceAbi, Interface>()
+  const toInterface = (abi: InterfaceAbi) => {
+    let iface = built.get(abi)
+    if (!iface) built.set(abi, (iface = new Interface(abi)))
+    return iface
+  }
+  // Object.fromEntries drops the key types, so this one cast restores them
+  return Object.fromEntries(
+    Object.entries(abis).map(([type, versions]) => [
+      type,
+      Object.fromEntries(
+        Object.entries(versions).map(([version, abi]) => [version, toInterface(abi)]),
+      ),
+    ]),
+  ) as { -readonly [T in keyof A]: { -readonly [V in keyof A[T]]: Interface } }
+}
+
+/**
+ * Cached pool {@link Interface}s per {@link TokenPoolType}, for exactly the
+ * {@link TokenPoolVersion}s that type shipped at, built once from `TOKEN_POOL_ABIS` (no per-call
+ * `new Interface`). `V1_5_0` uses the `*_and_proxy` variants, the only form
+ * `@chainlink/contracts-ccip` ships at 1.5.0. Types with the same ABI share the same instance.
+ *
+ * @remarks The table is the allowlist of pool versions, per type: 1.6.0 shipped only the siloed
+ * pool, the siloed pool first shipped at 1.6.0, and `BurnFromMintTokenPool` and
+ * `BurnToAddressTokenPool` at 1.5.1 (1.5.0 shipped no `BurnFromMintTokenPoolAndProxy`), and
+ * `BurnMintWithLockReleaseFlagTokenPool` only at 2.0.0 (its 1.6.1 bytecode reports
+ * `BurnMintTokenPool 1.6.1`). {@link parseTokenPoolVersion} rejects a pool
+ * claiming a missing pair, so every resolved pool has an entry.
+ * @remarks `BurnToAddressTokenPool` has its own ABI: `BurnMint` plus `getBurnAddress()`, and a
+ * constructor that appends `burnAddress`. `CrossChainPoolToken` too: `BurnMint` plus its ERC20
+ * surface, `setCCIPAdmin`, and a `BaseERC20` constructor.
+ */
+export const TOKEN_POOL_INTERFACES = toTokenPoolInterfaces(TOKEN_POOL_ABIS)
+
+/** {@link TOKEN_POOL_INTERFACES} widened for lookup by any type and version. */
 const TOKEN_POOL_INTERFACE_LOOKUP: Record<
-  TokenPoolFamily,
+  TokenPoolType,
   Partial<Record<TokenPoolVersion, Interface>>
 > = TOKEN_POOL_INTERFACES
 
 /**
- * Returns the cached pool {@link Interface} for `type` and `version`, selected by the type's
- * {@link TokenPoolFamily}. Never throws when both came from {@link parseTokenPoolVersion}.
- * @throws {@link CCTContractVersionUnsupportedError} if the type's family never shipped at
- * `version`
+ * Vendored ABI per {@link USDCTokenPoolType}, at exactly the versions it shipped at: only gates
+ * which USDC pools `getTokenPoolState` reads. Kept out of `TOKEN_POOL_ABIS` so no generic op or
+ * {@link TOKEN_POOL_INTERFACES} entry sees them. No 1.4.0 row: that `USDCTokenPool` has
+ * `getArmProxy`, not the `getRmnProxy` the legacy state reader calls.
+ */
+const USDC_TOKEN_POOL_ABIS: Record<
+  USDCTokenPoolType,
+  Partial<Record<USDCTokenPoolVersion, Abi>>
+> = {
+  USDCTokenPool: {
+    [TokenPoolVersion.V1_5_1]: USDC_TOKEN_POOL_V1_5_1_ABI,
+    [LegacyUSDCTokenPoolVersion.V1_6_2]: USDC_TOKEN_POOL_V1_6_2_ABI,
+    [LegacyUSDCTokenPoolVersion.V1_6_5]: USDC_TOKEN_POOL_V1_6_5_ABI,
+  },
+  USDCTokenPoolCCTPV2: { [LegacyUSDCTokenPoolVersion.V1_6_5]: USDC_TOKEN_POOL_CCTP_V2_V1_6_5_ABI },
+  SiloedUSDCTokenPool: { [TokenPoolVersion.V2_0_0]: SILOED_USDC_TOKEN_POOL_V2_0_0_ABI },
+  CCTPThroughCCVTokenPool: { [TokenPoolVersion.V2_0_0]: CCTP_THROUGH_CCV_TOKEN_POOL_V2_0_0_ABI },
+}
+
+/**
+ * Returns the cached pool {@link Interface} for `type` and `version`. Never throws when both came
+ * from {@link parseTokenPoolVersion}.
+ * @throws {@link CCTContractVersionUnsupportedError} if the type never shipped at `version`
  */
 export function getTokenPoolInterface(type: TokenPoolType, version: TokenPoolVersion): Interface {
-  const iface = TOKEN_POOL_INTERFACE_LOOKUP[getTokenPoolFamily(type)][version]
+  const iface = TOKEN_POOL_INTERFACE_LOOKUP[type][version]
   if (!iface) throw new CCTContractVersionUnsupportedError(type, version)
   return iface
 }
@@ -433,7 +622,7 @@ export async function readTokenPoolOwner(chain: EVMChain, poolAddress: string): 
   const pool: PoolOwnerGetter = getTypedContract(
     chain,
     poolAddress,
-    BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V1_5_0],
   )
   return getAddress(resultToObject(await pool.owner()))
 }
@@ -450,7 +639,11 @@ export async function readTokenPoolAllowedFinality(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   return resultToObject(await pool.getAllowedFinalityConfig())
 }
 
@@ -469,7 +662,11 @@ export async function readTokenPoolAdvancedPoolHooks(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   return getAddress(resultToObject(await pool.getAdvancedPoolHooks()))
 }
 
@@ -506,7 +703,11 @@ export async function readTokenPoolFee(
   destChainSelector: bigint,
   requestedFinalityConfig: string,
 ): Promise<TokenPoolFee> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   const fee = await pool.getFee(
     ZeroAddress,
     destChainSelector,
@@ -532,7 +733,11 @@ export async function readTokenPoolTokenTransferFeeConfig(
   finality: string,
   tokenArgs: string,
 ): Promise<TokenTransferFeeConfig> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   const tokenAddress = await pool.getToken()
   const config = await pool.getTokenTransferFeeConfig(
     tokenAddress,
@@ -579,7 +784,7 @@ export async function resolveAllowlistHolder(
  * `AdvancedPoolHooks`. Absent from the v2.0.0 pool itself — resolve the holder first.
  */
 type PoolAllowlistGetter = Pick<
-  TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>,
+  TypedContract<(typeof TOKEN_POOL_ABIS)['BurnMintTokenPool'][typeof TokenPoolVersion.V1_5_0]>,
   'getAllowListEnabled' | 'getAllowList'
 >
 
@@ -605,7 +810,7 @@ export async function readTokenPoolAllowlist(
   const pool: PoolAllowlistGetter = getTypedContract(
     chain,
     poolAddress,
-    BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V1_5_0],
   )
   const [enabled, entries] = await Promise.all([pool.getAllowListEnabled(), pool.getAllowList()])
   return {
@@ -636,7 +841,11 @@ export async function readTokenPoolRateLimitAdmin(
 ): Promise<string> {
   if (version === TokenPoolVersion.V2_0_0)
     return (await readTokenPoolDynamicConfig(chain, poolAddress)).rateLimitAdmin
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V1_5_1],
+  )
   return getAddress(resultToObject(await pool.getRateLimitAdmin()))
 }
 
@@ -652,7 +861,11 @@ export async function readTokenPoolDynamicConfig(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<TokenPoolDynamicConfig> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   // Index the raw Result: resultToObject would turn this named tuple into an object.
   const dynamicConfig = await pool.getDynamicConfig()
   return {
@@ -711,7 +924,11 @@ export async function readTokenPoolRebalancer(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.LockReleaseTokenPool[TokenPoolVersion.V1_5_1],
+  )
   return getAddress(resultToObject(await pool.getRebalancer()))
 }
 
@@ -747,6 +964,22 @@ export async function assertPoolRebalancer(
 }
 
 /**
+ * Reads a BurnToAddress pool's `getBurnAddress()` (its immutable `i_burnAddress`), checksummed.
+ * The v2.0.0 ABI serves every version: the view is unchanged since 1.5.1.
+ */
+export async function readTokenPoolBurnAddress(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<string> {
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnToAddressTokenPool[TokenPoolVersion.V2_0_0],
+  )
+  return getAddress(resultToObject(await pool.getBurnAddress()))
+}
+
+/**
  * Reads a non-siloed v2.0.0 LockRelease pool's `getLockBox()` — the `ERC20LockBox` it escrows
  * through — in one `eth_call`.
  *
@@ -760,7 +993,11 @@ export async function assertPoolRebalancer(
  * @returns The pool's lockbox, checksummed. Set in the constructor and immutable thereafter.
  */
 export async function readTokenPoolLockbox(chain: EVMChain, poolAddress: string): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.LockReleaseTokenPool[TokenPoolVersion.V2_0_0],
+  )
   return getAddress(resultToObject(await pool.getLockBox()))
 }
 
@@ -780,7 +1017,11 @@ export async function readTokenPoolAcceptsLiquidity(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<boolean> {
-  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.LockReleaseTokenPool[TokenPoolVersion.V1_5_1],
+  )
   return resultToObject(await pool.canAcceptLiquidity())
 }
 
@@ -798,7 +1039,11 @@ export async function readTokenPoolToken(
   token: string
   erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>
 }> {
-  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.LockReleaseTokenPool[TokenPoolVersion.V1_5_1],
+  )
   const token = getAddress(resultToObject(await pool.getToken()))
   return {
     token,
@@ -904,7 +1149,11 @@ export async function readTokenPoolLiquidity(
   type: TokenPoolType,
 ): Promise<{ token: string; liquidity: bigint }> {
   if (type === 'SiloedLockReleaseTokenPool') {
-    const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+    const pool = getTypedContract(
+      chain,
+      poolAddress,
+      TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+    )
     const [{ token }, liquidity] = await Promise.all([
       readTokenPoolToken(chain, poolAddress),
       pool.getUnsiloedLiquidity(),
@@ -946,7 +1195,11 @@ export async function readTokenPoolIsSiloed(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<boolean> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+  )
   return resultToObject(await pool.isSiloed(remoteChainSelector))
 }
 
@@ -964,7 +1217,11 @@ export async function readTokenPoolIsSupportedChain(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<boolean> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+  )
   return resultToObject(await pool.isSupportedChain(remoteChainSelector))
 }
 
@@ -984,7 +1241,11 @@ export async function readTokenPoolChainRebalancer(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+  )
   return getAddress(resultToObject(await pool.getChainRebalancer(remoteChainSelector)))
 }
 
@@ -1004,7 +1265,11 @@ export async function readTokenPoolAvailableTokens(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<bigint> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+  )
   return resultToObject(await pool.getAvailableTokens(remoteChainSelector))
 }
 
@@ -1131,6 +1396,8 @@ export const DEPLOYABLE_TOKEN_POOL_TYPES = [
   'BurnMintTokenPool',
   'BurnFromMintTokenPool',
   'BurnWithFromMintTokenPool',
+  'BurnToAddressTokenPool',
+  'BurnMintWithLockReleaseFlagTokenPool',
   'LockReleaseTokenPool',
   'SiloedLockReleaseTokenPool',
 ] as const satisfies readonly TokenPoolType[]
@@ -1167,7 +1434,11 @@ export async function readTokenPoolLockboxConfigs(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<LockboxConfig[]> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V2_0_0],
+  )
   const configs = resultToObject(await pool.getAllLockBoxConfigs())
   return configs.map((config) => ({
     remoteChainSelector: config.remoteChainSelector,
@@ -1190,37 +1461,67 @@ export async function readTokenPoolSiloedLockbox(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V2_0_0],
+  )
   return getAddress(resultToObject(await pool.getLockBox(remoteChainSelector)))
 }
 
 /**
- * Creation bytecode per deployable pool type (2.0.0 only — pre-2.0.0 bytecode is not vendored).
- * The keys define the deployable set ({@link DeployableTokenPoolType}). The burn-* variants share
- * the `BurnMint` constructor ABI but are distinct contracts with distinct bytecode.
+ * Deploy artifact per deployable pool type (2.0.0 only; pre-2.0.0 bytecode is not vendored). The
+ * keys define the deployable set ({@link DeployableTokenPoolType}).
+ * - `contract` is the compiled name verification needs: `BurnToAddressTokenPool` compiles as
+ *   `BurnToAddressMintTokenPool`.
+ * - `iface` is the constructor ABI: the burn-* variants share the `BurnMint` one, except
+ *   BurnToAddress, whose constructor appends `burnAddress`.
  */
-const TOKEN_POOL_BYTECODE = {
-  BurnMintTokenPool: BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
-  BurnFromMintTokenPool: BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
-  BurnWithFromMintTokenPool: BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
-  LockReleaseTokenPool: LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
-  SiloedLockReleaseTokenPool: SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
-} satisfies Record<DeployableTokenPoolType, `0x${string}`>
+const TOKEN_POOL_DEPLOY_ARTIFACTS = {
+  BurnMintTokenPool: {
+    contract: 'BurnMintTokenPool',
+    iface: getTokenPoolInterface('BurnMintTokenPool', TokenPoolVersion.V2_0_0),
+    bytecode: BURN_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  BurnFromMintTokenPool: {
+    contract: 'BurnFromMintTokenPool',
+    iface: getTokenPoolInterface('BurnFromMintTokenPool', TokenPoolVersion.V2_0_0),
+    bytecode: BURN_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  BurnWithFromMintTokenPool: {
+    contract: 'BurnWithFromMintTokenPool',
+    iface: getTokenPoolInterface('BurnWithFromMintTokenPool', TokenPoolVersion.V2_0_0),
+    bytecode: BURN_WITH_FROM_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  BurnMintWithLockReleaseFlagTokenPool: {
+    contract: 'BurnMintWithLockReleaseFlagTokenPool',
+    iface: getTokenPoolInterface('BurnMintWithLockReleaseFlagTokenPool', TokenPoolVersion.V2_0_0),
+    bytecode: BURN_MINT_WITH_LOCK_RELEASE_FLAG_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  BurnToAddressTokenPool: {
+    contract: 'BurnToAddressMintTokenPool',
+    iface: getTokenPoolInterface('BurnToAddressTokenPool', TokenPoolVersion.V2_0_0),
+    bytecode: BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  LockReleaseTokenPool: {
+    contract: 'LockReleaseTokenPool',
+    iface: getTokenPoolInterface('LockReleaseTokenPool', TokenPoolVersion.V2_0_0),
+    bytecode: LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+  SiloedLockReleaseTokenPool: {
+    contract: 'SiloedLockReleaseTokenPool',
+    iface: getTokenPoolInterface('SiloedLockReleaseTokenPool', TokenPoolVersion.V2_0_0),
+    bytecode: SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE,
+  },
+} satisfies Record<DeployableTokenPoolType, DeployArtifact>
 
 /**
- * Deploy artifact for a deployable pool `type` (v2.0.0): contract name (= `type`), the cached
+ * Deploy artifact for a deployable pool `type` (v2.0.0): the compiled contract name, the cached
  * constructor {@link Interface}, and the creation bytecode.
  */
 export function getTokenPoolArtifact(type: DeployableTokenPoolType): DeployArtifact {
-  return {
-    contract: type,
-    iface: getTokenPoolInterface(type, TokenPoolVersion.V2_0_0),
-    bytecode: TOKEN_POOL_BYTECODE[type],
-  }
+  return TOKEN_POOL_DEPLOY_ARTIFACTS[type]
 }
-
-/** Cached `CrossChainPoolToken` (v2.0.0) interface, for the ctor and `setCCIPAdmin` `BurnMint` lacks. */
-export const CROSS_CHAIN_POOL_TOKEN_INTERFACE = new Interface(CROSS_CHAIN_POOL_TOKEN_V2_0_0_ABI)
 
 /**
  * `CrossChainPoolToken` (v2.0.0) deploy artifact: contract name + ctor {@link Interface} +
@@ -1229,7 +1530,7 @@ export const CROSS_CHAIN_POOL_TOKEN_INTERFACE = new Interface(CROSS_CHAIN_POOL_T
 export function getCrossChainPoolTokenArtifact(): DeployArtifact {
   return {
     contract: 'CrossChainPoolToken',
-    iface: CROSS_CHAIN_POOL_TOKEN_INTERFACE,
+    iface: TOKEN_POOL_INTERFACES.CrossChainPoolToken[TokenPoolVersion.V2_0_0],
     bytecode: CROSS_CHAIN_POOL_TOKEN_V2_0_0_BYTECODE,
   }
 }
