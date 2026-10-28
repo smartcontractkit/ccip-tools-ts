@@ -11,12 +11,12 @@ import {
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/siloed-lock-release-token-pool.ts'
 import * as cctEvm from '../index.ts'
 import {
-  type TokenPoolFamily,
+  type TokenPoolType,
   DEPLOYABLE_TOKEN_POOL_TYPES,
-  TOKEN_POOL_FAMILIES,
   TOKEN_POOL_INTERFACES,
   TOKEN_POOL_TYPES,
   TokenPoolVersion,
+  USDC_TOKEN_POOL_TYPES,
   assertLockReleasePool,
   assertNonSiloedLockReleasePool,
   assertSiloedLockReleasePool,
@@ -60,6 +60,8 @@ describe('pool types', () => {
       'BurnMintTokenPool',
       'BurnFromMintTokenPool',
       'BurnWithFromMintTokenPool',
+      'BurnToAddressTokenPool',
+      'BurnMintWithLockReleaseFlagTokenPool',
       'LockReleaseTokenPool',
       'SiloedLockReleaseTokenPool',
     ])
@@ -67,7 +69,8 @@ describe('pool types', () => {
       assert.equal(isDeployableTokenPoolType(type), true)
       assert.match(getTokenPoolArtifact(type).bytecode, /^0x/)
     }
-    assert.equal(isDeployableTokenPoolType('BurnToAddressTokenPool'), false)
+    assert.equal(isDeployableTokenPoolType('BurnMintWithLockReleaseFlagTokenPool'), true)
+    assert.equal(isDeployableTokenPoolType('UpgradeableLockReleaseTokenPool'), false)
   })
 
   it('isTokenPoolType accepts burn-family + lock-release, rejects others', () => {
@@ -118,7 +121,10 @@ describe('pool versions', () => {
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V1_6_0), true)
     assert.equal(isTokenPoolVersion(TokenPoolVersion.V2_0_0), true)
     // exact match: an unlisted patch is unknown, not floor-matched to its neighbour
+    assert.equal(isTokenPoolVersion('1.6.3'), false)
+    // only the legacy USDC pools shipped at 1.6.2 and 1.6.5, so no generic op resolves to them
     assert.equal(isTokenPoolVersion('1.6.2'), false)
+    assert.equal(isTokenPoolVersion('1.6.5'), false)
     assert.equal(isTokenPoolVersion('garbage'), false)
   })
 })
@@ -183,7 +189,6 @@ describe('parseTokenPoolVersion', () => {
   it('normalizes the v1.5.0 *AndProxy shims to their base type', () => {
     for (const [contractType, type] of [
       ['BurnMintTokenPoolAndProxy', 'BurnMintTokenPool'],
-      ['BurnFromMintTokenPoolAndProxy', 'BurnFromMintTokenPool'],
       ['BurnWithFromMintTokenPoolAndProxy', 'BurnWithFromMintTokenPool'],
       ['LockReleaseTokenPoolAndProxy', 'LockReleaseTokenPool'],
     ] as const) {
@@ -192,6 +197,18 @@ describe('parseTokenPoolVersion', () => {
         version: TokenPoolVersion.V1_5_0,
       })
     }
+  })
+
+  it('rejects BurnFromMintTokenPoolAndProxy at v1.5.0, a shim 1.5.0 never shipped', () => {
+    assert.throws(
+      () =>
+        parseTokenPoolVersion({
+          address: ADDR,
+          contractType: 'BurnFromMintTokenPoolAndProxy',
+          version: '1.5.0',
+        }),
+      CCTContractVersionUnsupportedError,
+    )
   })
 
   it('only strips AndProxy at v1.5.0 — the shim exists at no other version', () => {
@@ -256,6 +273,47 @@ describe('parseTokenPoolVersion', () => {
       )
   })
 
+  it('gates BurnToAddressTokenPool on its own versions: 1.5.1 on, never 1.5.0 like its family', () => {
+    for (const version of ['1.5.1', '1.6.1', '2.0.0'])
+      assert.deepEqual(
+        parseTokenPoolVersion({ address: ADDR, contractType: 'BurnToAddressTokenPool', version }),
+        { type: 'BurnToAddressTokenPool', version },
+      )
+    assert.throws(
+      () =>
+        parseTokenPoolVersion({
+          address: ADDR,
+          contractType: 'BurnToAddressTokenPool',
+          version: '1.5.0',
+        }),
+      (error: unknown) =>
+        error instanceof CCTContractVersionUnsupportedError && error.context.address === ADDR,
+    )
+  })
+
+  it('gates BurnMintWithLockReleaseFlagTokenPool on 2.0.0, the only version that ships it by name', () => {
+    assert.deepEqual(
+      parseTokenPoolVersion({
+        address: ADDR,
+        contractType: 'BurnMintWithLockReleaseFlagTokenPool',
+        version: '2.0.0',
+      }),
+      { type: 'BurnMintWithLockReleaseFlagTokenPool', version: TokenPoolVersion.V2_0_0 },
+    )
+    for (const version of ['1.5.1', '1.6.1'])
+      assert.throws(
+        () =>
+          parseTokenPoolVersion({
+            address: ADDR,
+            contractType: 'BurnMintWithLockReleaseFlagTokenPool',
+            version,
+          }),
+        (error: unknown) =>
+          error instanceof CCTContractVersionUnsupportedError && error.context.address === ADDR,
+        version,
+      )
+  })
+
   it('throws CCTContractVersionUnsupportedError for an unknown version', () => {
     assert.throws(
       () =>
@@ -267,40 +325,112 @@ describe('parseTokenPoolVersion', () => {
       CCTContractVersionUnsupportedError,
     )
   })
+
+  it('keeps the USDC/CCTP types out of the TokenPoolTypes, so no family or generic op sees one', () => {
+    for (const type of USDC_TOKEN_POOL_TYPES) assert.equal(isTokenPoolType(type), false, type)
+    const usdcTypes: readonly string[] = USDC_TOKEN_POOL_TYPES
+    for (const type of TOKEN_POOL_TYPES) assert.equal(usdcTypes.includes(type), false, type)
+  })
+
+  it('rejects a USDC type as a type at any version, even one it never shipped at', () => {
+    for (const [contractType, version] of [
+      ['USDCTokenPool', '1.6.2'],
+      ['USDCTokenPool', '1.4.0'],
+      ['CCTPThroughCCVTokenPool', '1.6.5'],
+    ] as const)
+      assert.throws(
+        () => parseTokenPoolVersion({ address: ADDR, contractType, version }),
+        (error: unknown) =>
+          error instanceof CCTContractTypeInvalidError &&
+          error.context.actual === contractType &&
+          /getTokenPoolState/.test(error.message),
+        `${contractType} ${version}`,
+      )
+    // 1.6.2 and 1.6.5 shipped only USDC pools
+    assert.throws(
+      () =>
+        parseTokenPoolVersion({
+          address: ADDR,
+          contractType: 'BurnMintTokenPool',
+          version: '1.6.2',
+        }),
+      CCTContractVersionUnsupportedError,
+    )
+  })
+
+  it('rejects a USDCTokenPoolProxy, naming getPools as the way out', () => {
+    assert.throws(
+      () =>
+        parseTokenPoolVersion({
+          address: ADDR,
+          contractType: 'USDCTokenPoolProxy',
+          version: '2.0.0',
+        }),
+      (error: unknown) =>
+        error instanceof CCTContractTypeInvalidError &&
+        error.context.actual === 'USDCTokenPoolProxy' &&
+        /getPools/.test(error.message),
+    )
+  })
 })
 
 describe('TOKEN_POOL_INTERFACES', () => {
-  it('provides a cached ethers Interface for each family, at exactly the versions it shipped', () => {
-    for (const family of TOKEN_POOL_FAMILIES)
-      for (const iface of Object.values(TOKEN_POOL_INTERFACES[family]))
-        assert.ok(iface instanceof Interface, family)
-    const versions = (family: TokenPoolFamily) => Object.keys(TOKEN_POOL_INTERFACES[family])
+  it('provides a cached ethers Interface for each type, at exactly the versions it shipped', () => {
+    for (const type of TOKEN_POOL_TYPES)
+      for (const iface of Object.values(TOKEN_POOL_INTERFACES[type]))
+        assert.ok(iface instanceof Interface, type)
+    const versions = (type: TokenPoolType) => Object.keys(TOKEN_POOL_INTERFACES[type])
     // 1.6.0 shipped only the siloed pool, and the siloed pool first shipped at 1.6.0
-    assert.deepEqual(versions('BurnMint'), ['1.5.0', '1.5.1', '1.6.1', '2.0.0'])
-    assert.deepEqual(versions('LockRelease'), ['1.5.0', '1.5.1', '1.6.1', '2.0.0'])
-    assert.deepEqual(versions('SiloedLockRelease'), ['1.6.0', '1.6.1', '2.0.0'])
+    for (const type of [
+      'BurnMintTokenPool',
+      'BurnWithFromMintTokenPool',
+      'LockReleaseTokenPool',
+    ] as const)
+      assert.deepEqual(versions(type), ['1.5.0', '1.5.1', '1.6.1', '2.0.0'], type)
+    assert.deepEqual(versions('BurnFromMintTokenPool'), ['1.5.1', '1.6.1', '2.0.0'])
+    assert.deepEqual(versions('BurnToAddressTokenPool'), ['1.5.1', '1.6.1', '2.0.0'])
+    // only 2.0.0 ships it under its own name; its 1.6.1 bytecode reports BurnMintTokenPool 1.6.1
+    assert.deepEqual(versions('BurnMintWithLockReleaseFlagTokenPool'), ['2.0.0'])
+    assert.deepEqual(versions('SiloedLockReleaseTokenPool'), ['1.6.0', '1.6.1', '2.0.0'])
+  })
+
+  it('shares one Interface across types with the same ABI at a version', () => {
+    for (const version of [
+      TokenPoolVersion.V1_5_1,
+      TokenPoolVersion.V1_6_1,
+      TokenPoolVersion.V2_0_0,
+    ]) {
+      const burnMint = TOKEN_POOL_INTERFACES.BurnMintTokenPool[version]
+      assert.equal(TOKEN_POOL_INTERFACES.BurnFromMintTokenPool[version], burnMint, version)
+      assert.equal(TOKEN_POOL_INTERFACES.BurnWithFromMintTokenPool[version], burnMint, version)
+      assert.notEqual(TOKEN_POOL_INTERFACES.BurnToAddressTokenPool[version], burnMint, version)
+    }
+    assert.equal(
+      TOKEN_POOL_INTERFACES.BurnMintWithLockReleaseFlagTokenPool[TokenPoolVersion.V2_0_0],
+      TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+    )
   })
 
   it('resolves distinct Interfaces per family at the same version', () => {
     assert.notEqual(
-      TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_1],
-      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_1],
+      TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V1_5_1],
+      TOKEN_POOL_INTERFACES.LockReleaseTokenPool[TokenPoolVersion.V1_5_1],
     )
     for (const version of [TokenPoolVersion.V1_6_1, TokenPoolVersion.V2_0_0])
       assert.notEqual(
-        TOKEN_POOL_INTERFACES.SiloedLockRelease[version],
-        TOKEN_POOL_INTERFACES.LockRelease[version],
+        TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[version],
+        TOKEN_POOL_INTERFACES.LockReleaseTokenPool[version],
         version,
       )
   })
 
   it('gives SiloedLockRelease the siloed ABI from 1.6.0 on: no single getLockBox(), no transferLiquidity', () => {
     for (const version of [TokenPoolVersion.V1_6_0, TokenPoolVersion.V1_6_1]) {
-      const iface = TOKEN_POOL_INTERFACES.SiloedLockRelease[version]
+      const iface = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[version]
       assert.ok(iface.hasFunction('getUnsiloedLiquidity'), version)
       assert.equal(iface.hasFunction('transferLiquidity'), false, version)
     }
-    const v2 = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V2_0_0]
+    const v2 = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[TokenPoolVersion.V2_0_0]
     assert.ok(v2.getFunction('getLockBox(uint64)'))
     assert.equal(v2.getFunction('getLockBox()'), null)
     assert.deepEqual(
@@ -309,12 +439,70 @@ describe('TOKEN_POOL_INTERFACES', () => {
     )
   })
 
+  it('gives BurnToAddressTokenPool its own ABI: getBurnAddress() and a burnAddress constructor arg', () => {
+    for (const iface of Object.values(TOKEN_POOL_INTERFACES.BurnToAddressTokenPool))
+      assert.ok(iface.getFunction('getBurnAddress()'))
+    assert.deepEqual(
+      TOKEN_POOL_INTERFACES.BurnToAddressTokenPool[TokenPoolVersion.V2_0_0].deploy.inputs.map(
+        (i) => i.name,
+      ),
+      ['token', 'localTokenDecimals', 'advancedPoolHooks', 'rmnProxy', 'router', 'burnAddress'],
+    )
+  })
+
+  // Every op on a BurnToAddress pool encodes through this table instead of BurnMint's, so it must
+  // declare every BurnMint function with the same selector at each version, or calldata changes.
+  it('keeps BurnToAddress a strict superset of BurnMint at each version it shipped', () => {
+    for (const [version, iface] of Object.entries(TOKEN_POOL_INTERFACES.BurnToAddressTokenPool)) {
+      const burnMint = getTokenPoolInterface('BurnMintTokenPool', version as TokenPoolVersion)
+      burnMint.forEachFunction((fn) =>
+        assert.equal(
+          iface.getFunction(fn.selector)?.format(),
+          fn.format(),
+          `${version} ${fn.name}`,
+        ),
+      )
+    }
+  })
+
+  // Compares every pair of cells, so it fails both when two cells with the same ABI stop sharing
+  // an instance and when two different ABIs get collapsed onto one.
+  it('shares an Interface between two type/version cells exactly when they declare the same ABI', () => {
+    const cells = TOKEN_POOL_TYPES.flatMap((type) =>
+      Object.entries(TOKEN_POOL_INTERFACES[type]).map(([version, iface]) => ({
+        cell: `${type}@${version}`,
+        iface,
+        json: iface.formatJson(),
+      })),
+    )
+    for (const a of cells)
+      for (const b of cells)
+        assert.equal(a.iface === b.iface, a.json === b.json, `${a.cell} vs ${b.cell}`)
+  })
+
+  // Catches a copy-pasted row: every type points at a distinct vendored ABI per version.
+  it('gives each type a distinct Interface per version', () => {
+    for (const type of TOKEN_POOL_TYPES) {
+      const ifaces = Object.values(TOKEN_POOL_INTERFACES[type])
+      assert.equal(new Set(ifaces).size, ifaces.length, type)
+    }
+  })
+
+  it('keeps per-type version keys after derivation, so an unshipped pair is a type error', () => {
+    // @ts-expect-error -- BurnToAddressTokenPool never shipped at 1.5.0
+    assert.equal(TOKEN_POOL_INTERFACES.BurnToAddressTokenPool['1.5.0'], undefined)
+  })
+
   it('uses the *_and_proxy variant at V1_5_0 (exposes getPreviousPool)', () => {
     assert.ok(
-      TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_0].hasFunction('getPreviousPool'),
+      TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V1_5_0].hasFunction(
+        'getPreviousPool',
+      ),
     )
     assert.ok(
-      !TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_1].hasFunction('getPreviousPool'),
+      !TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V1_5_1].hasFunction(
+        'getPreviousPool',
+      ),
     )
   })
 })
@@ -360,14 +548,14 @@ describe('SiloedLockRelease calldata parity', () => {
       // selector, output types and mutability: what encoding and decoding depend on. Parameter
       // names are not compared; they differ (setRebalancer's newRebalancer vs rebalancer at 1.6.1)
       // and ops encode positionally.
-      const shape = (family: 'LockRelease' | 'SiloedLockRelease', fn: string) => {
-        const f = TOKEN_POOL_INTERFACES[family][version].getFunction(fn)
+      const shape = (type: 'LockReleaseTokenPool' | 'SiloedLockReleaseTokenPool', fn: string) => {
+        const f = TOKEN_POOL_INTERFACES[type][version].getFunction(fn)
         return f && [f.format('sighash'), f.outputs.map((o) => o.format()), f.stateMutability]
       }
       for (const fn of OP_ENCODED_FUNCTIONS)
         assert.deepEqual(
-          shape('SiloedLockRelease', fn),
-          shape('LockRelease', fn),
+          shape('SiloedLockReleaseTokenPool', fn),
+          shape('LockReleaseTokenPool', fn),
           `${fn} @ ${version}`,
         )
     })
@@ -381,7 +569,7 @@ describe('LockRelease liquidity surface', () => {
     // this parity is what licenses one encoder entry at 1.5.0 instead of a per-version table
     for (const fn of LIQUIDITY_FUNCTIONS) {
       const [first, ...rest] = V1_X.map((version) =>
-        TOKEN_POOL_INTERFACES.LockRelease[version].getFunction(fn)!.format('sighash'),
+        TOKEN_POOL_INTERFACES.LockReleaseTokenPool[version].getFunction(fn)!.format('sighash'),
       )
       for (const sighash of rest) assert.equal(sighash, first, `${fn} diverged across v1.x`)
     }
@@ -389,11 +577,13 @@ describe('LockRelease liquidity surface', () => {
 
   it('declares the unsiloed liquidity functions on siloed v1.6.x with the v1.5.0 signatures', () => {
     // this parity licenses floor-matching siloed pools to the 1.5.x encoders
-    const base = TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_0]
+    const base = TOKEN_POOL_INTERFACES.LockReleaseTokenPool[TokenPoolVersion.V1_5_0]
     for (const version of [TokenPoolVersion.V1_6_0, TokenPoolVersion.V1_6_1])
       for (const fn of ['provideLiquidity', 'withdrawLiquidity', 'setRebalancer', 'getRebalancer'])
         assert.equal(
-          TOKEN_POOL_INTERFACES.SiloedLockRelease[version].getFunction(fn)!.format('sighash'),
+          TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[version]
+            .getFunction(fn)!
+            .format('sighash'),
           base.getFunction(fn)!.format('sighash'),
           `${fn} @ ${version}`,
         )
@@ -401,24 +591,24 @@ describe('LockRelease liquidity surface', () => {
 
   it('declares neither transferLiquidity nor canAcceptLiquidity on siloed v1.6.x', () => {
     for (const version of [TokenPoolVersion.V1_6_0, TokenPoolVersion.V1_6_1]) {
-      const siloed = TOKEN_POOL_INTERFACES.SiloedLockRelease[version]
+      const siloed = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[version]
       assert.equal(siloed.hasFunction('transferLiquidity'), false, version)
       assert.equal(siloed.hasFunction('canAcceptLiquidity'), false, version)
     }
   })
 
   it('drops every liquidity function at v2.0.0, which escrows through a lockbox', () => {
-    for (const family of ['LockRelease', 'SiloedLockRelease'] as const)
+    for (const type of ['LockReleaseTokenPool', 'SiloedLockReleaseTokenPool'] as const)
       for (const fn of LIQUIDITY_FUNCTIONS)
         assert.equal(
-          TOKEN_POOL_INTERFACES[family][TokenPoolVersion.V2_0_0].hasFunction(fn),
+          TOKEN_POOL_INTERFACES[type][TokenPoolVersion.V2_0_0].hasFunction(fn),
           false,
-          `${fn} unexpectedly present on ${family} 2.0.0`,
+          `${fn} unexpectedly present on ${type} 2.0.0`,
         )
   })
 
   it('declares no liquidity function on the BurnMint family at any version', () => {
-    for (const [version, iface] of Object.entries(TOKEN_POOL_INTERFACES.BurnMint))
+    for (const [version, iface] of Object.entries(TOKEN_POOL_INTERFACES.BurnMintTokenPool))
       for (const fn of LIQUIDITY_FUNCTIONS)
         assert.equal(
           iface.hasFunction(fn),
@@ -429,16 +619,22 @@ describe('LockRelease liquidity surface', () => {
 
   it('declares canAcceptLiquidity only at v1.5.0 and v1.5.1', () => {
     assert.equal(
-      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_0].hasFunction('canAcceptLiquidity'),
+      TOKEN_POOL_INTERFACES.LockReleaseTokenPool[TokenPoolVersion.V1_5_0].hasFunction(
+        'canAcceptLiquidity',
+      ),
       true,
     )
     assert.equal(
-      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_5_1].hasFunction('canAcceptLiquidity'),
+      TOKEN_POOL_INTERFACES.LockReleaseTokenPool[TokenPoolVersion.V1_5_1].hasFunction(
+        'canAcceptLiquidity',
+      ),
       true,
     )
     // 1.6.1 dropped the immutable flag and always accepts deposits
     assert.equal(
-      TOKEN_POOL_INTERFACES.LockRelease[TokenPoolVersion.V1_6_1].hasFunction('canAcceptLiquidity'),
+      TOKEN_POOL_INTERFACES.LockReleaseTokenPool[TokenPoolVersion.V1_6_1].hasFunction(
+        'canAcceptLiquidity',
+      ),
       false,
     )
   })
@@ -528,7 +724,7 @@ describe('assertSiloedLockReleasePool', () => {
 })
 
 describe('isTokenPoolRevert', () => {
-  const iface = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V2_0_0]
+  const iface = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[TokenPoolVersion.V2_0_0]
   /** A decoded custom-error revert, as ethers' Contract rethrows it. */
   const reverted = (name: string) =>
     iface.makeError(iface.encodeErrorResult(name, [1n]), { to: ADDR, data: '0x' })
@@ -575,14 +771,14 @@ describe('SiloedLockRelease per-lane surface', () => {
 
   it('declares every silo function identically at v1.6.0 and v1.6.1', () => {
     // this parity is what licenses one 1.6.0 encoder entry, and one 1.6.0 ABI for the reads
-    const v160 = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V1_6_0]
-    const v161 = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V1_6_1]
+    const v160 = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0]
+    const v161 = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_1]
     for (const fn of SILO_FUNCTIONS)
       assert.equal(v161.getFunction(fn)!.format('full'), v160.getFunction(fn)!.format('full'), fn)
   })
 
   it('declares the per-lane lockbox functions at v2.0.0 and drops the 1.6.x silo functions', () => {
-    const v200 = TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V2_0_0]
+    const v200 = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[TokenPoolVersion.V2_0_0]
     for (const fn of ['configureLockBoxes', 'getAllLockBoxConfigs', 'getLockBox'])
       assert.equal(v200.hasFunction(fn), true, fn)
     assert.equal(
@@ -597,7 +793,7 @@ describe('SiloedLockRelease per-lane surface', () => {
     for (const version of [TokenPoolVersion.V1_6_0, TokenPoolVersion.V1_6_1])
       for (const fn of ['configureLockBoxes', 'getAllLockBoxConfigs', 'getLockBox'])
         assert.equal(
-          TOKEN_POOL_INTERFACES.SiloedLockRelease[version].hasFunction(fn),
+          TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[version].hasFunction(fn),
           false,
           `${fn} @ ${version}`,
         )
@@ -610,17 +806,25 @@ describe('getTokenPoolInterface', () => {
     const b = getTokenPoolInterface('BurnMintTokenPool', TokenPoolVersion.V1_5_1)
     assert.ok(a instanceof Interface)
     assert.equal(a, b)
-    assert.equal(a, TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V1_5_1])
+    assert.equal(a, TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V1_5_1])
   })
 
-  it('resolves all burn-* variants to the same BurnMint-family Interface', () => {
+  it('resolves the burn-* variants that declare only the BurnMint ABI to the same Interface', () => {
     const burnMint = getTokenPoolInterface('BurnMintTokenPool', TokenPoolVersion.V1_5_1)
     assert.equal(getTokenPoolInterface('BurnFromMintTokenPool', TokenPoolVersion.V1_5_1), burnMint)
     assert.equal(
       getTokenPoolInterface('BurnWithFromMintTokenPool', TokenPoolVersion.V1_5_1),
       burnMint,
     )
-    assert.equal(getTokenPoolInterface('BurnToAddressTokenPool', TokenPoolVersion.V1_5_1), burnMint)
+  })
+
+  it('resolves BurnToAddressTokenPool to its own Interface at each version it shipped', () => {
+    for (const [version, iface] of Object.entries(TOKEN_POOL_INTERFACES.BurnToAddressTokenPool))
+      assert.equal(
+        getTokenPoolInterface('BurnToAddressTokenPool', version as TokenPoolVersion),
+        iface,
+        version,
+      )
   })
 
   it('resolves LockRelease to a different Interface than the BurnMint family', () => {
@@ -631,7 +835,7 @@ describe('getTokenPoolInterface', () => {
   })
 
   it('resolves SiloedLockReleaseTokenPool through its own family at the versions it shipped', () => {
-    for (const [version, iface] of Object.entries(TOKEN_POOL_INTERFACES.SiloedLockRelease))
+    for (const [version, iface] of Object.entries(TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool))
       assert.equal(
         getTokenPoolInterface('SiloedLockReleaseTokenPool', version as TokenPoolVersion),
         iface,
@@ -644,6 +848,8 @@ describe('getTokenPoolInterface', () => {
       ['SiloedLockReleaseTokenPool', TokenPoolVersion.V1_5_1],
       ['BurnMintTokenPool', TokenPoolVersion.V1_6_0],
       ['LockReleaseTokenPool', TokenPoolVersion.V1_6_0],
+      // its family shipped at 1.5.0, but BurnToAddress did not
+      ['BurnToAddressTokenPool', TokenPoolVersion.V1_5_0],
     ] as const)
       assert.throws(
         () => getTokenPoolInterface(type, version),
@@ -667,12 +873,19 @@ describe('getTokenPoolArtifact', () => {
   it('deploys SiloedLockReleaseTokenPool with the same Interface its reads resolve to', () => {
     assert.equal(
       getTokenPoolArtifact('SiloedLockReleaseTokenPool').iface,
-      TOKEN_POOL_INTERFACES.SiloedLockRelease[TokenPoolVersion.V2_0_0],
+      TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool[TokenPoolVersion.V2_0_0],
     )
   })
 
   it('keeps the non-siloed LockReleaseTokenPool constructor (with lockBox)', () => {
     assert.equal(getTokenPoolArtifact('LockReleaseTokenPool').iface.deploy.inputs.length, 6)
+  })
+
+  it('deploys BurnToAddressTokenPool with the same Interface its reads resolve to', () => {
+    assert.equal(
+      getTokenPoolArtifact('BurnToAddressTokenPool').iface,
+      TOKEN_POOL_INTERFACES.BurnToAddressTokenPool[TokenPoolVersion.V2_0_0],
+    )
   })
 })
 

@@ -151,7 +151,7 @@ describe('UpdateAdvancedPoolHooks (cct/evm)', () => {
         advancedPoolHooks: HOOKS,
       })
       assert.equal(unsigned.transactions[0]!.from, undefined)
-      const ifaceV2 = TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V2_0_0]
+      const ifaceV2 = TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V2_0_0]
       assert.ok(!seen.includes(ifaceV2.getFunction('owner')!.selector), 'no owner read')
     })
   })

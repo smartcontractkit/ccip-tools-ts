@@ -37,7 +37,7 @@ function stubChain({
   configured?: LockboxConfig[]
   seen?: Seen
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES.SiloedLockRelease['2.0.0']
+  const iface = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool['2.0.0']
   return {
     provider: {
       call: ({ data }: { data: string }) => {
