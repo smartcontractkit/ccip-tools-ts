@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CCT SDK (EVM): `setRateLimitAdmin` works on v2.0.0 pools, writing the new admin through `setDynamicConfig` and keeping the pool's current `router` and `feeAdmin`
 - CCT SDK (EVM): add `simulateEVMTx(chain, unsigned, opts?)`, which dry-runs a built CCT tx with `eth_call` from `opts.from` or the tx's `sender` and returns `{ success: true }` or the revert's `errorName` and `errorArgs` (decoded with the SDK's bundled ABIs, `null` when none declares it) and raw `revertData`
 - CCT SDK (EVM): `setChainRateLimiterConfigs` checks for duplicates per lane and `fastFinality` (omitted counts as `false`), so a v2.0.0 update can set both the finalized and the fast-finality limit for the same lane
 - CCT SDK (EVM): `getTokenPoolState` reads the USDC/CCTP token pools; other ops still reject them
