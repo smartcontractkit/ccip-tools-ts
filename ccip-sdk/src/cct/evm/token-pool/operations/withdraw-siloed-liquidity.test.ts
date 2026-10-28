@@ -79,7 +79,7 @@ function stubChain({
   revert?: string
   seen?: Seen
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES.SiloedLockRelease['1.6.1']
+  const iface = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool['1.6.1']
   const pool = (fn: string, args: readonly unknown[], data: string): unknown[] | undefined => {
     // only the per-lane getters take an argument; reading one off a no-arg call throws
     const selector = (args.length > 0 ? args[0] : undefined) as bigint

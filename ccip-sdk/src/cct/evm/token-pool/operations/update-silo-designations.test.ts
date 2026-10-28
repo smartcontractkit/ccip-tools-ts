@@ -64,7 +64,7 @@ function stubChain({
   supported?: bigint[]
   seen?: Seen
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES.SiloedLockRelease['1.6.1']
+  const iface = TOKEN_POOL_INTERFACES.SiloedLockReleaseTokenPool['1.6.1']
   const pool = (fn: string, args: readonly unknown[]): unknown[] | undefined => {
     switch (fn) {
       case 'isSiloed':

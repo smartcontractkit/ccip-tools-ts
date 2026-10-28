@@ -18,7 +18,7 @@ import { type GetFeeParams, GetFee } from './get-fee.ts'
 
 const POOL = '0x' + '11'.repeat(20)
 const SELECTOR = 16015286601757825753n
-const IFACE = TOKEN_POOL_INTERFACES.BurnMint[TokenPoolVersion.V2_0_0]
+const IFACE = TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V2_0_0]
 const FEE = [10n, 100_000n, 32n, 25n, true]
 const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
   BurnMint: 'BurnMintTokenPool',

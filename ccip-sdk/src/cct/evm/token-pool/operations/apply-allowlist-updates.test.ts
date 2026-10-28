@@ -164,7 +164,9 @@ describe('ApplyAllowlistUpdates (cct/evm)', () => {
   describe('generate', () => {
     for (const version of LEGACY_VERSIONS) {
       // every family that shipped at this version: 1.6.0 shipped only the siloed pool
-      for (const family of TOKEN_POOL_FAMILIES.filter((f) => version in TOKEN_POOL_INTERFACES[f])) {
+      for (const family of TOKEN_POOL_FAMILIES.filter(
+        (f) => version in TOKEN_POOL_INTERFACES[POOL_TYPE[f]],
+      )) {
         it(`encodes applyAllowListUpdates(removes, adds) for a ${family} ${version} pool`, async () => {
           const unsigned = await generate(stubChain({ family, version }))
           const tx = unsigned.transactions[0]!
