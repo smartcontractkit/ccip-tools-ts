@@ -42,6 +42,23 @@ export function parseCctpV2ExtraData(
   return { tag, ...(bytes.length === 40 ? { sourceDomain: toNumber(bytes.subarray(4, 8)) } : {}) }
 }
 
+/**
+ * A CCIP v2.0 token verifier implementation behind a destination CCV, that accepts `ccvData`
+ * composed from a token issuer's offchain attestation.
+ */
+export type TokenVerifier = {
+  /** Kind of the offchain data it consumes, as {@link OffchainTokenData}'s `_tag`. */
+  tag: 'usdc' | 'lbtc'
+  /** The address the destination policy requires (a verifier resolver or the verifier itself). */
+  ccv: string
+  /** The 4-byte tag that routes `ccvData` to this implementation. */
+  versionTag: string
+  /** Implementation version, e.g. `2.1.0`. */
+  version: string
+  /** For `usdc`: the CCTP domain this verifier maps the message's source chain to. */
+  cctpSourceDomain?: number
+}
+
 type CctpAttestationResponse =
   | { error: 'string' }
   | {
@@ -201,6 +218,96 @@ export async function getLbtcAttestation(
     throw new CCIPLbtcAttestationNotApprovedError(payloadHash, attestation)
   }
   return attestation
+}
+
+/**
+ * Read the verifier version tag a token issuer's attested message binds to a CCIP message.
+ *
+ * CCIP v2.0 token verifiers send `[versionTag (4)][ccipMessageId (32)]` along with the transfer:
+ * as the CCTP message's hook data, or as the Lombard bridge's optional message. The destination
+ * verifier rejects a result whose attested tag or message id differs.
+ *
+ * @param attested - The attested bytes: the CCTP message, or the Lombard payload or attestation
+ * @param messageId - The CCIP message id the data is being composed for
+ * @returns The 4-byte version tag, or `undefined` when `attested` does not carry `messageId`
+ */
+export function getAttestedVersionTag(
+  attested: BytesLike,
+  messageId: BytesLike,
+): string | undefined {
+  const hex = hexlify(attested)
+  const idx = hex.lastIndexOf(hexlify(messageId).slice(2))
+  // byte-aligned, and preceded by a 4-byte tag
+  if (idx < 10 || idx % 2) return
+  return '0x' + hex.slice(idx - 8, idx)
+}
+
+/**
+ * The Lombard payload hash of a CCIP v2.0 LBTC transfer: the `verifierBlobs` entry the source
+ * Lombard verifier returned in `CCIPMessageSent` (v2 Lombard pools don't put it in `extraData`).
+ *
+ * Blobs line up with the leading `receipts`, one per CCV; only the blob whose receipt `issuer` is
+ * one of `ccvs` is taken, so unrelated CCVs' 32-byte blobs are never looked up.
+ *
+ * @param message - The source message's `receipts` and `verifierBlobs`, when read from source logs
+ * @param ccvs - The Lombard CCV addresses, as the destination policy names them
+ * @returns The payload hash, or `undefined` when the message doesn't carry it
+ */
+export function getLbtcPayloadHash(
+  message: { receipts?: readonly { issuer: string }[]; verifierBlobs?: readonly BytesLike[] },
+  ccvs: readonly string[],
+): string | undefined {
+  const lombardCCVs = new Set(ccvs.map((ccv) => ccv.toLowerCase()))
+  const i = (message.receipts ?? []).findIndex(({ issuer }) =>
+    lombardCCVs.has(issuer.toLowerCase()),
+  )
+  const blob = message.verifierBlobs?.[i]
+  if (blob != null && dataLength(blob) === 32) return hexlify(blob)
+}
+
+/**
+ * Fetch the token issuer's attestation that CCIP v2.0 token verifiers of kind `tag` consume.
+ *
+ * - `usdc`: Circle's CCTP message whose hook data carries `messageId`, queried by the CCTP source
+ *   domain the source-pool data or `cctpSourceDomain` gives;
+ * - `lbtc`: Lombard's attestation of `lbtcPayloadHash`; see {@link getLbtcPayloadHash}.
+ *
+ * @param tag - The verifiers' kind
+ * @param opts - The message's id, source chain, token transfer `extraData` and source tx hash
+ * @returns The offchain token data, or `undefined` when there is not enough to query the issuer
+ * @throws if the issuer's API has no ready attestation
+ */
+export async function getTokenVerifierData(
+  tag: TokenVerifier['tag'],
+  opts: WithLogger & {
+    messageId: string
+    sourceChainSelector: bigint
+    extraData: BytesLike
+    txHash: string
+    lbtcPayloadHash?: string
+    cctpSourceDomain?: number
+  },
+): Promise<NonNullable<OffchainTokenData> | undefined> {
+  const { logger = console, messageId, txHash } = opts
+  const { networkType } = networkInfo(opts.sourceChainSelector)
+  if (tag === 'usdc') {
+    const sourceDomain = parseCctpV2ExtraData(opts.extraData)?.sourceDomain ?? opts.cctpSourceDomain
+    if (sourceDomain == null) {
+      logger.debug('CCTP: no source domain for', messageId)
+      return
+    }
+    return {
+      _tag: tag,
+      ...(await getUsdcAttestation({ sourceDomain, txHash, messageId }, networkType)),
+    }
+  }
+  const { lbtcPayloadHash } = opts
+  if (!lbtcPayloadHash) {
+    logger.debug('LBTC: the source verifierBlobs carry no payload hash for', messageId)
+    return
+  }
+  const { attestation } = await getLbtcAttestation(lbtcPayloadHash, networkType)
+  return { _tag: tag, extraData: lbtcPayloadHash, attestation }
 }
 
 /** Options for {@link getOffchainTokenData}. */
