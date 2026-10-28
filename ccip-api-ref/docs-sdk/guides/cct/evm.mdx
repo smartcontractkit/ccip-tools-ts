@@ -215,6 +215,23 @@ const unsigned = await cct.generateUnsignedRegisterAdmin({
 // Hand `unsigned` to the Safe or offline signer to sign and broadcast.
 ```
 
+### Simulate before signing
+
+`simulateEVMTx` runs an unsigned transaction (a call or a deployment) with `eth_call` and names the revert with its arguments, decoded against the SDK's bundled ABIs, so you don't pass one. It simulates from the transaction's `sender`, or from `from` when given, which is how you check calldata built without `sender` for a multisig. RPC failures throw rather than reporting a revert.
+
+```typescript
+import { simulateEVMTx } from '@chainlink/ccip-sdk/cct/evm'
+
+const result = await simulateEVMTx(cct.chain, unsigned, { from: safeAddress })
+if (!result.success) {
+  // e.g. LockBoxNotConfigured { remoteChainSelector: 16015286601757825753n }; errorName and
+  // errorArgs are null when no known ABI declares the revert, and revertData is the raw bytes
+  console.log(result.errorName ?? result.revertData, result.errorArgs)
+}
+```
+
+Built with `sender`, the builders already reject an unauthorized one (as `CCTParamsInvalidError`) and check some on-chain state, so a simulation catches the rest, plus state that changed since the build, like a lock/release pool's `InsufficientLiquidity` after transfers drained it. Built without `sender`, owner and role failures come back here as named reverts.
+
 ## Configure a v2 pool
 
 `deployTokenPool` and the factory create v2.0.0 pools, which add a configuration surface beyond lanes and rate limits: per-destination transfer fees, faster-than-finality settings, and a pluggable `AdvancedPoolHooks` contract that holds the sender allowlist, Cross-Chain Verifier (CCV) requirements, an optional policy engine (ACE), and a threshold amount. The subsections below cover each, and a lock/release v2 pool also escrows through an [ERC20LockBox](#lockrelease-pools).

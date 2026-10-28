@@ -4393,3 +4393,5 @@ export type {
   ExplorerVerificationInput,
 } from './operation.ts'
 export type { TransactionResult } from '../operation.ts'
+export type { SimulateEVMTxOptions, SimulateEVMTxResult } from './simulate.ts'
+export { simulateEVMTx } from './simulate.ts'
