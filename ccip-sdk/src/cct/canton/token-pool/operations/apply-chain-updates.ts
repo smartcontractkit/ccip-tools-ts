@@ -11,7 +11,8 @@
 import type { JsCommands } from '../../../../canton/client/index.ts'
 import type { CantonChain } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
-import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
+import { CCIPTxOutcomeUnavailableError } from '../../../../errors/index.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { ApplyChainUpdatesArg } from '../../daml-types.ts'
 import { type FinalityConfig, encodeFinalityConfig, rawInstanceAddress } from '../../encoding.ts'
 import {
@@ -213,6 +214,7 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
       choiceArgument,
       actAs: [p.sender],
       commandIdPrefix: 'cct-apply-chain-updates',
+      commandId: p.commandId,
     })
   }
 
@@ -223,10 +225,11 @@ export class ApplyChainUpdates extends CantonOperation<ApplyChainUpdatesParams> 
     const base = await super.execute(chain, params)
     const poolCid = extractExerciseResult(base.response, 'ApplyChainUpdates')
     if (typeof poolCid !== 'string') {
-      throw new CCTTxFailedError(
+      // Committed on-ledger; the response just lacks the exercise event.
+      throw new CCIPTxOutcomeUnavailableError(
         this.name,
-        'ApplyChainUpdates exerciseResult was not a contract ID',
-        { context: { updateId: base.hash } },
+        base.hash,
+        'the ApplyChainUpdates exercise result (new pool contract ID)',
       )
     }
     return { ...base, poolCid }

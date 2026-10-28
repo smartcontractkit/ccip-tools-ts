@@ -294,10 +294,10 @@ describe('SetRemotePool (cct/evm)', () => {
     })
 
     it('has no setRemotePool in any post-1.5.0 vendored ABI', () => {
-      for (const [family, versions] of Object.entries(TOKEN_POOL_INTERFACES))
+      for (const [type, versions] of Object.entries(TOKEN_POOL_INTERFACES))
         for (const [version, iface] of Object.entries(versions))
           if (version !== TokenPoolVersion.V1_5_0)
-            assert.equal(iface.getFunction('setRemotePool'), null, `${family} ${version}`)
+            assert.equal(iface.getFunction('setRemotePool'), null, `${type} ${version}`)
     })
   })
 

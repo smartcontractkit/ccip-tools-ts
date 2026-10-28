@@ -147,6 +147,33 @@ describe('SuiGrpcChainClient.getCheckpoints', () => {
     assert.equal(page.data[99]!.sequenceNumber, '219')
     assert.deepEqual(ledger.requests[0], { startCheckpoint: 120n, endCheckpoint: 220n })
   })
+
+  it('resumes when the server caps a page below the requested range', async () => {
+    // public fullnodes cap ListCheckpoints (50 items) and end the stream with
+    // ITEM_LIMIT; the length-based heuristic must not stop the walk early
+    const requests: { options?: { limit?: number } }[] = []
+    const client = clientWith({
+      ledgerService: {
+        getServiceInfo: async () => ({ response: { checkpointHeight: 400n } }),
+        listCheckpoints: (input: { startCheckpoint?: bigint; options?: { limit?: number } }) => {
+          requests.push(input)
+          return {
+            responses: (async function* () {
+              const start = input.startCheckpoint ?? 0n
+              for (let seq = start; seq < start + 10n; seq++)
+                yield { checkpoint: { sequenceNumber: seq, digest: `digest-${seq}` } }
+              yield { end: { reason: 1 /* ITEM_LIMIT */ } }
+            })(),
+          }
+        },
+      },
+    })
+    const page = await client.getCheckpoints({ cursor: '100', limit: 100 })
+    assert.equal(requests[0]!.options?.limit, 100)
+    assert.equal(page.data.length, 10)
+    assert.equal(page.hasNextPage, true)
+    assert.equal((decodeCursor(page.nextCursor) as { a?: string }).a, '109')
+  })
 })
 
 // ── queryTransactionBlocks ──
@@ -374,6 +401,31 @@ describe('SuiGrpcChainClient.queryEvents', () => {
   })
 })
 
+// ── transaction events ──
+
+describe('SuiGrpcChainClient.getTransactionBlock', () => {
+  it('fills the enclosing digest on events embedded in a transaction', async () => {
+    // a transaction response's events carry no digest of their own; the
+    // checkpoint walk's logs need the enclosing tx's digest as transactionHash
+    const client = clientWith({
+      ledgerService: {
+        getTransaction: async () => ({
+          response: {
+            transaction: {
+              digest: 'd1',
+              checkpoint: 1n,
+              events: { events: [{ eventType: '0xp::m::E', transactionDigest: '' }] },
+            },
+          },
+        }),
+      },
+    })
+    const tx = await client.getTransactionBlock({ digest: 'd1', options: { showEvents: true } })
+    const events = (tx as unknown as { events: { id: { txDigest: string } }[] }).events
+    assert.equal(events[0]!.id.txDigest, 'd1')
+  })
+})
+
 // ── getOwnedObjects ──
 
 describe('SuiGrpcChainClient.getOwnedObjects', () => {
@@ -437,26 +489,34 @@ describe('SuiGrpcChainClient error typing', () => {
     )
   })
 
-  it('maps the retention boundary to the JSON-RPC "events" wording (walk-mode trigger)', async () => {
-    // events.ts switches the stream to the checkpoint walk on
-    // /could not find the referenced transaction events/i — the gRPC
-    // NOT_FOUND for a pruned/lagging position must surface as that message
-    const notFound = Object.assign(new Error('pruned'), { code: 'NOT_FOUND' })
-    const client = clientWith({
-      listEvents: async () => {
-        throw notFound
-      },
+  for (const [code, message, pruned] of [
+    ['NOT_FOUND', 'pruned', true],
+    [
+      'OUT_OF_RANGE',
+      'requested data below earliest available; lowest available checkpoint is 394032323',
+      true,
+    ],
+    ['OUT_OF_RANGE', 'invalid page token', false],
+  ] as const) {
+    it(`handles the event query error ${code}: ${message}`, async () => {
+      const failure = Object.assign(new Error(message), { code })
+      const client = clientWith({
+        listEvents: async () => {
+          throw failure
+        },
+      })
+      await assert.rejects(
+        client.queryEvents({ query: { MoveEventType: '0xp::m::E' }, limit: 1 }),
+        (error: unknown) => {
+          if (!pruned) return error === failure
+          assert.ok(error instanceof CCIPError)
+          assert.equal(error.code, CCIPErrorCode.TRANSACTION_NOT_FOUND)
+          assert.match(error.message, /could not find the referenced transaction events/i)
+          return true
+        },
+      )
     })
-    await assert.rejects(
-      client.queryEvents({ query: { MoveEventType: '0xp::m::E' }, limit: 1 }),
-      (error: unknown) => {
-        assert.ok(error instanceof CCIPError)
-        assert.equal(error.code, CCIPErrorCode.TRANSACTION_NOT_FOUND)
-        assert.match(error.message, /could not find the referenced transaction events/i)
-        return true
-      },
-    )
-  })
+  }
 
   it('keeps the unsupported-filter messages the discovery fallback matches', async () => {
     const client = clientWith({})

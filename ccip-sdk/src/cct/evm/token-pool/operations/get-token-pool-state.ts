@@ -1,7 +1,8 @@
 /**
  * getTokenPoolState — reads a token pool's admin state (v1.5.0–v2.0.0): the owner and admin roles
  * CCT writes are gated on, which {@link EVMChain.getTokenPoolConfig} (a transfer-flow read) does
- * not return. One reader per version generation, since the getters differ.
+ * not return. One reader per version generation, since the getters differ. The one op that reads
+ * the USDC/CCTP pools: their base TokenPool state, through the same readers.
  *
  * @packageDocumentation
  */
@@ -21,9 +22,13 @@ import {
   type BurnMintTokenPoolType,
   type LockReleaseTokenPoolType,
   type TokenPoolType,
+  type USDCTokenPoolType,
+  type USDCTokenPoolVersion,
+  LegacyUSDCTokenPoolVersion,
   TokenPoolVersion,
   isLockReleaseTokenPoolType,
-  resolveTokenPool,
+  isTokenPoolType,
+  resolveAnyTokenPool,
 } from '../contracts.ts'
 
 /** Parameters for {@link GetTokenPoolState}. */
@@ -53,14 +58,15 @@ type TokenPoolStateCore = {
 }
 
 /**
- * State of a pre-v2.0.0 pool (v1.5.0–v1.6.1), of any supported type: no fee admin, finality
+ * State of a pre-v2.0.0 pool (v1.5.0 to v1.6.5), of any recognized type: no fee admin, finality
  * window, or lockbox, none of which exist before v2.0.0.
  * @remarks A legacy pool's `allowList` and (lock/release) `rebalancer` are transfer-flow and
  * liquidity concerns, not admin ones; read those via `cct.chain.getTokenPoolConfig()`.
  */
 export type LegacyTokenPoolState = TokenPoolStateCore & {
-  version: Exclude<TokenPoolVersion, typeof TokenPoolVersion.V2_0_0>
-  type: TokenPoolType
+  /** 1.6.2 and 1.6.5 only on a {@link USDCTokenPoolType}. */
+  version: Exclude<USDCTokenPoolVersion, typeof TokenPoolVersion.V2_0_0>
+  type: TokenPoolType | USDCTokenPoolType
 }
 
 /** Admin state v2.0.0 adds to {@link TokenPoolStateCore}: the fee role and the finality window. */
@@ -96,11 +102,20 @@ export type SiloedLockReleaseTokenPoolStateV2_0_0 = TokenPoolStateCoreV2_0_0 & {
   type: 'SiloedLockReleaseTokenPool'
 }
 
+/**
+ * State of a v2.0.0 USDC/CCTP pool (`SiloedUSDCTokenPool`, `CCTPThroughCCVTokenPool`): the base
+ * TokenPool state only, with no `lockBox` (the siloed one escrows per lane) and no USDC fields.
+ */
+export type USDCTokenPoolStateV2_0_0 = TokenPoolStateCoreV2_0_0 & {
+  type: USDCTokenPoolType
+}
+
 /** State of a v2.0.0 pool. Only `type === 'LockReleaseTokenPool'` reports a `lockBox`. */
 export type TokenPoolStateV2_0_0 =
   | BurnMintTokenPoolStateV2_0_0
   | LockReleaseTokenPoolStateV2_0_0
   | SiloedLockReleaseTokenPoolStateV2_0_0
+  | USDCTokenPoolStateV2_0_0
 
 /**
  * Admin state of a token pool: `version === '2.0.0'` gates the roles and finality window that
@@ -137,7 +152,7 @@ type TokenPoolGettersV2_0_0 = Pick<
 async function readLegacyTokenPool(
   chain: EVMChain,
   poolAddress: string,
-  type: TokenPoolType,
+  type: LegacyTokenPoolState['type'],
   version: LegacyTokenPoolState['version'],
 ): Promise<LegacyTokenPoolState> {
   const pool: LegacyTokenPoolGetters = getTypedContract(
@@ -217,6 +232,19 @@ async function readBurnMintTokenPoolV2_0_0(
   return { ...(await readTokenPoolV2_0_0(pool, poolAddress)), type }
 }
 
+/**
+ * Reads a v2.0.0 USDC/CCTP pool: the shared state only. Through the BurnMint ABI, whose every
+ * getter each USDC pool declares identically at v2.0.0.
+ */
+async function readUSDCTokenPoolV2_0_0(
+  chain: EVMChain,
+  poolAddress: string,
+  type: USDCTokenPoolType,
+): Promise<USDCTokenPoolStateV2_0_0> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  return { ...(await readTokenPoolV2_0_0(pool, poolAddress)), type }
+}
+
 /** Reads a v2.0.0 lock/release pool: the shared state, plus `lockBox` for the non-siloed variant. */
 async function readLockReleaseTokenPoolV2_0_0(
   chain: EVMChain,
@@ -259,23 +287,28 @@ export class GetTokenPoolState extends EVMQuery<GetTokenPoolStateParams, GetToke
    * newer pool misreport itself and silently drop any admin field its version added, so a new
    * {@link TokenPoolVersion} fails to compile here until it is pointed at a reader.
    * @remarks Type only narrows the v2.0.0 result; the legacy getters are declared by `TokenPool`
-   * itself, so pre-v2.0.0 needs no per-type case.
-   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not a supported one
+   * itself, so pre-v2.0.0 needs no per-type case. That holds for the USDC/CCTP pools too, which
+   * is why this op resolves with {@link resolveAnyTokenPool} rather than rejecting them.
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not a recognized
+   * one, including a `USDCTokenPoolProxy`
    * @throws {@link CCTContractVersionUnsupportedError} if the reported version is not a known one
    */
   protected async read(
     chain: EVMChain,
     { poolAddress }: GetTokenPoolStateParams,
   ): Promise<GetTokenPoolStateResult> {
-    const { type, version } = await resolveTokenPool(chain, poolAddress)
+    const { type, version } = await resolveAnyTokenPool(chain, poolAddress)
 
     switch (version) {
       case TokenPoolVersion.V1_5_0:
       case TokenPoolVersion.V1_5_1:
       case TokenPoolVersion.V1_6_0:
       case TokenPoolVersion.V1_6_1:
+      case LegacyUSDCTokenPoolVersion.V1_6_2:
+      case LegacyUSDCTokenPoolVersion.V1_6_5:
         return readLegacyTokenPool(chain, poolAddress, type, version)
       case TokenPoolVersion.V2_0_0:
+        if (!isTokenPoolType(type)) return readUSDCTokenPoolV2_0_0(chain, poolAddress, type)
         return isLockReleaseTokenPoolType(type)
           ? readLockReleaseTokenPoolV2_0_0(chain, poolAddress, type)
           : readBurnMintTokenPoolV2_0_0(chain, poolAddress, type)

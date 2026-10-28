@@ -9,7 +9,7 @@
  * JavaScript objects that the rest of the SDK can work with.
  */
 
-import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
+import { CCIPTxOutcomeUnavailableError } from '../errors/index.ts'
 import { type ExecutionReceipt, ExecutionState } from '../types.ts'
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ export function normalizeCantonEncodedMessage(encodedMessage: string): string {
  * ```
  * Field values use a `{ Sum: { Text|Numeric|... } }` envelope.
  *
- * @throws {@link CCIPError} if no `CCIPMessageSent` event is found.
+ * @throws {@link CCIPTxOutcomeUnavailableError} if no `CCIPMessageSent` event is found (committed, but details unavailable).
  */
 export function parseCantonSendResult(
   transaction: unknown,
@@ -121,9 +121,11 @@ export function parseCantonSendResult(
     }
   }
 
-  throw new CCIPError(
-    CCIPErrorCode.CANTON_API_ERROR,
-    `Canton send: no CCIPMessageSent event found in transaction ${updateId}`,
+  // Committed on-ledger; the response just lacks the CCIPMessageSent event.
+  throw new CCIPTxOutcomeUnavailableError(
+    'CantonChain.sendMessage',
+    updateId,
+    'the CCIPMessageSent event',
   )
 }
 

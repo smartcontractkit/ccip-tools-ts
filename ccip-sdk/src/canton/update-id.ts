@@ -51,3 +51,12 @@ export function normalizeCantonUpdateId(updateId: string): string {
   if (isCantonUpdateId(hex)) return hex
   return updateId.trim()
 }
+
+/** Extract the update ID (`updateId`/`update_id`) from a submit response's transaction, or ''. */
+export function extractCantonUpdateId(transaction: unknown): string {
+  const tx = transaction as Record<string, unknown> | undefined
+  return (
+    (typeof tx?.['update_id'] === 'string' ? tx['update_id'] : null) ??
+    (typeof tx?.['updateId'] === 'string' ? tx['updateId'] : '')
+  )
+}
