@@ -90,7 +90,7 @@ function stubChain({
   sourceUnsiloedLiquidity?: bigint
   seen?: Seen
 } = {}): EVMChain {
-  const iface = TOKEN_POOL_INTERFACES.LockRelease['1.5.1']
+  const iface = TOKEN_POOL_INTERFACES.LockReleaseTokenPool['1.5.1']
   return {
     network: networkInfo('ethereum-testnet-sepolia-base-1'),
     provider: {
