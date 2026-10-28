@@ -16,12 +16,12 @@ The EVM CCT operations work with several token pool contract types across five p
 | Pool type | `deployTokenPool` | Factory | Administer / read |
 | --- | --- | --- | --- |
 | `BurnMintTokenPool` | Yes (v2.0.0) | Yes (v2.0.0) | v1.5.0 to v2.0.0 |
-| `BurnFromMintTokenPool` | Yes (v2.0.0) | No | v1.5.0 to v2.0.0 |
-| `BurnWithFromMintTokenPool` | Yes (v2.0.0) | No | v1.5.0 to v2.0.0 |
+| `BurnFromMintTokenPool` | Yes (v2.0.0) | Yes (v2.0.0) | v1.5.0 to v2.0.0 |
+| `BurnWithFromMintTokenPool` | Yes (v2.0.0) | Yes (v2.0.0) | v1.5.0 to v2.0.0 |
 | `LockReleaseTokenPool` | Yes (v2.0.0) | Yes (v2.0.0) | v1.5.0 to v2.0.0 |
-| `BurnToAddressTokenPool` | No | No | v1.5.0 to v2.0.0 |
-| `BurnMintWithLockReleaseFlagTokenPool` | No | No | v1.5.0 to v2.0.0 |
-| `SiloedLockReleaseTokenPool` | No | No | v1.5.0 to v2.0.0 |
+| `BurnToAddressTokenPool` | Yes (v2.0.0) | No | v1.5.0 to v2.0.0 |
+| `BurnMintWithLockReleaseFlagTokenPool` | Yes (v2.0.0) | Yes (v2.0.0) | v1.5.0 to v2.0.0 |
+| `SiloedLockReleaseTokenPool` | Yes (v2.0.0) | Yes (v2.0.0) | v1.5.0 to v2.0.0 |
 
 ## Operation applicability by pool version
 
@@ -45,7 +45,9 @@ A v2.0.0-only operation throws `CCTOperationUnsupportedError` when the resolved 
 - `provideLiquidity`, `withdrawLiquidity`, `transferLiquidity`, and `setRebalancer` act on the **unsiloed** bucket and its rebalancer. On a siloed pool they measure available funds with `getUnsiloedLiquidity()`, not the pool's full token balance (which also holds every siloed lane's escrow), so a pre-flight matches what the plain `withdrawLiquidity(uint256)` can actually pay out.
 - The contract also exposes per-lane operations: `provideSiloedLiquidity`, `withdrawSiloedLiquidity`, `setSiloRebalancer`, and `updateSiloDesignations`. These are **not exposed by the SDK**. To manage a specific lane's silo, call the pool contract directly.
 
-The SDK does not deploy siloed pools (see the deploy matrix above): deploy one from the contract's creation code, then administer and read it with the SDK.
+The SDK deploys v2.0.0 siloed pools with `deployTokenPool` or the TokenPoolFactory. After deployment, deploy lockboxes for the same token, authorize the pool on each with `updateLockboxAuthorizedCallers`, and bind remote lanes with `configureSiloedLockboxes`. Lanes may share a lockbox or use separate ones; a lane without a configured lockbox cannot transfer tokens.
+
+When deploying a **new token** with a siloed pool through the factory, its `BURN_MINT` constructor path also grants the pool unused mint/burn roles. After deployment, the token's `DEFAULT_ADMIN_ROLE` holder should call `grantRole(BURN_MINT_ADMIN_ROLE, cleanupAccount)`. That account should then call `revokeRole(MINTER_ROLE, pool)` and `revokeRole(BURNER_ROLE, pool)`, and may call `renounceRole(BURN_MINT_ADMIN_ROLE, cleanupAccount)` if the admin role was temporary. The existing-token factory path does not grant these roles.
 
 ## Source code
 

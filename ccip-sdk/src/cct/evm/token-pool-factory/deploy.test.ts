@@ -92,8 +92,9 @@ function decode(fn: 'deployTokenAndTokenPool' | 'deployTokenPoolWithExistingToke
 
 const guarded = guardFactorySalt(normalizeFactorySalt('t', SALT), SENDER)
 
-describe('factory deployment supports every deployable pool type', () => {
+describe('factory deployment supports every deployable pool type except BurnToAddressTokenPool', () => {
   for (const type of DEPLOYABLE_TOKEN_POOL_TYPES) {
+    if (type === 'BurnToAddressTokenPool') continue
     for (const existingToken of [false, true]) {
       it(`${type}: ${existingToken ? 'existing' : 'new'} token uses matching bytecode and constructor`, async () => {
         const common = { factory: FACTORY, sender: SENDER, salt: SALT, type }

@@ -54,18 +54,23 @@ import {
   predictFactoryToken,
 } from './predict.ts'
 
-/** Pool types whose constructors match the factory's init-arg encoding. */
-export type FactoryTokenPoolType = DeployableTokenPoolType
+/** Pool types whose constructors match the factory's init-arg encoding (no burnAddress argument). */
+export type FactoryTokenPoolType = Exclude<DeployableTokenPoolType, 'BurnToAddressTokenPool'>
 
 /**
  * Factory constructor encoding per pool type. Siloed pools use `BURN_MINT` for its five-argument
  * constructor, not its transfer semantics. For new tokens this also grants mint/burn roles to the
- * siloed pool; its per-lane lockboxes must still be configured after deployment.
+ * siloed pool; its per-lane lockboxes must still be configured after deployment. Revoke these
+ * unused roles afterward: the token's `DEFAULT_ADMIN_ROLE` holder calls
+ * `grantRole(BURN_MINT_ADMIN_ROLE, cleanupAccount)`, then that account calls
+ * `revokeRole(MINTER_ROLE, pool)` and `revokeRole(BURNER_ROLE, pool)`. The cleanup account may then
+ * call `renounceRole(BURN_MINT_ADMIN_ROLE, cleanupAccount)` if its admin role was temporary.
  */
 const FACTORY_POOL_FAMILY = {
   BurnMintTokenPool: 'BurnMint',
   BurnFromMintTokenPool: 'BurnMint',
   BurnWithFromMintTokenPool: 'BurnMint',
+  BurnMintWithLockReleaseFlagTokenPool: 'BurnMint',
   LockReleaseTokenPool: 'LockRelease',
   SiloedLockReleaseTokenPool: 'BurnMint',
 } as const satisfies Record<FactoryTokenPoolType, FactoryPoolFamily>
@@ -149,7 +154,7 @@ export type FactoryDeployCommon = {
 
 /** Parameters for {@link deployTokenAndTokenPoolViaFactory}. */
 export type DeployTokenAndTokenPoolViaFactoryParams = FactoryDeployCommon & {
-  /** Local pool type; supports every {@link DeployableTokenPoolType}. */
+  /** Local pool type; supports every {@link DeployableTokenPoolType} except BurnToAddressTokenPool. */
   type: FactoryTokenPoolType
   /** CrossChainToken constructor inputs; `ccipAdmin` and `burnMintRoleAdmin` are forced to the factory. */
   token: {
