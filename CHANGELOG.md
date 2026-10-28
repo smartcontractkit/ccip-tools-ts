@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - CCT SDK (EVM): `generateUnsignedTransferAdmin` and `generateUnsignedAcceptAdmin` take an optional `sender`, as `registerAdmin` does; without it the admin check is skipped and the registration checks still run
+- CCT SDK (EVM): `setChainRateLimiterConfigs` checks for duplicates per lane and `fastFinality` (omitted counts as `false`), so a v2.0.0 update can set both the finalized and the fast-finality limit for the same lane
 - CCT SDK (EVM): `getTokenPoolState` reads the USDC/CCTP token pools; other ops still reject them
 - CCT SDK (EVM): `deployTokenPool` deploys `BurnMintWithLockReleaseFlagTokenPool` v2.0.0
 - CCT SDK (EVM): `deployTokenPool` deploys `BurnToAddressTokenPool` v2.0.0 and `getBurnAddress` reads its burn address
