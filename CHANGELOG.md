@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CCT SDK (EVM): `getTokenPoolState` reads the USDC/CCTP token pools; other ops still reject them
 - CCT SDK (EVM): `deployTokenPool` deploys `BurnMintWithLockReleaseFlagTokenPool` v2.0.0
 - CCT SDK (EVM): `deployTokenPool` deploys `BurnToAddressTokenPool` v2.0.0 and `getBurnAddress` reads its burn address
 - Sui: support gRPC endpoints. Sui's public fullnodes no longer serve JSON-RPC; `SuiChain.fromUrl` now detects gRPC-Web on an `http(s)` URL (e.g. `https://fullnode.testnet.sui.io:443`), falling back to JSON-RPC
