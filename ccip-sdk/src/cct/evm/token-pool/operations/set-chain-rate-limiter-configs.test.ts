@@ -262,6 +262,24 @@ describe('SetChainRateLimiterConfigs (cct/evm)', () => {
       assert.equal(unsigned.transactions[0]!.data, v2Data([true, false]))
     })
 
+    it('sets both the finalized and fast-finality buckets of one lane on a 2.0.0 pool', async () => {
+      const unsigned = await generate(stubChain({ version: TokenPoolVersion.V2_0_0 }), {
+        updates: [
+          { ...UPDATES[0]!, fastFinality: false },
+          { ...UPDATES[1]!, remoteChainSelector: ETHEREUM, fastFinality: true },
+        ],
+      })
+      const expected = new Interface([
+        'function setRateLimitConfig((uint64 remoteChainSelector, bool fastFinality, (bool isEnabled, uint128 capacity, uint128 rate) outboundRateLimiterConfig, (bool isEnabled, uint128 capacity, uint128 rate) inboundRateLimiterConfig)[] rateLimitConfigArgs)',
+      ]).encodeFunctionData('setRateLimitConfig', [
+        [
+          [ETHEREUM, false, [true, 1_000_000n, 100n], [true, 2_000_000n, 200n]],
+          [ETHEREUM, true, [false, 0n, 0n], [false, 0n, 0n]],
+        ],
+      ])
+      assert.equal(unsigned.transactions[0]!.data, expected)
+    })
+
     it('omits from when sender is not supplied', async () => {
       const unsigned = await generate(stubChain(), { sender: undefined })
       assert.equal(unsigned.transactions[0]!.from, undefined)
@@ -363,6 +381,37 @@ describe('SetChainRateLimiterConfigs (cct/evm)', () => {
         name: 'a duplicate remoteChainSelector',
         param: 'updates[1].remoteChainSelector',
         overrides: { updates: [UPDATES[0]!, { ...UPDATES[1]!, remoteChainSelector: ETHEREUM }] },
+      },
+      {
+        name: 'a repeated (remoteChainSelector, fastFinality: true) pair',
+        param: 'updates[1].remoteChainSelector',
+        overrides: {
+          updates: [
+            { ...UPDATES[0]!, fastFinality: true },
+            { ...UPDATES[1]!, remoteChainSelector: ETHEREUM, fastFinality: true },
+          ],
+        },
+      },
+      {
+        name: 'an omitted fastFinality repeating an explicit fastFinality: false for the same lane',
+        param: 'updates[1].remoteChainSelector',
+        overrides: {
+          updates: [
+            { ...UPDATES[0]!, fastFinality: false },
+            { ...UPDATES[1]!, remoteChainSelector: ETHEREUM },
+          ],
+        },
+      },
+      {
+        name: 'both buckets of one lane on a pre-2.0.0 pool, which has no fastFinality',
+        param: 'updates[1].fastFinality',
+        overrides: {
+          updates: [
+            UPDATES[0]!,
+            { ...UPDATES[1]!, remoteChainSelector: ETHEREUM, fastFinality: true },
+          ],
+        },
+        version: TokenPoolVersion.V1_5_1,
       },
       {
         name: 'a non-uint64 remoteChainSelector',
