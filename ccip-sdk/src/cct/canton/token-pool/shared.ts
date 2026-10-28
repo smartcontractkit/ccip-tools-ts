@@ -15,6 +15,7 @@ import type {
   BurnMintTokenPoolArg,
   InitializeArg,
   LaneDeploySpecArg,
+  LockReleaseTokenPoolArg,
   RateLimiterDeploySpecArg,
 } from '../daml-types.ts'
 import {
@@ -393,20 +394,23 @@ export interface PoolCreateArgsInput {
   poolReceiveContext?: PoolReceiveContext
   /** Transfer timeout (default: `RelativeHours 24`, matching Go). */
   transferTimeout?: TransferTimeout
+  /** Pool type — lock-release create args carry an extra mandatory field. */
+  poolType?: PoolType
+  /** Holdings labels for lock-release pools (default: empty). Ignored for burn-mint. */
+  poolReceiveMetadata?: Record<string, string>
 }
 
 /**
  * Build the full `BurnMintTokenPool`/`LockReleaseTokenPool` create-arguments
- * record (identical field shape for both — `LockReleaseTokenPool` shares the
- * same fields). Shared by the `Initialize`-atomic-deploy path
- * (`deploy-token-pool.ts`) and the standalone bare-create path.
- *
- * Typed against the `BurnMintTokenPool` binding; `LockReleaseTokenPool` is a
- * separate generated package but shares the identical field shape, so this
- * return type is structurally valid for both.
+ * record. `LockReleaseTokenPool` shares the burn-mint fields but adds a
+ * mandatory `poolReceiveMetadata` (holdings labels) — included when
+ * `p.poolType === 'lockRelease'`. Shared by the `Initialize`-atomic-deploy
+ * path (`deploy-token-pool.ts`) and the standalone bare-create path.
  */
-export function buildPoolCreateArguments(p: PoolCreateArgsInput): BurnMintTokenPoolArg {
-  return {
+export function buildPoolCreateArguments(
+  p: PoolCreateArgsInput,
+): BurnMintTokenPoolArg | LockReleaseTokenPoolArg {
+  const args: BurnMintTokenPoolArg = {
     instanceId: p.instanceId,
     poolOwner: p.poolOwner,
     ccipOwner: p.ccipOwner,
@@ -426,6 +430,11 @@ export function buildPoolCreateArguments(p: PoolCreateArgsInput): BurnMintTokenP
       feeQuoter: rawInstanceAddress(p.deps.feeQuoter),
     },
   }
+  // LockReleaseTokenPool has one extra mandatory field the burn-mint template lacks.
+  if (p.poolType === 'lockRelease') {
+    return { ...args, poolReceiveMetadata: { values: p.poolReceiveMetadata ?? {} } }
+  }
+  return args
 }
 
 /**

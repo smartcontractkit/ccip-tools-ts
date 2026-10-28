@@ -60,6 +60,11 @@ function mockChain(
     network: { family: ChainFamily.Canton, chainId },
     ccipParty: CCIP_OWNER,
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    // ledger reads used by findActiveContractsByTemplate (e.g. preapproval lookup)
+    provider: {
+      getLedgerEnd: async () => ({ offset: 1 }),
+      getActiveContracts: async () => [],
+    },
     // stubbed failure (not undefined) forces the ACS-fallback branch of resolveTar
     edsDisclosureProvider: {
       fetchContractDisclosure: async () => {
@@ -184,6 +189,48 @@ describe('deployTokenPool command building', () => {
     assert.equal(choiceArgument.tokenAdminRegistryCid, TAR_CID)
     assert.equal(choiceArgument.admin, POOL_OWNER)
     assert.equal(choiceArgument.existingTokenConfigCid, null)
+  })
+
+  it('includes poolReceiveMetadata only for lock-release pools', async () => {
+    const burnMint = await op.generate(mockChain('canton:TestNet'), baseParams())
+    assert.equal(createAndExercise(burnMint).createArguments.poolReceiveMetadata, undefined)
+
+    const lockRelease = await op.generate(
+      mockChain('canton:TestNet'),
+      baseParams({ poolType: 'lockRelease', poolReceiveMetadata: { origin: 'test' } }),
+    )
+    const cmd = createAndExercise(lockRelease)
+    assert.match(cmd.templateId, /lock-release/)
+    assert.deepEqual(cmd.createArguments.poolReceiveMetadata, { values: { origin: 'test' } })
+  })
+
+  it('auto-wires a transfer preapproval into lock-release poolReceiveContext', async () => {
+    const chain = mockChain('canton:TestNet', {
+      findActiveContractsByTemplate: async () => [
+        {
+          contractId: 'preapproval-cid-1',
+          createArgument: {
+            receiver: POOL_OWNER,
+            instrumentAdmin: POOL_OWNER,
+            instrumentAllowances: [], // empty = all instruments of the admin
+          },
+        },
+      ],
+    })
+    const tx = await op.generate(chain, baseParams({ poolType: 'lockRelease' }))
+    assert.deepEqual(createAndExercise(tx).createArguments.poolReceiveContext, {
+      values: { 'transfer-preapproval': { tag: 'AV_ContractId', value: 'preapproval-cid-1' } },
+    })
+  })
+
+  it('leaves poolReceiveContext untouched for burn-mint', async () => {
+    const chain = mockChain('canton:TestNet', {
+      findActiveContractsByTemplate: async () => {
+        throw new Error('should not be called for burn-mint')
+      },
+    })
+    const tx = await op.generate(chain, baseParams())
+    assert.deepEqual(createAndExercise(tx).createArguments.poolReceiveContext, { values: {} })
   })
 
   it('deduplicates actAs when poolOwner and admin are the same party', async () => {

@@ -56,6 +56,8 @@ import {
   type ExecuteSetRateLimitConfigResult,
   type ExecuteSetRateLimiterReferencesParams,
   type ExecuteSetRateLimiterReferencesResult,
+  type ExecuteSetPoolReceiveMetadataParams,
+  type ExecuteSetPoolReceiveMetadataResult,
   type ExecuteSetRateLimiterObserversParams,
   type ExecuteSetRateLimiterObserversResult,
   type ExecuteSetTransferTimeoutParams,
@@ -82,6 +84,8 @@ import {
   type GenerateSetRateLimitConfigResult,
   type GenerateSetRateLimiterReferencesParams,
   type GenerateSetRateLimiterReferencesResult,
+  type GenerateSetPoolReceiveMetadataParams,
+  type GenerateSetPoolReceiveMetadataResult,
   type GenerateSetRateLimiterObserversParams,
   type GenerateSetRateLimiterObserversResult,
   type GenerateSetTransferTimeoutParams,
@@ -98,6 +102,7 @@ import {
   type SetObserversParams,
   type SetRateLimitConfigParams,
   type SetRateLimiterReferencesParams,
+  type SetPoolReceiveMetadataParams,
   type SetRateLimiterObserversParams,
   type SetTransferTimeoutParams,
   type TokenTransferFeeConfigUpdate,
@@ -111,6 +116,7 @@ import {
   GetTokenPoolState,
   RemovePoolReceiveContextValue,
   SetDynamicConfig,
+  SetPoolReceiveMetadata,
   SetObservers,
   SetRateLimitConfig,
   SetRateLimiterReferences,
@@ -134,6 +140,7 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   readonly #setRateLimitConfig = new SetRateLimitConfig()
   readonly #setRateLimiterReferences = new SetRateLimiterReferences()
   readonly #setRateLimiterObservers = new SetRateLimiterObservers()
+  readonly #setPoolReceiveMetadata = new SetPoolReceiveMetadata()
   readonly #setTransferTimeout = new SetTransferTimeout()
   readonly #setObservers = new SetObservers()
   readonly #setDynamicConfig = new SetDynamicConfig()
@@ -258,6 +265,24 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
     opts: ExecuteSetRateLimiterObserversParams,
   ): Promise<ExecuteSetRateLimiterObserversResult> {
     return this.#setRateLimiterObservers.execute(this.chain, opts)
+  }
+
+  /** Builds unsigned `setPoolReceiveMetadata` commands. */
+  async generateUnsignedSetPoolReceiveMetadata(
+    opts: GenerateSetPoolReceiveMetadataParams,
+  ): Promise<GenerateSetPoolReceiveMetadataResult> {
+    return this.#setPoolReceiveMetadata.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets a lock-release pool's holdings-disclosure labels (e.g.
+   * `{ "cip-112/receiver.id": "ccip-public" }` to publicly disclose the lockbox
+   * via DA's holdings API). Lock-release pools only.
+   */
+  async setPoolReceiveMetadata(
+    opts: ExecuteSetPoolReceiveMetadataParams,
+  ): Promise<ExecuteSetPoolReceiveMetadataResult> {
+    return this.#setPoolReceiveMetadata.execute(this.chain, opts)
   }
 
   /** Builds unsigned `setTransferTimeout` commands. */
@@ -407,6 +432,7 @@ export {
   GetTokenPoolState,
   RemovePoolReceiveContextValue,
   SetDynamicConfig,
+  SetPoolReceiveMetadata,
   SetObservers,
   SetRateLimitConfig,
   SetRateLimiterReferences,
@@ -431,6 +457,7 @@ export type {
   RateLimiterReferenceUpdate,
   RemovePoolReceiveContextValueParams,
   SetDynamicConfigParams,
+  SetPoolReceiveMetadataParams,
   SetObserversParams,
   SetRateLimitConfigParams,
   SetRateLimiterReferencesParams,

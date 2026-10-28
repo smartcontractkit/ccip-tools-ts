@@ -37,6 +37,11 @@ export type ChoiceContextArg = {
   values: Record<string, unknown>
 }
 
+/** `Splice.Api.Token.MetadataV1.Metadata` (values is a TextMap Text → JSON object). */
+export type MetadataArg = {
+  values: Record<string, string>
+}
+
 // ─── CCIP.CodecV2 ──────────────────────────────────────────────────────────
 
 /** `CCIP.CodecV2.FinalityConfig.FinalityConfig` — WaitForFinality | WaitForSafe | BlockDepth Int. */
@@ -80,6 +85,12 @@ export type BurnMintTokenPoolArg = {
   poolReceiveContext: ChoiceContextArg
   transferTimeout: TransferTimeoutArg
   deps: PoolDepsArg
+}
+
+/** `LockReleaseTokenPool` create arguments — the burn-mint fields plus holdings labels. */
+export type LockReleaseTokenPoolArg = BurnMintTokenPoolArg & {
+  /** Labels on pool-owned holdings (for DA's holdings disclosure API). Mandatory on this template. */
+  poolReceiveMetadata: MetadataArg
 }
 
 /** `RateLimiterDeploySpec` (per-lane rate limiter to deploy via Initialize). */

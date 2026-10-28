@@ -74,6 +74,15 @@ export {
 } from './set-rate-limiter-observers.ts'
 
 export {
+  type ExecuteSetPoolReceiveMetadataParams,
+  type ExecuteSetPoolReceiveMetadataResult,
+  type GenerateSetPoolReceiveMetadataParams,
+  type GenerateSetPoolReceiveMetadataResult,
+  type SetPoolReceiveMetadataParams,
+  SetPoolReceiveMetadata,
+} from './set-pool-receive-metadata.ts'
+
+export {
   type ExecuteSetTransferTimeoutParams,
   type ExecuteSetTransferTimeoutResult,
   type GenerateSetTransferTimeoutParams,

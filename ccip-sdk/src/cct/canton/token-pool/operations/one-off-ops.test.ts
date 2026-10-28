@@ -27,6 +27,7 @@ import {
   RemovePoolReceiveContextValue,
 } from './pool-receive-context.ts'
 import { SetDynamicConfig } from './set-dynamic-config.ts'
+import { SetPoolReceiveMetadata } from './set-pool-receive-metadata.ts'
 import { SetObservers } from './set-observers.ts'
 import { SetRateLimitConfig } from './set-rate-limit-config.ts'
 import { SetRateLimiterObservers } from './set-rate-limiter-observers.ts'
@@ -65,7 +66,7 @@ function activeContract(
 }
 
 /** Chain mock: ACS holds one burn-mint pool at {@link POOL_ADDRESS} and one limiter per `rl-*` instance ID. */
-function mockChain() {
+function mockChain(poolTemplateId = BURN_MINT_POOL_TEMPLATE_ID) {
   const provider = {
     getLedgerEnd: async () => ({ offset: 1 }),
     getActiveContracts: async (req: {
@@ -91,7 +92,7 @@ function mockChain() {
       }
       assert.ok(POOL_TEMPLATES.some((t) => templates.includes(t)))
       return [
-        activeContract(BURN_MINT_POOL_TEMPLATE_ID, '#pool', 'pool-1', POOL_OWNER, {
+        activeContract(poolTemplateId, '#pool', 'pool-1', POOL_OWNER, {
           poolOwner: POOL_OWNER,
         }),
       ]
@@ -275,6 +276,37 @@ describe('setTransferTimeout', () => {
         /transferTimeout/,
       )
     }
+  })
+})
+
+describe('setPoolReceiveMetadata', () => {
+  const op = new SetPoolReceiveMetadata()
+
+  it('encodes the metadata labels', async () => {
+    const tx = await op.generate(mockChain(LOCK_RELEASE_POOL_TEMPLATE_ID), {
+      ...POOL,
+      ...SENDER,
+      metadata: { 'cip-112/receiver.id': 'ccip-public' },
+    })
+    assert.equal(exercise(tx).choice, 'SetPoolReceiveMetadata')
+    assert.deepEqual(exercise(tx).choiceArgument, {
+      metadata: { values: { 'cip-112/receiver.id': 'ccip-public' } },
+    })
+  })
+
+  it('rejects burn-mint pools and empty metadata', async () => {
+    await assert.rejects(
+      op.generate(mockChain(), {
+        ...POOL,
+        ...SENDER,
+        metadata: { 'cip-112/receiver.id': 'ccip-public' },
+      }),
+      /lock-release/,
+    )
+    await assert.rejects(
+      op.generate(mockChain(LOCK_RELEASE_POOL_TEMPLATE_ID), { ...POOL, ...SENDER, metadata: {} }),
+      /metadata/,
+    )
   })
 })
 
