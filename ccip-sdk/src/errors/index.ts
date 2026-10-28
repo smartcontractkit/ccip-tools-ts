@@ -147,6 +147,7 @@ export {
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenPoolInfoNotFoundError,
   CCIPTokenPoolStateNotFoundError,
+  CCIPTokenPoolTokenRequiredError,
   CCIPTopicsInvalidError,
   CCIPTransactionNotFinalizedError,
 } from './specialized.ts'

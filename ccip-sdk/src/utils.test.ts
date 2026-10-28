@@ -5,7 +5,7 @@ import { setFlagsFromString } from 'node:v8'
 import { runInNewContext } from 'node:vm'
 
 import { NATIVE_MINT } from '@solana/spl-token'
-import { dataLength } from 'ethers'
+import { AbiCoder, dataLength } from 'ethers'
 
 import { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
@@ -1497,6 +1497,29 @@ describe('getSourceDecimalsFromExtraData', () => {
     ]) {
       assert.equal(getSourceDecimalsFromExtraData(extraData), undefined, String(extraData))
     }
+  })
+
+  describe('multi-token pool long pool data', () => {
+    const coder = AbiCoder.defaultAbiCoder()
+    const sourceToken = coder.encode(['address'], ['0x8FE4D867DB59E38E7bA7D98DC14ac1826c79CF9f'])
+    const long = (decimals: bigint, additionalPoolData = '0x') =>
+      coder.encode(['uint256', 'bytes', 'bytes'], [decimals, sourceToken, additionalPoolData])
+
+    it('reads the decimals of the 192-byte form and with additional pool data', () => {
+      assert.equal(getDataBytes(long(6n)).length, 192)
+      assert.equal(getSourceDecimalsFromExtraData(long(6n)), 6)
+      assert.equal(getDataBytes(long(18n, word(42n))).length, 224)
+      assert.equal(getSourceDecimalsFromExtraData(long(18n, word(42n))), 18)
+      assert.equal(getSourceDecimalsFromExtraData(long(0n, '0x1234')), 0)
+    })
+
+    it('declares nothing for implausible decimals or non-canonical payloads', () => {
+      assert.equal(getSourceDecimalsFromExtraData(long(37n)), undefined)
+      // a 192-byte payload of other words: offsets do not decode to the long form
+      assert.equal(getSourceDecimalsFromExtraData('0x' + word(6n).slice(2).repeat(6)), undefined)
+      // the long form with trailing junk does not re-encode to the same bytes
+      assert.equal(getSourceDecimalsFromExtraData(long(6n) + word(1n).slice(2)), undefined)
+    })
   })
 })
 
