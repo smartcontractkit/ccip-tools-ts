@@ -3506,9 +3506,9 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned pool deployment tx (for multisig / offline signing). `type` selects
    * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
-   * `BurnWithFromMintTokenPool`, `BurnToAddressTokenPool`, `LockReleaseTokenPool`, or
-   * `SiloedLockReleaseTokenPool`; all v2.0.0). `BurnToAddressTokenPool` additionally requires
-   * `burnAddress` ({@link DeployBurnToAddressTokenPoolParams}).
+   * `BurnWithFromMintTokenPool`, `BurnToAddressTokenPool`, `BurnMintWithLockReleaseFlagTokenPool`,
+   * `LockReleaseTokenPool`, or `SiloedLockReleaseTokenPool`; all v2.0.0). `BurnToAddressTokenPool`
+   * additionally requires `burnAddress` ({@link DeployBurnToAddressTokenPoolParams}).
    * The deployed address is only known once mined, so it is NOT returned here; use
    * {@link deployTokenPool} to receive `{ hash, contractAddress, verification }`.
    * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
@@ -3554,7 +3554,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * takes no `lockbox`; its lockboxes are bound per lane after deploy with
    * {@link configureSiloedLockboxes} (see {@link DeploySiloedLockReleaseTokenPoolParams}). `BurnToAddressTokenPool` requires an
    * immutable, non-zero `burnAddress` and burns by transferring to it, so it only needs the mint
-   * role ({@link DeployBurnToAddressTokenPoolParams}).
+   * role ({@link DeployBurnToAddressTokenPoolParams}). `BurnMintWithLockReleaseFlagTokenPool` only
+   * fits lanes whose remote pool reads its `LOCK_RELEASE_FLAG` ({@link DeployBurnMintTokenPoolParams}).
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid

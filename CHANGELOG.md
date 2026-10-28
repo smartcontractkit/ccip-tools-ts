@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CCT SDK (EVM): `deployTokenPool` deploys `BurnMintWithLockReleaseFlagTokenPool` v2.0.0
 - CCT SDK (EVM): `deployTokenPool` deploys `BurnToAddressTokenPool` v2.0.0 and `getBurnAddress` reads its burn address
 - Sui: support gRPC endpoints. Sui's public fullnodes no longer serve JSON-RPC; `SuiChain.fromUrl` now detects gRPC-Web on an `http(s)` URL (e.g. `https://fullnode.testnet.sui.io:443`), falling back to JSON-RPC
 - EVM: `getTokenInfo` throws the new typed `CCIPTokenDecimalsUnavailableError` (code `TOKEN_DECIMALS_UNAVAILABLE`) when a token does not implement the optional ERC-20 `decimals()` view, instead of the raw provider error; `name()` is best-effort. `getTokenPoolConfig` exposes the pool's declared decimals (`getTokenDecimals()`, pool v1.5.1+) as the new optional `decimals` field; v1.5.0 pools predate it and stay readable without it
