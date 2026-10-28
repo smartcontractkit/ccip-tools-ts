@@ -472,11 +472,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Two-step by design: `newAdmin` must separately call `acceptAdmin` to complete the
    * handoff. This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
    * (see {@link transferPoolOwnership}); do not confuse the two.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if `sender` is not the
-   * token's current registry administrator (including a not-yet-accepted registration)
+   * @remarks `sender` is optional, so calldata can be built for a multisig admin: omitting it
+   * skips the current-administrator check, and a wrong signer then only fails on-chain. The token
+   * must still be registered and accepted.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, the token is not registered
+   * (including a not-yet-accepted registration), or `sender` is given and is not the token's
+   * current registry administrator
    * @example
    * ```typescript
-   * // `sender` must be the token's current registry administrator
+   * // `sender` (optional): the token's current registry administrator
    * const unsigned = await cct.generateUnsignedTransferAdmin({
    *   tokenAddress: '0xToken...',
    *   newAdmin: '0xNewAdmin...', // must separately call acceptAdmin
@@ -519,14 +523,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned `acceptAdminRole` tx (for multisig / offline signing). Second half of
    * the two-step admin handshake: a registry module's `registerAdmin` (fresh registration) or
-   * the current admin's `transferAdmin` (hand-off) proposes `opts.sender` as
-   * `pendingAdministrator`; `acceptAdmin` then confirms it on-chain before encoding, after which
-   * {@link setPool} becomes callable by the new administrator.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is not the
-   *   pending administrator
+   * the current admin's `transferAdmin` (hand-off) proposes a `pendingAdministrator`, and
+   * `acceptAdmin` confirms one is pending on-chain before encoding. The new administrator can then
+   * call {@link setPool}.
+   * @remarks `sender` is optional, so calldata can be built for a multisig admin: omitting it
+   * skips the pending-administrator check, and a wrong signer then only fails on-chain. An
+   * administrator must still be pending.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, no administrator is pending,
+   *   or `sender` is given and is not the pending administrator
    * @example
    * ```typescript
-   * // `sender` must be the pending administrator proposed by registerAdmin/transferAdmin
+   * // `sender` (optional): the pending administrator from registerAdmin/transferAdmin
    * const unsigned = await cct.generateUnsignedAcceptAdmin({
    *   tokenAddress: '0xToken...',
    *   address: '0xTokenAdminRegistry...', // the TAR, or a Router/pool to resolve it from
