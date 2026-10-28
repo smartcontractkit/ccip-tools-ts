@@ -414,6 +414,34 @@ describe('TOKEN_POOL_INTERFACES', () => {
     }
   })
 
+  // Compares every pair of cells, so it fails both when two cells with the same ABI stop sharing
+  // an instance and when two different ABIs get collapsed onto one.
+  it('shares an Interface between two type/version cells exactly when they declare the same ABI', () => {
+    const cells = TOKEN_POOL_TYPES.flatMap((type) =>
+      Object.entries(TOKEN_POOL_INTERFACES[type]).map(([version, iface]) => ({
+        cell: `${type}@${version}`,
+        iface,
+        json: iface.formatJson(),
+      })),
+    )
+    for (const a of cells)
+      for (const b of cells)
+        assert.equal(a.iface === b.iface, a.json === b.json, `${a.cell} vs ${b.cell}`)
+  })
+
+  // Catches a copy-pasted row: every type points at a distinct vendored ABI per version.
+  it('gives each type a distinct Interface per version', () => {
+    for (const type of TOKEN_POOL_TYPES) {
+      const ifaces = Object.values(TOKEN_POOL_INTERFACES[type])
+      assert.equal(new Set(ifaces).size, ifaces.length, type)
+    }
+  })
+
+  it('keeps per-type version keys after derivation, so an unshipped pair is a type error', () => {
+    // @ts-expect-error -- BurnToAddressTokenPool never shipped at 1.5.0
+    assert.equal(TOKEN_POOL_INTERFACES.BurnToAddressTokenPool['1.5.0'], undefined)
+  })
+
   it('uses the *_and_proxy variant at V1_5_0 (exposes getPreviousPool)', () => {
     assert.ok(
       TOKEN_POOL_INTERFACES.BurnMintTokenPool[TokenPoolVersion.V1_5_0].hasFunction(

@@ -1,5 +1,7 @@
 /**
- * EVM token-pool contract layer for CCT: cached {@link Interface}s + on-chain type/version
+ * EVM token-pool contract layer for CCT: one vendored ABI table keyed by type then
+ * version (`TOKEN_POOL_ABIS`, unexported) that types the `read*` helpers and builds the cached
+ * {@link Interface}s ({@link TOKEN_POOL_INTERFACES}) + on-chain type/version
  * resolution ({@link resolveTokenPool}, {@link getTokenPoolInterface}, floor-matched via
  * {@link resolveEncoder}) for read/write ops, plus the deployable pools' creation artifacts
  * ({@link getTokenPoolArtifact}), the narrow role reads every owner-gated write pre-flights
@@ -20,7 +22,8 @@
  * @packageDocumentation
  */
 
-import { Interface, ZeroAddress, getAddress, isError } from 'ethers'
+import type { Abi } from 'abitype'
+import { type InterfaceAbi, Interface, ZeroAddress, getAddress, isError } from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { TokenTransferFeeConfig } from '../../../chain.ts'
@@ -205,7 +208,10 @@ export async function resolveTokenPool(
 }
 
 /** `Ownable2Step.owner()`, identical across all supported pool types and versions. */
-type PoolOwnerGetter = Pick<TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>, 'owner'>
+type PoolOwnerGetter = Pick<
+  TypedContract<(typeof TOKEN_POOL_ABIS)['BurnMintTokenPool'][typeof TokenPoolVersion.V1_5_0]>,
+  'owner'
+>
 
 /**
  * Pre-flights `sender` against the pool's on-chain `owner()` for an owner-gated write, so an
@@ -357,17 +363,82 @@ export function assertSiloedLockReleasePool(
 }
 
 /** `BurnMint` ABI per version it shipped at, shared by every burn-* type that declares nothing more. */
-const BURN_MINT_INTERFACES = {
-  [TokenPoolVersion.V1_5_0]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_0_ABI),
-  [TokenPoolVersion.V1_5_1]: new Interface(BURN_MINT_TOKEN_POOL_V1_5_1_ABI),
-  [TokenPoolVersion.V1_6_1]: new Interface(BURN_MINT_TOKEN_POOL_V1_6_1_ABI),
-  [TokenPoolVersion.V2_0_0]: new Interface(BURN_MINT_TOKEN_POOL_V2_0_0_ABI),
+const BURN_MINT_ABIS = {
+  [TokenPoolVersion.V1_5_0]: BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
+  [TokenPoolVersion.V1_5_1]: BURN_MINT_TOKEN_POOL_V1_5_1_ABI,
+  [TokenPoolVersion.V1_6_1]: BURN_MINT_TOKEN_POOL_V1_6_1_ABI,
+  [TokenPoolVersion.V2_0_0]: BURN_MINT_TOKEN_POOL_V2_0_0_ABI,
+} as const
+
+/**
+ * Vendored pool ABI per {@link TokenPoolType}, at exactly the {@link TokenPoolVersion}s that type
+ * shipped at: the one source for {@link TOKEN_POOL_INTERFACES} and the typed `read*` helpers.
+ * Adding a pool type needs a row here (the `satisfies` fails the build if the row or its
+ * {@link TOKEN_POOL_TYPES} entry is missing) and its family in {@link getTokenPoolFamily}.
+ *
+ * @remarks Kept unexported: an exported reference makes the declaration emitter inline every ABI
+ * literal into the published `.d.ts`.
+ */
+const TOKEN_POOL_ABIS = {
+  BurnMintTokenPool: BURN_MINT_ABIS,
+  BurnFromMintTokenPool: {
+    [TokenPoolVersion.V1_5_1]: BURN_MINT_ABIS[TokenPoolVersion.V1_5_1],
+    [TokenPoolVersion.V1_6_1]: BURN_MINT_ABIS[TokenPoolVersion.V1_6_1],
+    [TokenPoolVersion.V2_0_0]: BURN_MINT_ABIS[TokenPoolVersion.V2_0_0],
+  },
+  BurnWithFromMintTokenPool: BURN_MINT_ABIS,
+  BurnToAddressTokenPool: {
+    [TokenPoolVersion.V1_5_1]: BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_5_1_ABI,
+    [TokenPoolVersion.V1_6_1]: BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_6_1_ABI,
+    [TokenPoolVersion.V2_0_0]: BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_ABI,
+  },
+  BurnMintWithLockReleaseFlagTokenPool: {
+    [TokenPoolVersion.V2_0_0]: BURN_MINT_ABIS[TokenPoolVersion.V2_0_0],
+  },
+  LockReleaseTokenPool: {
+    [TokenPoolVersion.V1_5_0]: LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI,
+    [TokenPoolVersion.V1_5_1]: LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI,
+    [TokenPoolVersion.V1_6_1]: LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI,
+    [TokenPoolVersion.V2_0_0]: LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI,
+  },
+  SiloedLockReleaseTokenPool: {
+    [TokenPoolVersion.V1_6_0]: SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI,
+    [TokenPoolVersion.V1_6_1]: SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI,
+    [TokenPoolVersion.V2_0_0]: SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI,
+  },
+} as const satisfies Record<TokenPoolType, Partial<Record<TokenPoolVersion, Abi & InterfaceAbi>>>
+
+/**
+ * Maps an ABI table to its {@link Interface}s, building one per distinct ABI so types that share
+ * an ABI share the instance.
+ *
+ * @remarks The return type stays inline: a named alias makes the declaration emitter print the
+ * whole ABI table into the `.d.ts`.
+ */
+function toTokenPoolInterfaces<A extends Record<TokenPoolType, Record<string, InterfaceAbi>>>(
+  abis: A,
+): { -readonly [T in keyof A]: { -readonly [V in keyof A[T]]: Interface } } {
+  const built = new Map<InterfaceAbi, Interface>()
+  const toInterface = (abi: InterfaceAbi) => {
+    let iface = built.get(abi)
+    if (!iface) built.set(abi, (iface = new Interface(abi)))
+    return iface
+  }
+  // Object.fromEntries drops the key types, so this one cast restores them
+  return Object.fromEntries(
+    Object.entries(abis).map(([type, versions]) => [
+      type,
+      Object.fromEntries(
+        Object.entries(versions).map(([version, abi]) => [version, toInterface(abi)]),
+      ),
+    ]),
+  ) as { -readonly [T in keyof A]: { -readonly [V in keyof A[T]]: Interface } }
 }
 
 /**
  * Cached pool {@link Interface}s per {@link TokenPoolType}, for exactly the
- * {@link TokenPoolVersion}s that type shipped at, built once from the vendored `artifacts/` ABIs
- * (no per-call `new Interface`). `V1_5_0` uses the `*_and_proxy` variants, the only form
+ * {@link TokenPoolVersion}s that type shipped at, built once from `TOKEN_POOL_ABIS` (no per-call
+ * `new Interface`). `V1_5_0` uses the `*_and_proxy` variants, the only form
  * `@chainlink/contracts-ccip` ships at 1.5.0. Types with the same ABI share the same instance.
  *
  * @remarks The table is the allowlist of pool versions, per type: 1.6.0 shipped only the siloed
@@ -379,34 +450,7 @@ const BURN_MINT_INTERFACES = {
  * @remarks `BurnToAddressTokenPool` has its own ABI: `BurnMint` plus `getBurnAddress()`, and a
  * constructor that appends `burnAddress`.
  */
-export const TOKEN_POOL_INTERFACES = {
-  BurnMintTokenPool: BURN_MINT_INTERFACES,
-  BurnFromMintTokenPool: {
-    [TokenPoolVersion.V1_5_1]: BURN_MINT_INTERFACES[TokenPoolVersion.V1_5_1],
-    [TokenPoolVersion.V1_6_1]: BURN_MINT_INTERFACES[TokenPoolVersion.V1_6_1],
-    [TokenPoolVersion.V2_0_0]: BURN_MINT_INTERFACES[TokenPoolVersion.V2_0_0],
-  },
-  BurnWithFromMintTokenPool: BURN_MINT_INTERFACES,
-  BurnToAddressTokenPool: {
-    [TokenPoolVersion.V1_5_1]: new Interface(BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_5_1_ABI),
-    [TokenPoolVersion.V1_6_1]: new Interface(BURN_TO_ADDRESS_MINT_TOKEN_POOL_V1_6_1_ABI),
-    [TokenPoolVersion.V2_0_0]: new Interface(BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_ABI),
-  },
-  BurnMintWithLockReleaseFlagTokenPool: {
-    [TokenPoolVersion.V2_0_0]: BURN_MINT_INTERFACES[TokenPoolVersion.V2_0_0],
-  },
-  LockReleaseTokenPool: {
-    [TokenPoolVersion.V1_5_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_0_ABI),
-    [TokenPoolVersion.V1_5_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI),
-    [TokenPoolVersion.V1_6_1]: new Interface(LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI),
-    [TokenPoolVersion.V2_0_0]: new Interface(LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI),
-  },
-  SiloedLockReleaseTokenPool: {
-    [TokenPoolVersion.V1_6_0]: new Interface(SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI),
-    [TokenPoolVersion.V1_6_1]: new Interface(SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_1_ABI),
-    [TokenPoolVersion.V2_0_0]: new Interface(SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI),
-  },
-} satisfies Record<TokenPoolType, Partial<Record<TokenPoolVersion, Interface>>>
+export const TOKEN_POOL_INTERFACES = toTokenPoolInterfaces(TOKEN_POOL_ABIS)
 
 /** {@link TOKEN_POOL_INTERFACES} widened for lookup by any type and version. */
 const TOKEN_POOL_INTERFACE_LOOKUP: Record<
@@ -448,7 +492,7 @@ export async function readTokenPoolOwner(chain: EVMChain, poolAddress: string): 
   const pool: PoolOwnerGetter = getTypedContract(
     chain,
     poolAddress,
-    BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V1_5_0],
   )
   return getAddress(resultToObject(await pool.owner()))
 }
@@ -465,7 +509,11 @@ export async function readTokenPoolAllowedFinality(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   return resultToObject(await pool.getAllowedFinalityConfig())
 }
 
@@ -484,7 +532,11 @@ export async function readTokenPoolAdvancedPoolHooks(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   return getAddress(resultToObject(await pool.getAdvancedPoolHooks()))
 }
 
@@ -521,7 +573,11 @@ export async function readTokenPoolFee(
   destChainSelector: bigint,
   requestedFinalityConfig: string,
 ): Promise<TokenPoolFee> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   const fee = await pool.getFee(
     ZeroAddress,
     destChainSelector,
@@ -547,7 +603,11 @@ export async function readTokenPoolTokenTransferFeeConfig(
   finality: string,
   tokenArgs: string,
 ): Promise<TokenTransferFeeConfig> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   const tokenAddress = await pool.getToken()
   const config = await pool.getTokenTransferFeeConfig(
     tokenAddress,
@@ -594,7 +654,7 @@ export async function resolveAllowlistHolder(
  * `AdvancedPoolHooks`. Absent from the v2.0.0 pool itself — resolve the holder first.
  */
 type PoolAllowlistGetter = Pick<
-  TypedContract<typeof BURN_MINT_TOKEN_POOL_V1_5_0_ABI>,
+  TypedContract<(typeof TOKEN_POOL_ABIS)['BurnMintTokenPool'][typeof TokenPoolVersion.V1_5_0]>,
   'getAllowListEnabled' | 'getAllowList'
 >
 
@@ -620,7 +680,7 @@ export async function readTokenPoolAllowlist(
   const pool: PoolAllowlistGetter = getTypedContract(
     chain,
     poolAddress,
-    BURN_MINT_TOKEN_POOL_V1_5_0_ABI,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V1_5_0],
   )
   const [enabled, entries] = await Promise.all([pool.getAllowListEnabled(), pool.getAllowList()])
   return {
@@ -651,7 +711,11 @@ export async function readTokenPoolRateLimitAdmin(
 ): Promise<string> {
   if (version === TokenPoolVersion.V2_0_0)
     return (await readTokenPoolDynamicConfig(chain, poolAddress)).rateLimitAdmin
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V1_5_1],
+  )
   return getAddress(resultToObject(await pool.getRateLimitAdmin()))
 }
 
@@ -667,7 +731,11 @@ export async function readTokenPoolDynamicConfig(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<TokenPoolDynamicConfig> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
+  )
   // Index the raw Result: resultToObject would turn this named tuple into an object.
   const dynamicConfig = await pool.getDynamicConfig()
   return {
@@ -726,7 +794,11 @@ export async function readTokenPoolRebalancer(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.LockReleaseTokenPool[TokenPoolVersion.V1_5_1],
+  )
   return getAddress(resultToObject(await pool.getRebalancer()))
 }
 
@@ -769,7 +841,11 @@ export async function readTokenPoolBurnAddress(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, BURN_TO_ADDRESS_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.BurnToAddressTokenPool[TokenPoolVersion.V2_0_0],
+  )
   return getAddress(resultToObject(await pool.getBurnAddress()))
 }
 
@@ -787,7 +863,11 @@ export async function readTokenPoolBurnAddress(
  * @returns The pool's lockbox, checksummed. Set in the constructor and immutable thereafter.
  */
 export async function readTokenPoolLockbox(chain: EVMChain, poolAddress: string): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.LockReleaseTokenPool[TokenPoolVersion.V2_0_0],
+  )
   return getAddress(resultToObject(await pool.getLockBox()))
 }
 
@@ -807,7 +887,11 @@ export async function readTokenPoolAcceptsLiquidity(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<boolean> {
-  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.LockReleaseTokenPool[TokenPoolVersion.V1_5_1],
+  )
   return resultToObject(await pool.canAcceptLiquidity())
 }
 
@@ -825,7 +909,11 @@ export async function readTokenPoolToken(
   token: string
   erc20: TypedContract<typeof FACTORY_BURN_MINT_ERC20_V1_5_1_ABI>
 }> {
-  const pool = getTypedContract(chain, poolAddress, LOCK_RELEASE_TOKEN_POOL_V1_5_1_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.LockReleaseTokenPool[TokenPoolVersion.V1_5_1],
+  )
   const token = getAddress(resultToObject(await pool.getToken()))
   return {
     token,
@@ -931,7 +1019,11 @@ export async function readTokenPoolLiquidity(
   type: TokenPoolType,
 ): Promise<{ token: string; liquidity: bigint }> {
   if (type === 'SiloedLockReleaseTokenPool') {
-    const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+    const pool = getTypedContract(
+      chain,
+      poolAddress,
+      TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+    )
     const [{ token }, liquidity] = await Promise.all([
       readTokenPoolToken(chain, poolAddress),
       pool.getUnsiloedLiquidity(),
@@ -973,7 +1065,11 @@ export async function readTokenPoolIsSiloed(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<boolean> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+  )
   return resultToObject(await pool.isSiloed(remoteChainSelector))
 }
 
@@ -991,7 +1087,11 @@ export async function readTokenPoolIsSupportedChain(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<boolean> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+  )
   return resultToObject(await pool.isSupportedChain(remoteChainSelector))
 }
 
@@ -1011,7 +1111,11 @@ export async function readTokenPoolChainRebalancer(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+  )
   return getAddress(resultToObject(await pool.getChainRebalancer(remoteChainSelector)))
 }
 
@@ -1031,7 +1135,11 @@ export async function readTokenPoolAvailableTokens(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<bigint> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V1_6_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
+  )
   return resultToObject(await pool.getAvailableTokens(remoteChainSelector))
 }
 
@@ -1196,7 +1304,11 @@ export async function readTokenPoolLockboxConfigs(
   chain: EVMChain,
   poolAddress: string,
 ): Promise<LockboxConfig[]> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V2_0_0],
+  )
   const configs = resultToObject(await pool.getAllLockBoxConfigs())
   return configs.map((config) => ({
     remoteChainSelector: config.remoteChainSelector,
@@ -1219,7 +1331,11 @@ export async function readTokenPoolSiloedLockbox(
   poolAddress: string,
   remoteChainSelector: bigint,
 ): Promise<string> {
-  const pool = getTypedContract(chain, poolAddress, SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_ABI)
+  const pool = getTypedContract(
+    chain,
+    poolAddress,
+    TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V2_0_0],
+  )
   return getAddress(resultToObject(await pool.getLockBox(remoteChainSelector)))
 }
 
