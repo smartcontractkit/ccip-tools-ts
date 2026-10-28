@@ -12,6 +12,7 @@ import {
   CCIPExecTxRevertedError,
   CCIPInsufficientBalanceError,
   CCIPLogsRequiresStartError,
+  CCIPMessageNotVerifiedYetError,
   CCIPNotImplementedError,
   CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
@@ -1767,6 +1768,40 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
+   * Collect a CCIP v2.0 message's execution input by resolving this destination's CCV policy and
+   * fetching the verifications that cover it (API, indexers, extra sources, then the token-verifier
+   * fallback). Used when the API's own execution input cannot be taken as final.
+   *
+   * @param messageId - The v2.0 message id
+   * @param sources - Extra verification sources (`verifiers`, `ccvData`)
+   * @returns The destination OffRamp and the execution input
+   * @throws {@link CCIPApiClientNotAvailableError} if the API client is disabled
+   * @throws {@link CCIPNotImplementedError} if this destination's `getVerifications` is not v2-aware
+   */
+  private async resolveV2ExecuteInput(
+    messageId: string,
+    sources: VerificationSourcesOpts = {},
+  ): Promise<{
+    offRamp: string
+    input: { encodedMessage: string; verifications: VerifierResult[] }
+  }> {
+    if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+    const [request, { offRamp, encodedMessage }] = await Promise.all([
+      this.apiClient.getMessageById(messageId),
+      this.apiClient.getEncodedMessage(messageId),
+    ])
+    const collected = await this.getVerifications({
+      offRamp,
+      request: { ...request, message: { ...request.message, encodedMessage } as CCIPMessage },
+      verifiers: sources.verifiers,
+      ccvData: sources.ccvData,
+    })
+    if (!('verifications' in collected))
+      throw new CCIPNotImplementedError(`${this.constructor.name}.getVerifications for v2.0`)
+    return { offRamp, input: { encodedMessage, verifications: collected.verifications } }
+  }
+
+  /**
    * Resolves {@link ExecuteOpts} that may contain a `messageId` (API shorthand) into the
    * canonical `{ offRamp, input }` form required by {@link generateUnsignedExecute}.
    *
@@ -1796,23 +1831,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     ) {
       // v2 with extra verification sources: collect the verifications against this destination's
       // CCV policy (API, indexers, then those sources) rather than taking the API's as final
-      const [request, { offRamp, encodedMessage }] = await Promise.all([
-        this.apiClient.getMessageById(opts.messageId),
-        this.apiClient.getEncodedMessage(opts.messageId),
-      ])
-      const collected = await this.getVerifications({
-        offRamp,
-        request: { ...request, message: { ...request.message, encodedMessage } as CCIPMessage },
-        verifiers: opts.verifiers,
-        ccvData: opts.ccvData,
-      })
-      if (!('verifications' in collected))
-        throw new CCIPNotImplementedError(`${this.constructor.name}.getVerifications for v2.0`)
-      opts_ = {
-        ...opts,
-        offRamp,
-        input: { encodedMessage, verifications: collected.verifications },
-      }
+      opts_ = { ...opts, ...(await this.resolveV2ExecuteInput(opts.messageId, opts)) }
     } else {
       const messageId =
         'messageId' in opts
@@ -1820,20 +1839,36 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           : 'message' in opts.input
             ? opts.input.message.messageId
             : keccak256(getDataBytes(opts.input.encodedMessage))
-      const { offRamp, ...input } = await this.apiClient.getExecutionInput(messageId)
-      if (
-        'offchainTokenData' in input &&
-        input.message.tokenAmounts.length &&
-        !input.offchainTokenData[0]
-      ) {
-        // sometimes, attestation data may not be available on API, so try again to getOffchainTokenData from attestation providers;
-        const req = await this.apiClient.getMessageById(messageId)
-        input.offchainTokenData = await this.getOffchainTokenData({
-          log: req.log,
-          message: input.message,
-        })
+      try {
+        const { offRamp, ...input } = await this.apiClient.getExecutionInput(messageId)
+        if (
+          'offchainTokenData' in input &&
+          input.message.tokenAmounts.length &&
+          !input.offchainTokenData[0]
+        ) {
+          // sometimes, attestation data may not be available on API, so try again to getOffchainTokenData from attestation providers;
+          const req = await this.apiClient.getMessageById(messageId)
+          input.offchainTokenData = await this.getOffchainTokenData({
+            log: req.log,
+            message: input.message,
+          })
+        }
+        opts_ = { ...opts, offRamp, input }
+      } catch (err) {
+        if (!(err instanceof CCIPMessageNotVerifiedYetError)) throw err
+        // The API has the message but not a set of verifications covering its CCV policy (e.g. a
+        // token verifier has published nothing yet). Collect them ourselves; that path includes
+        // the token-verifier fallback, which composes USDC/CCTP and LBTC/Lombard data from the
+        // issuer's own attestation service.
+        this.logger.debug(
+          'execute: API execution input is not verified yet; collecting verifications locally:',
+          err.message,
+        )
+        opts_ = {
+          ...opts,
+          ...(await this.resolveV2ExecuteInput(messageId, opts as VerificationSourcesOpts)),
+        }
       }
-      opts_ = { ...opts, offRamp, input }
     }
 
     if (

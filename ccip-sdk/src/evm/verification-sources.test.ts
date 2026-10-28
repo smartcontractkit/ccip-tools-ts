@@ -120,6 +120,30 @@ describe('verification sources on the execute-by-messageId path', () => {
     })
     assert.equal((input as { encodedMessage: string }).encodedMessage, ENCODED)
   })
+
+  it('collects verifications locally when the API execution input is not verified yet', async () => {
+    const { chain, apiClient } = setup()
+    apiClient.getExecutionInput.mock.mockImplementation(() =>
+      Promise.reject(new CCIPMessageNotVerifiedYetError(MESSAGE_ID)),
+    )
+    // the token-verifier fallback lives inside getVerifications; its result is what the retry uses
+    Object.assign(chain, {
+      getVerifications: mock.fn(async () => ({
+        verificationPolicy: POLICY,
+        verifications: [{ ccvData: '0xbb', destAddress: B, sourceAddress: '' }],
+      })),
+    })
+
+    const resolved = await chain.resolve({ messageId: MESSAGE_ID, gasLimit: 0 })
+
+    assert.equal(resolved.offRamp, OFFRAMP)
+    assert.deepEqual(resolved.input, {
+      encodedMessage: ENCODED,
+      verifications: [{ ccvData: '0xbb', destAddress: B, sourceAddress: '' }],
+    })
+    assert.equal(apiClient.getExecutionInput.mock.callCount(), 1)
+    assert.equal(apiClient.getEncodedMessage.mock.callCount(), 1)
+  })
 })
 
 // ── token verifier fallback: composes CCTP/Lombard ccvData from the issuer attestation ──
