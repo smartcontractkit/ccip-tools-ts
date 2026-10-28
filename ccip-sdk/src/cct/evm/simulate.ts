@@ -9,12 +9,15 @@
  * @packageDocumentation
  */
 
-import { type Interface, ErrorFragment, Result, isError } from 'ethers'
+import { ErrorFragment, Interface, Result, isError } from 'ethers'
 
 import { getErrorData, parseWithFragment } from '../../evm/errors.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../evm/types.ts'
 import { CCTParamsInvalidError } from '../errors.ts'
+import USDC_TOKEN_POOL_V1_6_2_ABI from './artifacts/abi/V1_6_2/usdc-token-pool.ts'
+import USDC_TOKEN_POOL_CCTP_V2_V1_6_5_ABI from './artifacts/abi/V1_6_5/usdc-token-pool-cctp-v2.ts'
+import USDC_TOKEN_POOL_V1_6_5_ABI from './artifacts/abi/V1_6_5/usdc-token-pool.ts'
 import { REGISTRY_MODULE_OWNER_CUSTOM_INTERFACES } from './token-admin-registry/contracts.ts'
 import { TOKEN_POOL_FACTORY_INTERFACE } from './token-pool-factory/contracts.ts'
 import { validateAddress } from './validate.ts'
@@ -23,12 +26,16 @@ const OPERATION = 'simulateEVMTx'
 
 /**
  * Vendored CCT contracts with errors core `parseWithFragment` doesn't know
- * (`InvalidLockBoxToken`, `CanOnlySelfRegister`, `RequiredRoleNotFound`, ...). Every other
- * vendored CCT error decodes through core; `simulate.test.ts` checks each one.
+ * (`InvalidLockBoxToken`, `CanOnlySelfRegister`, `RequiredRoleNotFound`, the legacy USDC pools'
+ * CCTP errors, ...). Every other vendored CCT error decodes through core; `simulate.test.ts`
+ * checks each one.
  */
 const CCT_ERROR_INTERFACES: readonly Interface[] = [
   TOKEN_POOL_FACTORY_INTERFACE,
   ...Object.values(REGISTRY_MODULE_OWNER_CUSTOM_INTERFACES),
+  new Interface(USDC_TOKEN_POOL_V1_6_2_ABI),
+  new Interface(USDC_TOKEN_POOL_V1_6_5_ABI),
+  new Interface(USDC_TOKEN_POOL_CCTP_V2_V1_6_5_ABI),
 ]
 
 /** Options for {@link simulateEVMTx}. */

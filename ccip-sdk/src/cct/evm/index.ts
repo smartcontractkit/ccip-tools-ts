@@ -101,6 +101,8 @@ import {
   type GetAllowlistResult,
   type GetAvailableTokensParams,
   type GetAvailableTokensResult,
+  type GetBurnAddressParams,
+  type GetBurnAddressResult,
   type GetChainRebalancerParams,
   type GetChainRebalancerResult,
   type GetDynamicConfigParams,
@@ -151,6 +153,7 @@ import {
   GetAllowlist,
   GetAllowlistEnabled,
   GetAvailableTokens,
+  GetBurnAddress,
   GetChainRebalancer,
   GetDynamicConfig,
   GetFee,
@@ -295,6 +298,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #transferLiquidity = new TransferLiquidity()
   readonly #setRebalancer = new SetRebalancer()
   readonly #getRebalancer = new GetRebalancer()
+  readonly #getBurnAddress = new GetBurnAddress()
   readonly #getLockbox = new GetLockbox()
   readonly #provideSiloedLiquidity = new ProvideSiloedLiquidity()
   readonly #withdrawSiloedLiquidity = new WithdrawSiloedLiquidity()
@@ -2444,6 +2448,25 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads the `i_burnAddress` a `BurnToAddressTokenPool` (v1.5.1, v1.6.1, v2.0.0) sends every
+   * outbound amount to.
+   * @remarks Informational, for audit and UX: it is set in the constructor with no setter, so this
+   * confirms a deployed pool burns to the address intended.
+   * @returns The burn address, checksummed.
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is not a `BurnToAddressTokenPool`
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports a version BurnToAddress
+   * never shipped at (1.5.0, or an unknown one)
+   * @example
+   * ```typescript
+   * const burnAddress = await cct.getBurnAddress({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getBurnAddress(opts: GetBurnAddressParams): Promise<GetBurnAddressResult> {
+    return this.#getBurnAddress.query(this.chain, opts)
+  }
+
+  /**
    * Reads the `ERC20LockBox` a v2.0.0 LockRelease pool escrows through — fixed in its constructor
    * and immutable thereafter.
    * @remarks The address {@link depositToLockbox} / {@link withdrawFromLockbox} need: those ops
@@ -3483,8 +3506,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned pool deployment tx (for multisig / offline signing). `type` selects
    * the pool contract — a `DeployableTokenPoolType` (`BurnMintTokenPool`, `BurnFromMintTokenPool`,
-   * `BurnWithFromMintTokenPool`, `LockReleaseTokenPool`, or `SiloedLockReleaseTokenPool`; all
-   * v2.0.0). The deployed address is only known once mined, so it is NOT returned here — use
+   * `BurnWithFromMintTokenPool`, `BurnToAddressTokenPool`, `BurnMintWithLockReleaseFlagTokenPool`,
+   * `LockReleaseTokenPool`, or `SiloedLockReleaseTokenPool`; all v2.0.0). `BurnToAddressTokenPool`
+   * additionally requires `burnAddress` ({@link DeployBurnToAddressTokenPoolParams}).
+   * The deployed address is only known once mined, so it is NOT returned here; use
    * {@link deployTokenPool} to receive `{ hash, contractAddress, verification }`.
    * @remarks Same post-deploy setup caveat as {@link deployTokenPool} — a fresh pool must be
    * registered, role-granted, and lane-configured before it can bridge. `LockReleaseTokenPool`
@@ -3527,7 +3552,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * {@link setPool} → configure lanes → {@link depositToLockbox}. The deposit is not optional: a
    * v2.0.0 pool cannot release until its lockbox holds liquidity. `SiloedLockReleaseTokenPool`
    * takes no `lockbox`; its lockboxes are bound per lane after deploy with
-   * {@link configureSiloedLockboxes} (see {@link DeploySiloedLockReleaseTokenPoolParams}).
+   * {@link configureSiloedLockboxes} (see {@link DeploySiloedLockReleaseTokenPoolParams}). `BurnToAddressTokenPool` requires an
+   * immutable, non-zero `burnAddress` and burns by transferring to it, so it only needs the mint
+   * role ({@link DeployBurnToAddressTokenPoolParams}). `BurnMintWithLockReleaseFlagTokenPool` only
+   * fits lanes whose remote pool reads its `LOCK_RELEASE_FLAG` ({@link DeployBurnMintTokenPoolParams}).
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTParamsInvalidError} if any param is invalid
@@ -3861,10 +3889,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * window that version added, and `state.type === 'LockReleaseTokenPool'` gates its `lockBox`
    * (see the example) — a `SiloedLockReleaseTokenPool` reports no `lockBox`, since it escrows per
    * remote chain (read those with {@link getAllSiloedLockboxConfigs}). For a legacy pool's
-   * `allowList` / `rebalancer`, proxy/USDC pools, or a v1.5.0 `*AndProxy` pool's `previousPool`
-   * (it reads here as its base `type`), use `cct.chain.getTokenPoolConfig()`, the tolerant
-   * transfer-flow read. No pool version exposes a pending-owner getter, so a proposed owner is not
-   * readable here.
+   * `allowList` / `rebalancer`, or a v1.5.0 `*AndProxy` pool's `previousPool` (it reads here as its
+   * base `type`), use `cct.chain.getTokenPoolConfig()`, the tolerant transfer-flow read. No pool
+   * version exposes a pending-owner getter, so a proposed owner is not readable here.
+   * @remarks The one op that reads the USDC/CCTP pools (`USDC_TOKEN_POOL_TYPES`, also at v1.6.2
+   * and v1.6.5): their base state, with no USDC fields. A `USDCTokenPoolProxy` is not a pool and
+   * throws {@link CCTContractTypeInvalidError}: read one of its `getPools()` instead.
    * @remarks The Solana counterpart, `SolanaTokenManager.getTokenPoolState`, returns a different
    * shape: its fields nest under `state.config` where these are flat, it spells `token` /
    * `tokenDecimals` / `rmnProxy` as `config.mint` / `config.decimals` / `config.rmnRemote`, and its

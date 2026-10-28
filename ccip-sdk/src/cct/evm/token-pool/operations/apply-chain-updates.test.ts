@@ -949,7 +949,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       {
         type: 'BurnFromMintTokenPool',
         family: 'BurnMint',
-        versions: [V1_5_0, V1_5_1, V1_6_1, V2_0_0],
+        versions: [V1_5_1, V1_6_1, V2_0_0],
       },
       {
         type: 'BurnWithFromMintTokenPool',
@@ -965,7 +965,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
       {
         type: 'BurnMintWithLockReleaseFlagTokenPool',
         family: 'BurnMint',
-        versions: [V1_5_1, V1_6_1, V2_0_0],
+        versions: [V2_0_0],
       },
       {
         type: 'SiloedLockReleaseTokenPool',
