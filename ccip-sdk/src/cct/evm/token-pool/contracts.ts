@@ -23,7 +23,14 @@
  */
 
 import type { Abi } from 'abitype'
-import { type InterfaceAbi, Interface, ZeroAddress, getAddress, isError } from 'ethers'
+import {
+  type Addressable,
+  type InterfaceAbi,
+  Interface,
+  ZeroAddress,
+  getAddress,
+  isError,
+} from 'ethers'
 import type { TypedContract } from 'ethers-abitype'
 
 import type { TokenTransferFeeConfig } from '../../../chain.ts'
@@ -729,6 +736,58 @@ export async function readTokenPoolTokenTransferFeeConfig(
     TOKEN_POOL_ABIS.BurnMintTokenPool[TokenPoolVersion.V2_0_0],
   )
   const tokenAddress = await pool.getToken()
+  return readTokenTransferFeeConfigFor(pool, tokenAddress, destChainSelector, finality, tokenArgs)
+}
+
+/** A remote CCIP chain selector (`uint64`) plus its token-transfer fee configuration. */
+export type LaneTokenTransferFeeConfig = TokenTransferFeeConfig & {
+  /** CCIP selector of the lane's remote chain. */
+  remoteChainSelector: bigint
+}
+
+/**
+ * Reads a v2.0.0 pool's token-transfer fee config for every lane it reports through
+ * `getSupportedChains()`: `getToken()` and `getSupportedChains()` in parallel, then one
+ * `getTokenTransferFeeConfig` per lane in parallel, so the token is read once, not per lane.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v2.0.0 token pool to read.
+ * @param finality - `bytes4` finality the configs are read for.
+ * @param tokenArgs - Hex-encoded token-pool-specific arguments.
+ * @returns One entry per supported lane, in `getSupportedChains()` order; `[]` when none.
+ */
+export async function readTokenPoolTokenTransferFeeConfigs(
+  chain: EVMChain,
+  poolAddress: string,
+  finality: string,
+  tokenArgs: string,
+): Promise<LaneTokenTransferFeeConfig[]> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  const [tokenAddress, selectors] = await Promise.all([pool.getToken(), pool.getSupportedChains()])
+  return Promise.all(
+    selectors.map(async (remoteChainSelector) => ({
+      remoteChainSelector,
+      ...(await readTokenTransferFeeConfigFor(
+        pool,
+        tokenAddress,
+        remoteChainSelector,
+        finality,
+        tokenArgs,
+      )),
+    })),
+  )
+}
+
+/**
+ * One lane's `getTokenTransferFeeConfig`, shared by the single- and all-lane reads so the token is
+ * passed in rather than re-read per lane.
+ */
+async function readTokenTransferFeeConfigFor(
+  pool: TypedContract<typeof BURN_MINT_TOKEN_POOL_V2_0_0_ABI>,
+  tokenAddress: string | Addressable,
+  destChainSelector: bigint,
+  finality: string,
+  tokenArgs: string,
+): Promise<TokenTransferFeeConfig> {
   const config = await pool.getTokenTransferFeeConfig(
     tokenAddress,
     destChainSelector,
@@ -1042,6 +1101,40 @@ export async function readTokenPoolToken(
 }
 
 /**
+ * Reads a pool's `getTokenDecimals()` in one `eth_call`: the local token decimals the pool was
+ * deployed with, which it scales cross-chain amounts by.
+ * @remarks No dispatch, but callers must resolve the pool and reject v1.5.0 first: the getter is
+ * declared identically by every family from v1.5.1 on, and by none at v1.5.0.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v1.5.1+ token pool to read `getTokenDecimals()` from.
+ * @returns The pool's configured token decimals.
+ */
+export async function readTokenPoolTokenDecimals(
+  chain: EVMChain,
+  poolAddress: string,
+): Promise<number> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
+  return Number(resultToObject(await pool.getTokenDecimals()))
+}
+
+/**
+ * Reads a pool's `isSupportedToken(token)` in one `eth_call`. Declared identically by every pool
+ * type and version, so this needs no dispatch.
+ * @param chain - Chain to read from.
+ * @param poolAddress - Token pool to read.
+ * @param token - Token to ask about.
+ * @returns Whether `token` is the token the pool was deployed for.
+ */
+export async function readTokenPoolIsSupportedToken(
+  chain: EVMChain,
+  poolAddress: string,
+  token: string,
+): Promise<boolean> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_0_ABI)
+  return resultToObject(await pool.isSupportedToken(token))
+}
+
+/**
  * Pre-flights a `provideLiquidity` deposit against the rebalancer's ERC-20 position: it must hold
  * `amount` of the pool's token *and* have approved the pool to pull it, since the pool deposits
  * with `safeTransferFrom`.
@@ -1195,8 +1288,8 @@ export async function readTokenPoolIsSiloed(
 
 /**
  * Reads a pool's `isSupportedChain(remoteChainSelector)` in one `eth_call`.
- * @remarks Declared on the `TokenPool` base, so any family has it; typed here through the v1.6.0
- * siloed ABI because its one caller, `updateSiloDesignations`, needs it there.
+ * @remarks Declared identically on the `TokenPool` base by every type and version, so any pool has
+ * it; typed here through the v1.6.0 siloed ABI because `updateSiloDesignations` reads it there.
  * @param chain - Chain to read from.
  * @param poolAddress - Token pool to read.
  * @param remoteChainSelector - Lane to ask about.
@@ -1213,6 +1306,107 @@ export async function readTokenPoolIsSupportedChain(
     TOKEN_POOL_ABIS.SiloedLockReleaseTokenPool[TokenPoolVersion.V1_6_0],
   )
   return resultToObject(await pool.isSupportedChain(remoteChainSelector))
+}
+
+/**
+ * One direction of a lane's `RateLimiter.TokenBucket`, raw, as the pool's current-state getters
+ * return it: a disabled limiter keeps its fields rather than collapsing to `null`.
+ * @remarks The getters return `_currentTokenBucketState(bucket)`, a view that refills the stored
+ * bucket to the block read before returning it, so `tokens` and `lastUpdated` describe that block,
+ * not what is in storage.
+ */
+export type TokenBucket = {
+  /**
+   * Tokens available at the block read (`uint128`): the value the contract returns, already
+   * refilled on-chain at `rate` up to `capacity`, not a stored balance.
+   */
+  tokens: bigint
+  /**
+   * Unix timestamp in seconds (`uint32`). The getter stamps it with the read block's
+   * `block.timestamp`, so it is not when the bucket was last consumed or configured.
+   */
+  lastUpdated: number
+  /** Whether the limiter is enforced on this direction. */
+  isEnabled: boolean
+  /** Maximum tokens the bucket holds (`uint128`). */
+  capacity: bigint
+  /** Tokens restored to the bucket per second (`uint128`). */
+  rate: bigint
+}
+
+/** A lane's two raw token buckets, from the pool's current rate-limiter state getters. */
+export type TokenPoolRateLimiterState = {
+  /** Bucket limiting tokens received from the remote chain. */
+  inbound: TokenBucket
+  /** Bucket limiting tokens sent to the remote chain. */
+  outbound: TokenBucket
+}
+
+/** Converts a decoded `RateLimiter.TokenBucket`, whose `uint32 lastUpdated` decodes to a bigint. */
+const toTokenBucket = ({
+  tokens,
+  lastUpdated,
+  isEnabled,
+  capacity,
+  rate,
+}: {
+  tokens: bigint
+  lastUpdated: bigint
+  isEnabled: boolean
+  capacity: bigint
+  rate: bigint
+}): TokenBucket => ({ tokens, lastUpdated: Number(lastUpdated), isEnabled, capacity, rate })
+
+/**
+ * Reads a v1.5.0 to v1.6.1 pool's raw rate-limiter state for one lane: one
+ * `getCurrentInboundRateLimiterState(uint64)` and one `getCurrentOutboundRateLimiterState(uint64)`,
+ * in parallel.
+ * @remarks Typed through the v1.5.0 BurnMint ABI: both getters are declared identically by every
+ * type from v1.5.0 to v1.6.1, and by none at v2.0.0. Callers must resolve the pool first. An
+ * unsupported lane does not revert: it reads as a zeroed, disabled bucket, so callers pre-flight
+ * {@link readTokenPoolIsSupportedChain}.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v1.5.0 to v1.6.1 token pool to read.
+ * @param remoteChainSelector - Lane to read.
+ * @returns The lane's inbound and outbound buckets.
+ */
+export async function readTokenPoolCurrentRateLimiterStateV1_5_0(
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+): Promise<TokenPoolRateLimiterState> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_0_ABI)
+  const [inbound, outbound] = await Promise.all([
+    pool.getCurrentInboundRateLimiterState(remoteChainSelector),
+    pool.getCurrentOutboundRateLimiterState(remoteChainSelector),
+  ])
+  return { inbound: toTokenBucket(inbound), outbound: toTokenBucket(outbound) }
+}
+
+/**
+ * Reads a v2.0.0 pool's raw rate-limiter state for one lane in one `eth_call`:
+ * `getCurrentRateLimiterState(uint64, bool fastFinality)`, which returns `(outbound, inbound)`.
+ * @remarks Declared identically by every v2.0.0 pool type. Same unsupported-lane caveat as
+ * {@link readTokenPoolCurrentRateLimiterStateV1_5_0}.
+ * @param chain - Chain to read from.
+ * @param poolAddress - v2.0.0 token pool to read.
+ * @param remoteChainSelector - Lane to read.
+ * @param fastFinality - Read the lane's fast-finality buckets instead of its finalized ones.
+ * @returns The lane's inbound and outbound buckets.
+ */
+export async function readTokenPoolCurrentRateLimiterStateV2_0_0(
+  chain: EVMChain,
+  poolAddress: string,
+  remoteChainSelector: bigint,
+  fastFinality: boolean,
+): Promise<TokenPoolRateLimiterState> {
+  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V2_0_0_ABI)
+  // the getter returns (outbound, inbound), the reverse of this result's field order
+  const [outbound, inbound] = await pool.getCurrentRateLimiterState(
+    remoteChainSelector,
+    fastFinality,
+  )
+  return { inbound: toTokenBucket(inbound), outbound: toTokenBucket(outbound) }
 }
 
 /**

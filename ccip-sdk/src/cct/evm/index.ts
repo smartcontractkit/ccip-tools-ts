@@ -87,12 +87,16 @@ import {
   type ApplyAllowlistUpdatesParams,
   type ApplyChainUpdatesParams,
   type ApplyTokenTransferFeeConfigUpdatesParams,
+  type CanAcceptLiquidityParams,
+  type CanAcceptLiquidityResult,
   type ConfigureSiloedLockboxesParams,
   type DeployTokenPoolParams,
   type GetAdvancedPoolHooksParams,
   type GetAdvancedPoolHooksResult,
   type GetAllSiloedLockboxConfigsParams,
   type GetAllSiloedLockboxConfigsResult,
+  type GetAllTokenTransferFeeConfigsParams,
+  type GetAllTokenTransferFeeConfigsResult,
   type GetAllowedFinalityConfigParams,
   type GetAllowedFinalityConfigResult,
   type GetAllowlistEnabledParams,
@@ -105,24 +109,36 @@ import {
   type GetBurnAddressResult,
   type GetChainRebalancerParams,
   type GetChainRebalancerResult,
+  type GetCurrentRateLimiterStateParams,
+  type GetCurrentRateLimiterStateResult,
   type GetDynamicConfigParams,
   type GetDynamicConfigResult,
   type GetFeeParams,
   type GetFeeResult,
   type GetLockboxParams,
   type GetLockboxResult,
+  type GetRateLimitAdminParams,
+  type GetRateLimitAdminResult,
   type GetRebalancerParams,
   type GetRebalancerResult,
   type GetSiloedLockboxParams,
   type GetSiloedLockboxResult,
+  type GetTokenPoolOwnerParams,
+  type GetTokenPoolOwnerResult,
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
+  type GetTokenPoolTokenDecimalsParams,
+  type GetTokenPoolTokenDecimalsResult,
+  type GetTokenPoolTokenParams,
+  type GetTokenPoolTokenResult,
   type GetTokenTransferFeeConfigParams,
   type GetTokenTransferFeeConfigResult,
   type IsSiloedParams,
   type IsSiloedResult,
+  type IsSupportedTokenParams,
+  type IsSupportedTokenResult,
   type ProvideLiquidityParams,
   type ProvideSiloedLiquidityParams,
   type RemoveRemotePoolParams,
@@ -145,25 +161,33 @@ import {
   ApplyAllowlistUpdates,
   ApplyChainUpdates,
   ApplyTokenTransferFeeConfigUpdates,
+  CanAcceptLiquidity,
   ConfigureSiloedLockboxes,
   DeployTokenPool,
   GetAdvancedPoolHooks,
   GetAllSiloedLockboxConfigs,
+  GetAllTokenTransferFeeConfigs,
   GetAllowedFinalityConfig,
   GetAllowlist,
   GetAllowlistEnabled,
   GetAvailableTokens,
   GetBurnAddress,
   GetChainRebalancer,
+  GetCurrentRateLimiterState,
   GetDynamicConfig,
   GetFee,
   GetLockbox,
+  GetRateLimitAdmin,
   GetRebalancer,
   GetSiloedLockbox,
+  GetTokenPoolOwner,
   GetTokenPoolRemotes,
   GetTokenPoolState,
+  GetTokenPoolToken,
+  GetTokenPoolTokenDecimals,
   GetTokenTransferFeeConfig,
   IsSiloed,
+  IsSupportedToken,
   ProvideLiquidity,
   ProvideSiloedLiquidity,
   RemoveRemotePool,
@@ -274,6 +298,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #acceptPoolOwnership = new AcceptPoolOwnership()
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
+  readonly #getTokenPoolOwner = new GetTokenPoolOwner()
+  readonly #getTokenPoolToken = new GetTokenPoolToken()
+  readonly #getTokenPoolTokenDecimals = new GetTokenPoolTokenDecimals()
+  readonly #isSupportedToken = new IsSupportedToken()
   readonly #setRemotePool = new SetRemotePool()
   readonly #addRemotePool = new AddRemotePool()
   readonly #removeRemotePool = new RemoveRemotePool()
@@ -283,14 +311,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #getAllowlistEnabled = new GetAllowlistEnabled()
   readonly #applyTokenTransferFeeConfigUpdates = new ApplyTokenTransferFeeConfigUpdates()
   readonly #setChainRateLimiterConfigs = new SetChainRateLimiterConfigs()
+  readonly #getCurrentRateLimiterState = new GetCurrentRateLimiterState()
   readonly #getAllowedFinalityConfig = new GetAllowedFinalityConfig()
   readonly #getDynamicConfig = new GetDynamicConfig()
   readonly #getFee = new GetFee()
   readonly #getTokenTransferFeeConfig = new GetTokenTransferFeeConfig()
+  readonly #getAllTokenTransferFeeConfigs = new GetAllTokenTransferFeeConfigs()
   readonly #setAllowedFinalityConfig = new SetAllowedFinalityConfig()
   readonly #getAdvancedPoolHooks = new GetAdvancedPoolHooks()
   readonly #updateAdvancedPoolHooks = new UpdateAdvancedPoolHooks()
   readonly #setRateLimitAdmin = new SetRateLimitAdmin()
+  readonly #getRateLimitAdmin = new GetRateLimitAdmin()
   readonly #setDynamicConfig = new SetDynamicConfig()
   readonly #provideLiquidity = new ProvideLiquidity()
   readonly #withdrawFeeTokens = new WithdrawFeeTokens()
@@ -298,6 +329,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #transferLiquidity = new TransferLiquidity()
   readonly #setRebalancer = new SetRebalancer()
   readonly #getRebalancer = new GetRebalancer()
+  readonly #canAcceptLiquidity = new CanAcceptLiquidity()
   readonly #getBurnAddress = new GetBurnAddress()
   readonly #getLockbox = new GetLockbox()
   readonly #provideSiloedLiquidity = new ProvideSiloedLiquidity()
@@ -1142,6 +1174,42 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads the raw inbound and outbound token buckets of one lane of a token pool, at every
+   * supported version.
+   *
+   * @remarks Unlike {@link getTokenPoolRemotes}, a disabled limiter is returned as is rather than
+   * as `null`, with `lastUpdated` and `isEnabled` kept. Each bucket's `tokens` is the value the
+   * contract returns, already refilled on-chain to the read block, not a stored balance; for the
+   * same reason `lastUpdated` is the read block's timestamp. v1.5.0 to v1.6.1 read
+   * `getCurrentInboundRateLimiterState(uint64)` and `getCurrentOutboundRateLimiterState(uint64)` in
+   * parallel; v2.0.0 reads `getCurrentRateLimiterState(uint64, bool fastFinality)`, and
+   * `fastFinality: true` selects its fast-finality buckets. The getters do not check the lane, so
+   * the op reads `isSupportedChain` alongside them and rejects an unsupported lane instead of
+   * returning zeroed buckets.
+   *
+   * @throws {@link CCTParamsInvalidError} if a parameter is invalid, `fastFinality` is set on a
+   * pre-v2.0.0 pool, or the pool does not support `remoteChainSelector`
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const { inbound, outbound } = await cct.getCurrentRateLimiterState({
+   *   poolAddress: '0xPool...',
+   *   remoteChainSelector: 16015286601757825753n,
+   *   // fastFinality: true, // v2.0.0 pools only
+   * })
+   * console.log(outbound.isEnabled, outbound.tokens, outbound.capacity)
+   * ```
+   */
+  getCurrentRateLimiterState(
+    opts: GetCurrentRateLimiterStateParams,
+  ): Promise<GetCurrentRateLimiterStateResult> {
+    return this.#getCurrentRateLimiterState.query(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned pool `setRateLimitAdmin` tx (for multisig / offline signing): assigns the
    * role allowed to change the pool's rate limits alongside the owner. Probes the pool's on-chain
    * `typeAndVersion` to resolve its interface + encoder.
@@ -1199,6 +1267,27 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   setRateLimitAdmin(opts: EVMExecuteParams<SetRateLimitAdminParams>): Promise<TransactionResult> {
     return this.#setRateLimitAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads a token pool's rate-limit admin: the account besides the owner that may call
+   * {@link setChainRateLimiterConfigs}.
+   * @remarks Works at every pool version: v1.5.0 to v1.6.1 read the standalone
+   * `getRateLimitAdmin()`, v2.0.0 the `rateLimitAdmin` field of `getDynamicConfig()` (see
+   * {@link getDynamicConfig}). Set it with {@link setRateLimitAdmin} before v2.0.0 and with
+   * {@link setDynamicConfig} on v2.0.0.
+   * @returns The rate-limit admin, checksummed. The zero address when the role is unset, meaning
+   * only the owner may set rate limits.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const rateLimitAdmin = await cct.getRateLimitAdmin({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getRateLimitAdmin(opts: GetRateLimitAdminParams): Promise<GetRateLimitAdminResult> {
+    return this.#getRateLimitAdmin.query(this.chain, opts)
   }
 
   /**
@@ -2124,6 +2213,36 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads token-transfer fee configuration for every lane a **v2.0.0+** pool supports, each with
+   * its `remoteChainSelector`.
+   *
+   * @remarks The all-lanes variant of {@link getTokenTransferFeeConfig}: reads `getToken()` and
+   * `getSupportedChains()` once, then each lane's `getTokenTransferFeeConfig` in parallel, with the
+   * same `finality` and `tokenArgs` (defaults `'finalized'` and `'0x'`) for every lane. Lanes come
+   * back in `getSupportedChains()` order, like {@link getAllSiloedLockboxConfigs}; `[]` when none
+   * is supported.
+   *
+   * @throws {@link CCTParamsInvalidError} if a parameter is invalid
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   *
+   * @example
+   * ```ts
+   * const cct = EVMTokenManager.fromChain(chain)
+   * const configs = await cct.getAllTokenTransferFeeConfigs({ poolAddress: '0xPool...' })
+   * for (const { remoteChainSelector, isEnabled } of configs) {
+   *   console.log(remoteChainSelector, isEnabled)
+   * }
+   * ```
+   */
+  getAllTokenTransferFeeConfigs(
+    opts: GetAllTokenTransferFeeConfigsParams,
+  ): Promise<GetAllTokenTransferFeeConfigsResult> {
+    return this.#getAllTokenTransferFeeConfigs.query(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned ERC-20 `approve` tx (for multisig / offline signing): grants `spender` an
    * allowance over `sender`'s tokens.
    * @remarks The prerequisite for {@link generateUnsignedProvideLiquidity} — a pool deposits with
@@ -2459,6 +2578,27 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   getRebalancer(opts: GetRebalancerParams): Promise<GetRebalancerResult> {
     return this.#getRebalancer.query(this.chain, opts)
+  }
+
+  /**
+   * Reads whether a **v1.5.0 / v1.5.1** `LockReleaseTokenPool` accepts liquidity deposits at all.
+   * @remarks `canAcceptLiquidity()` returns the immutable `i_acceptLiquidity` the constructor
+   * fixed: a pool deployed with it `false` reverts every {@link provideLiquidity} with
+   * `LiquidityNotAccepted` for its whole lifetime. `provideLiquidity` pre-flights this itself, so
+   * this is for audit and UX. v1.6.x pools dropped the flag and always accept.
+   * @returns `true` if the pool accepts deposits.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if `poolAddress` is a BurnMint pool
+   * @throws {@link CCTOperationUnsupportedError} on a v1.6.x or v2.0.0 pool, siloed pools
+   * included, none of which declares the getter
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const accepts = await cct.canAcceptLiquidity({ poolAddress: '0xPool...' })
+   * ```
+   */
+  canAcceptLiquidity(opts: CanAcceptLiquidityParams): Promise<CanAcceptLiquidityResult> {
+    return this.#canAcceptLiquidity.query(this.chain, opts)
   }
 
   /**
@@ -3976,6 +4116,84 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads a token pool's Ownable2Step `owner()`: the account every owner-gated pool write must be
+   * signed by.
+   * @remarks Works at every pool version. One `owner()` call after the `typeAndVersion`
+   * resolution, instead of the full {@link getTokenPoolState} read. No pool version exposes a
+   * pending-owner getter, so a proposed owner is not readable here.
+   * @returns The owner, checksummed.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const owner = await cct.getTokenPoolOwner({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getTokenPoolOwner(opts: GetTokenPoolOwnerParams): Promise<GetTokenPoolOwnerResult> {
+    return this.#getTokenPoolOwner.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the token a pool was deployed for, from its `getToken()`.
+   * @remarks Works at every pool version. The token is set in the pool's constructor and is
+   * immutable thereafter. To check a candidate token instead, use {@link isSupportedToken}.
+   * @returns The token address, checksummed.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const token = await cct.getTokenPoolToken({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getTokenPoolToken(opts: GetTokenPoolTokenParams): Promise<GetTokenPoolTokenResult> {
+    return this.#getTokenPoolToken.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the local token decimals a **v1.5.1+** pool was deployed with, from its
+   * `getTokenDecimals()`: the decimals it scales cross-chain amounts by.
+   * @remarks v1.5.0 pools do not declare `getTokenDecimals()`; read the token's own `decimals()`
+   * there, as {@link getTokenPoolState} does.
+   * @returns The pool's configured token decimals.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a v1.5.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const decimals = await cct.getTokenPoolTokenDecimals({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getTokenPoolTokenDecimals(
+    opts: GetTokenPoolTokenDecimalsParams,
+  ): Promise<GetTokenPoolTokenDecimalsResult> {
+    return this.#getTokenPoolTokenDecimals.query(this.chain, opts)
+  }
+
+  /**
+   * Reads whether a token pool serves `tokenAddress`, from its `isSupportedToken(token)`.
+   * @remarks Works at every pool version. `true` only for the one token set in the pool's
+   * constructor, the one {@link getTokenPoolToken} returns.
+   * @returns `true` if `tokenAddress` is the pool's token.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` or `tokenAddress` is not a valid
+   * address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const supported = await cct.isSupportedToken({
+   *   poolAddress: '0xPool...',
+   *   tokenAddress: '0xToken...',
+   * })
+   * ```
+   */
+  isSupportedToken(opts: IsSupportedTokenParams): Promise<IsSupportedTokenResult> {
+    return this.#isSupportedToken.query(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned pool `setRemotePool` tx (for multisig / offline signing), replacing the
    * remote pool a lane accepts.
    * @remarks **v1.5.0 pools only.** A v1.5.0 pool holds exactly one remote pool per lane, and this
@@ -4366,9 +4584,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 }
 
 export type * from './token-admin-registry/operations/index.ts'
-export * from './token-admin-registry/contracts.ts'
 export type * from './token/operations/index.ts'
-export * from './token/contracts.ts'
 export type * from './token-pool/operations/index.ts'
 /**
  * `GetTokenPoolRemotesResult` is a `Record<string, TokenPoolRemote>`, so a caller cannot name a
@@ -4377,11 +4593,40 @@ export type * from './token-pool/operations/index.ts'
  */
 export type { RateLimiterState, TokenPoolRemote, TokenTransferFeeConfig } from '../../chain.ts'
 export type { RateLimitConfig } from './token-pool/rate-limit.ts'
-export * from './token-pool/contracts.ts'
+// Pool taxonomy and the types public op params and results reference. The `read*`, `assert*` and
+// `resolve*` helpers in each `contracts.ts` stay internal: they skip param validation and version
+// gating, so callers go through the query ops.
+export type {
+  BurnMintTokenPoolType,
+  DeployableTokenPoolType,
+  LaneTokenTransferFeeConfig,
+  LockReleaseTokenPoolType,
+  LockboxConfig,
+  TokenBucket,
+  TokenPoolDynamicConfig,
+  TokenPoolFamily,
+  TokenPoolFee,
+  TokenPoolRateLimiterState,
+  TokenPoolType,
+} from './token-pool/contracts.ts'
+export {
+  DEPLOYABLE_TOKEN_POOL_TYPES,
+  TOKEN_POOL_FAMILIES,
+  TOKEN_POOL_TYPES,
+  TokenPoolVersion,
+  getTokenPoolFamily,
+  isDeployableTokenPoolType,
+  isLockReleaseTokenPoolType,
+  isTokenPoolType,
+  isTokenPoolVersion,
+} from './token-pool/contracts.ts'
 export type * from './lockbox/operations/index.ts'
-export * from './lockbox/contracts.ts'
 export type * from './advanced-pool-hooks/operations/index.ts'
-export * from './advanced-pool-hooks/contracts.ts'
+export type {
+  AdvancedPoolHooksTarget,
+  CCVConfig,
+  CCVConfigUpdate,
+} from './advanced-pool-hooks/contracts.ts'
 export type {
   DeployTokenAndTokenPoolViaFactoryParams,
   DeployTokenPoolWithExistingTokenViaFactoryParams,
