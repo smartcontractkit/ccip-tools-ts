@@ -1022,4 +1022,55 @@ describe('fetchVerifications against a CCV policy', () => {
       ['0xdeadbeef', '0xcc', '0xdd'],
     )
   })
+
+  it('asks the fallback only for the CCVs still missing, and accepts them as covering', async () => {
+    const fallback = mock.fn((missing: readonly string[]) =>
+      Promise.resolve([{ ccvData: '0xfb', destAddress: missing[0]!, sourceAddress: '' }]),
+    )
+    const res = await fetchVerifications(MESSAGE_ID, {
+      indexer: [INDEXER],
+      apiClient: null,
+      fetch: indexerServing(A) as unknown as typeof globalThis.fetch,
+      policy: { requiredCCVs: [A, B], optionalCCVs: [], optionalThreshold: 0 },
+      fallback,
+    })
+
+    assert.deepEqual(
+      fallback.mock.calls.map((c) => c.arguments[0]),
+      [[B]],
+    )
+    assert.deepEqual(
+      res.map((r) => r.ccvData),
+      ['0xdeadbeef', '0xfb'],
+    )
+  })
+
+  it('does not call the fallback when the managed sources already cover the policy', async () => {
+    const fallback = mock.fn(() => Promise.resolve([]))
+    await fetchVerifications(MESSAGE_ID, {
+      indexer: [INDEXER],
+      apiClient: null,
+      fetch: indexerServing(A) as unknown as typeof globalThis.fetch,
+      policy: { requiredCCVs: [A], optionalCCVs: [], optionalThreshold: 0 },
+      fallback,
+    })
+    assert.equal(fallback.mock.callCount(), 0)
+  })
+
+  it('reports a fallback failure in the not-verified error context', async () => {
+    await assert.rejects(
+      fetchVerifications(MESSAGE_ID, {
+        indexer: [],
+        apiClient: null,
+        policy: { requiredCCVs: [A], optionalCCVs: [], optionalThreshold: 0 },
+        fallback: () => Promise.reject(new Error('no attestation yet')),
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCIPMessageNotVerifiedYetError)
+        assert.equal(err.context.fallbackError, 'no attestation yet')
+        assert.deepEqual(err.context.missingCCVs, [A])
+        return true
+      },
+    )
+  })
 })

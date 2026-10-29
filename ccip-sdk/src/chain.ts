@@ -12,6 +12,7 @@ import {
   CCIPExecTxRevertedError,
   CCIPInsufficientBalanceError,
   CCIPLogsRequiresStartError,
+  CCIPMessageNotVerifiedYetError,
   CCIPNotImplementedError,
   CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
@@ -31,9 +32,17 @@ import type {
 } from './extra-args.ts'
 import type { EstimateMessageInput, GetRequiredCCVsMessage, GetRequiredCCVsResult } from './gas.ts'
 import type { LeafHasher } from './hasher/common.ts'
-import { decodeMessageV1 } from './messages.ts'
+import { decodeMessageV1, decodeMessageV1Raw } from './messages.ts'
 import { type NetworkInfo, type NetworkType, ChainFamily, networkInfo } from './networks.ts'
-import { getOffchainTokenData } from './offchain.ts'
+import {
+  type TokenVerifier,
+  CCTP_V2_CCV_TAG,
+  getAttestedVersionTag,
+  getLbtcPayloadHash,
+  getOffchainTokenData,
+  getTokenVerifierData,
+  parseCctpV2ExtraData,
+} from './offchain.ts'
 import {
   getMessagesInBatch,
   getMessagesInRange,
@@ -1759,6 +1768,40 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /**
+   * Collect a CCIP v2.0 message's execution input by resolving this destination's CCV policy and
+   * fetching the verifications that cover it (API, indexers, extra sources, then the token-verifier
+   * fallback). Used when the API's own execution input cannot be taken as final.
+   *
+   * @param messageId - The v2.0 message id
+   * @param sources - Extra verification sources (`verifiers`, `ccvData`)
+   * @returns The destination OffRamp and the execution input
+   * @throws {@link CCIPApiClientNotAvailableError} if the API client is disabled
+   * @throws {@link CCIPNotImplementedError} if this destination's `getVerifications` is not v2-aware
+   */
+  private async resolveV2ExecuteInput(
+    messageId: string,
+    sources: VerificationSourcesOpts = {},
+  ): Promise<{
+    offRamp: string
+    input: { encodedMessage: string; verifications: VerifierResult[] }
+  }> {
+    if (!this.apiClient) throw new CCIPApiClientNotAvailableError()
+    const [request, { offRamp, encodedMessage }] = await Promise.all([
+      this.apiClient.getMessageById(messageId),
+      this.apiClient.getEncodedMessage(messageId),
+    ])
+    const collected = await this.getVerifications({
+      offRamp,
+      request: { ...request, message: { ...request.message, encodedMessage } as CCIPMessage },
+      verifiers: sources.verifiers,
+      ccvData: sources.ccvData,
+    })
+    if (!('verifications' in collected))
+      throw new CCIPNotImplementedError(`${this.constructor.name}.getVerifications for v2.0`)
+    return { offRamp, input: { encodedMessage, verifications: collected.verifications } }
+  }
+
+  /**
    * Resolves {@link ExecuteOpts} that may contain a `messageId` (API shorthand) into the
    * canonical `{ offRamp, input }` form required by {@link generateUnsignedExecute}.
    *
@@ -1788,23 +1831,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     ) {
       // v2 with extra verification sources: collect the verifications against this destination's
       // CCV policy (API, indexers, then those sources) rather than taking the API's as final
-      const [request, { offRamp, encodedMessage }] = await Promise.all([
-        this.apiClient.getMessageById(opts.messageId),
-        this.apiClient.getEncodedMessage(opts.messageId),
-      ])
-      const collected = await this.getVerifications({
-        offRamp,
-        request: { ...request, message: { ...request.message, encodedMessage } as CCIPMessage },
-        verifiers: opts.verifiers,
-        ccvData: opts.ccvData,
-      })
-      if (!('verifications' in collected))
-        throw new CCIPNotImplementedError(`${this.constructor.name}.getVerifications for v2.0`)
-      opts_ = {
-        ...opts,
-        offRamp,
-        input: { encodedMessage, verifications: collected.verifications },
-      }
+      opts_ = { ...opts, ...(await this.resolveV2ExecuteInput(opts.messageId, opts)) }
     } else {
       const messageId =
         'messageId' in opts
@@ -1812,20 +1839,36 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           : 'message' in opts.input
             ? opts.input.message.messageId
             : keccak256(getDataBytes(opts.input.encodedMessage))
-      const { offRamp, ...input } = await this.apiClient.getExecutionInput(messageId)
-      if (
-        'offchainTokenData' in input &&
-        input.message.tokenAmounts.length &&
-        !input.offchainTokenData[0]
-      ) {
-        // sometimes, attestation data may not be available on API, so try again to getOffchainTokenData from attestation providers;
-        const req = await this.apiClient.getMessageById(messageId)
-        input.offchainTokenData = await this.getOffchainTokenData({
-          log: req.log,
-          message: input.message,
-        })
+      try {
+        const { offRamp, ...input } = await this.apiClient.getExecutionInput(messageId)
+        if (
+          'offchainTokenData' in input &&
+          input.message.tokenAmounts.length &&
+          !input.offchainTokenData[0]
+        ) {
+          // sometimes, attestation data may not be available on API, so try again to getOffchainTokenData from attestation providers;
+          const req = await this.apiClient.getMessageById(messageId)
+          input.offchainTokenData = await this.getOffchainTokenData({
+            log: req.log,
+            message: input.message,
+          })
+        }
+        opts_ = { ...opts, offRamp, input }
+      } catch (err) {
+        if (!(err instanceof CCIPMessageNotVerifiedYetError)) throw err
+        // The API has the message but not a set of verifications covering its CCV policy (e.g. a
+        // token verifier has published nothing yet). Collect them ourselves; that path includes
+        // the token-verifier fallback, which composes USDC/CCTP and LBTC/Lombard data from the
+        // issuer's own attestation service.
+        this.logger.debug(
+          'execute: API execution input is not verified yet; collecting verifications locally:',
+          err.message,
+        )
+        opts_ = {
+          ...opts,
+          ...(await this.resolveV2ExecuteInput(messageId, opts as VerificationSourcesOpts)),
+        }
       }
-      opts_ = { ...opts, offRamp, input }
     }
 
     if (
@@ -1993,7 +2036,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   /**
    * Collect a CCIP v2.0 message's CCV results against the destination `policy`, from every source:
    * `opts.ccvData`, then the CCIP API raced against the indexers, then `opts.verifiers` (read via
-   * {@link ChainContext.verifierTransport}). For families' `getVerifications` implementations.
+   * {@link ChainContext.verifierTransport}), then the token-verifier fallback. For families'
+   * `getVerifications` implementations.
    *
    * @param messageId - The message id
    * @param policy - This destination's CCV policy for the message
@@ -2017,6 +2061,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       apiClient: this.apiClient,
       indexer: opts.indexer ?? this.verificationsIndexer ?? this.network.networkType,
       verifiers: opts.verifiers,
+      fallback: (missingCCVs) => this.getTokenVerifierFallback(opts, missingCCVs),
       verifierTransport: this.verifierTransport,
       getAddress,
       watch:
@@ -2026,6 +2071,114 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
             ? this.abort
             : undefined,
     })
+  }
+
+  /**
+   * Compose verification results for token CCVs that the managed sources left uncovered, from the
+   * token issuer's offchain attestation: Circle's for CCTP (USDC), Lombard's for LBTC.
+   *
+   * This is the last source {@link Chain.getVerifications} tries. It is safe because the composed
+   * bytes are not trusted here: the destination CCV's onchain `verifyMessage` validates them, so
+   * wrong or incomplete data can only waste gas. Families take part by implementing
+   * {@link Chain.getTokenVerifiers} and {@link Chain.encodeTokenCcvData}.
+   *
+   * @param opts - The `getVerifications` options
+   * @param missingCCVs - Required CCVs still missing, as policy addresses
+   * @returns At most one result, for the token verifier of the message's token transfer
+   */
+  protected async getTokenVerifierFallback(
+    { request }: Parameters<Chain['getVerifications']>[0],
+    missingCCVs: readonly string[],
+  ): Promise<VerifierResult[]> {
+    if (request.lane.version < CCIPVersion.V2_0 || !missingCCVs.length) return []
+    const message = decodeMessageV1Raw(await this.resolveEncodedMessage(request))
+    // a CCIP v2 message carries at most one token transfer, so at most one issuer is involved
+    if (message.tokenTransfer.length !== 1) return []
+    const { extraData } = message.tokenTransfer[0]!
+    // CCTP-through-CCV pools tag their transfers; Lombard's carry no marker (only decimals)
+    const tag = parseCctpV2ExtraData(extraData)?.tag === CCTP_V2_CCV_TAG ? 'usdc' : 'lbtc'
+    const verifiers = (
+      await Promise.all(
+        missingCCVs.map((ccv) => this.getTokenVerifiers(ccv, message.sourceChainSelector)),
+      )
+    )
+      .flat()
+      .filter((v) => v.tag === tag)
+    if (!verifiers.length) return []
+    // a resolver may register several versions; prefer the newest
+    verifiers.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+
+    const { messageId } = request.message
+    // requests read from source logs carry the tx hash, and the `receipts` and `verifierBlobs`
+    const source = request as {
+      log: { transactionHash?: string }
+      message: Parameters<typeof getLbtcPayloadHash>[0]
+    }
+    const txHash =
+      source.log.transactionHash ??
+      (await this.apiClient?.getMessageById(messageId))?.log.transactionHash
+    if (!txHash) return []
+    const data = await getTokenVerifierData(tag, {
+      logger: this.logger,
+      messageId,
+      sourceChainSelector: message.sourceChainSelector,
+      extraData,
+      txHash,
+      lbtcPayloadHash: getLbtcPayloadHash(
+        source.message,
+        verifiers.map((v) => v.ccv),
+      ),
+      cctpSourceDomain: verifiers.find((v) => v.cctpSourceDomain != null)?.cctpSourceDomain,
+    })
+    if (!data) return []
+
+    // the attested data binds the version tag the source used to this message; it picks the
+    // implementation among a resolver's versions
+    const attestedTag = getAttestedVersionTag(
+      data._tag === 'usdc' ? data.message! : data.attestation!,
+      messageId,
+    )
+    const verifier = verifiers.find((v) => v.versionTag === attestedTag) ?? verifiers[0]!
+    return [
+      {
+        ccvData: this.encodeTokenCcvData(attestedTag ?? verifier.versionTag, data),
+        destAddress: verifier.ccv,
+        sourceAddress: '',
+      },
+    ]
+  }
+
+  /**
+   * List the token verifier implementations behind a destination CCV (resolving a versioned
+   * verifier resolver), for {@link Chain.getTokenVerifierFallback}.
+   *
+   * The base implementation finds none; families with CCTP or Lombard verifiers override it.
+   *
+   * @param _ccv - A destination CCV address, from the message's verification policy
+   * @param _sourceChainSelector - The message's source chain
+   * @returns The token verifiers behind `_ccv`, possibly empty
+   */
+  protected getTokenVerifiers(
+    _ccv: string,
+    _sourceChainSelector: bigint,
+  ): Promise<TokenVerifier[]> {
+    return Promise.resolve([])
+  }
+
+  /**
+   * Encode a token issuer's offchain data as this destination's token verifier `ccvData`, for
+   * {@link Chain.getTokenVerifierFallback}.
+   *
+   * @param _versionTag - The 4-byte tag of the verifier implementation to route to
+   * @param _data - The issuer's offchain data, from {@link getTokenVerifierData}
+   * @returns The encoded `ccvData`
+   * @throws {@link CCIPNotImplementedError} unless the family overrides it
+   */
+  protected encodeTokenCcvData(
+    _versionTag: string,
+    _data: NonNullable<OffchainTokenData>,
+  ): BytesLike {
+    throw new CCIPNotImplementedError(`${this.constructor.name}.encodeTokenCcvData`)
   }
 
   /**

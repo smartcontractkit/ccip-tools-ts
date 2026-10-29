@@ -17,15 +17,7 @@ import { EVMOperation, callTx } from '../../operation.ts'
 import { validateAddress } from '../../validate.ts'
 import { getTokenAdminRegistryInterface, readTokenAdminRegistryConfig } from '../contracts.ts'
 
-/**
- * Parameters for `acceptAdmin`.
- * @remarks `sender` is typed optional to satisfy `EVMOperation`'s shared shape, but is required
- * for {@link AcceptAdmin.generate}: the pre-tx check below has nothing to compare
- * `pendingAdministrator` against without it, so an omitted `sender` is rejected in
- * {@link AcceptAdmin.prepare}. {@link AcceptAdmin.execute} relaxes this — it defaults `sender`
- * to the signing wallet's own address, since that is the only address that can ever satisfy
- * the pending-administrator check for a signed submission (see {@link AcceptAdmin.execute}).
- */
+/** Parameters for `acceptAdmin`. */
 export type AcceptAdminParams = {
   /** Token whose pending registry admin role is being accepted. */
   tokenAddress: string
@@ -36,41 +28,35 @@ export type AcceptAdminParams = {
    */
   address: string
   /**
-   * Pending administrator accepting the role. Required for {@link AcceptAdmin.generate}
-   * (unsigned/offline flows); optional for {@link AcceptAdmin.execute}, which defaults it to
-   * the wallet's address — see the remarks above.
+   * Pending administrator accepting the role. Optional: omitting it skips the
+   * pending-administrator check in {@link AcceptAdmin.buildUnsigned}, so a wrong signer only fails
+   * on-chain. {@link AcceptAdmin.execute} defaults it to the signing wallet.
    */
   sender?: string
 }
 
-/** {@link AcceptAdminParams} as {@link AcceptAdmin.prepare} leaves it: `sender` present and checksummed. */
-type ParsedAcceptAdminParams = AcceptAdminParams & { sender: string }
-
 /** Accepts a pending TokenAdminRegistry administrator role for a token. */
-export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdminParams> {
+export class AcceptAdmin extends EVMOperation<AcceptAdminParams> {
   readonly name = 'acceptAdmin'
 
   /**
-   * Validates all addresses before any RPC — `sender` is required here (unlike the base
-   * `EVMOperation` shape), see the {@link AcceptAdminParams} remarks — and checksums `sender` so
+   * Validates all addresses before any RPC and, if given, checksums `sender` so
    * {@link buildUnsigned} can compare it against the registry's own checksummed
-   * `pendingAdministrator` without re-asserting it.
+   * `pendingAdministrator`.
    */
-  protected override prepare(p: AcceptAdminParams): ParsedAcceptAdminParams {
+  protected override prepare(p: AcceptAdminParams): AcceptAdminParams {
     validateAddress(this.name, 'tokenAddress', p.tokenAddress)
     validateAddress(this.name, 'address', p.address)
+    if (p.sender === undefined) return p
     validateAddress(this.name, 'sender', p.sender)
     return { ...p, sender: getAddress(p.sender) }
   }
 
   /**
-   * Confirms `sender` is the pending administrator, then builds `acceptAdminRole` calldata
-   * against the TokenAdminRegistry resolved from `address`.
+   * Confirms an administrator is pending and, if given, that it is `sender`, then builds
+   * `acceptAdminRole` calldata against the TokenAdminRegistry resolved from `address`.
    */
-  protected async buildUnsigned(
-    chain: EVMChain,
-    p: ParsedAcceptAdminParams,
-  ): Promise<UnsignedEVMTx> {
+  protected async buildUnsigned(chain: EVMChain, p: AcceptAdminParams): Promise<UnsignedEVMTx> {
     const to = await chain.getTokenAdminRegistryFor(p.address)
     const { administrator, pendingAdministrator } = await readTokenAdminRegistryConfig(
       chain,
@@ -85,7 +71,8 @@ export class AcceptAdmin extends EVMOperation<AcceptAdminParams, ParsedAcceptAdm
         `no administrator is pending for this token (current administrator: ${administrator}) — nothing to accept`,
       )
     }
-    if (pendingAdministrator !== p.sender) {
+    // without `sender`, the pending check above is the only pre-flight
+    if (p.sender !== undefined && pendingAdministrator !== p.sender) {
       throw new CCTParamsInvalidError(
         this.name,
         'sender',

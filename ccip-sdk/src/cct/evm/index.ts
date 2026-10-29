@@ -475,11 +475,15 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * Two-step by design: `newAdmin` must separately call `acceptAdmin` to complete the
    * handoff. This is the registry's ADMIN role — distinct from a pool's Ownable2Step *owner*
    * (see {@link transferPoolOwnership}); do not confuse the two.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or if `sender` is not the
-   * token's current registry administrator (including a not-yet-accepted registration)
+   * @remarks `sender` is optional, so calldata can be built for a multisig admin: omitting it
+   * skips the current-administrator check, and a wrong signer then only fails on-chain. The token
+   * must still be registered and accepted.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, the token is not registered
+   * (including a not-yet-accepted registration), or `sender` is given and is not the token's
+   * current registry administrator
    * @example
    * ```typescript
-   * // `sender` must be the token's current registry administrator
+   * // `sender` (optional): the token's current registry administrator
    * const unsigned = await cct.generateUnsignedTransferAdmin({
    *   tokenAddress: '0xToken...',
    *   newAdmin: '0xNewAdmin...', // must separately call acceptAdmin
@@ -522,14 +526,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Builds an unsigned `acceptAdminRole` tx (for multisig / offline signing). Second half of
    * the two-step admin handshake: a registry module's `registerAdmin` (fresh registration) or
-   * the current admin's `transferAdmin` (hand-off) proposes `opts.sender` as
-   * `pendingAdministrator`; `acceptAdmin` then confirms it on-chain before encoding, after which
-   * {@link setPool} becomes callable by the new administrator.
-   * @throws {@link CCTParamsInvalidError} if any param is invalid, or `sender` is not the
-   *   pending administrator
+   * the current admin's `transferAdmin` (hand-off) proposes a `pendingAdministrator`, and
+   * `acceptAdmin` confirms one is pending on-chain before encoding. The new administrator can then
+   * call {@link setPool}.
+   * @remarks `sender` is optional, so calldata can be built for a multisig admin: omitting it
+   * skips the pending-administrator check, and a wrong signer then only fails on-chain. An
+   * administrator must still be pending.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, no administrator is pending,
+   *   or `sender` is given and is not the pending administrator
    * @example
    * ```typescript
-   * // `sender` must be the pending administrator proposed by registerAdmin/transferAdmin
+   * // `sender` (optional): the pending administrator from registerAdmin/transferAdmin
    * const unsigned = await cct.generateUnsignedAcceptAdmin({
    *   tokenAddress: '0xToken...',
    *   address: '0xTokenAdminRegistry...', // the TAR, or a Router/pool to resolve it from
@@ -1052,7 +1059,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * `fastFinality` is **v2.0.0-only** — the flag does not exist in the earlier ABIs, so setting it
    * (to either value) on an older pool is rejected rather than silently dropped. It defaults to
-   * `false` on v2.0.0.
+   * `false` on v2.0.0, where each lane has a finalized and a fast-finality bucket, so a lane may
+   * appear twice in `updates`: once per `fastFinality` value.
    *
    * This op *updates* limits on lanes that already exist; it does not add one. An unconfigured
    * selector reverts on-chain (`NonExistentChain`).
@@ -1060,16 +1068,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * The tx must ultimately be signed by the pool `owner` **or** its `rateLimitAdmin` — both are
    * reported by {@link getTokenPoolState}. When `opts.sender` is supplied it is pre-flighted
    * against *both* roles (two extra `eth_call`s — the pool's `owner()` and whichever getter
-   * reports `rateLimitAdmin` on that version), so a
-   * `sender` holding neither fails at build time rather than reverting at signing. Omit `sender`
-   * to build the calldata without any role read, when the eventual signer is not yet known.
+   * reports `rateLimitAdmin` on that version), so a `sender` holding neither fails at build time
+   * rather than reverting at signing. Omit `sender` to build the calldata without any role read,
+   * when the eventual signer is not yet known.
    * @throws {@link CCTParamsInvalidError} if any param is invalid: `updates` empty, a repeated
-   * `remoteChainSelector`, a non-`uint64` selector, a rate above its capacity while enabled, a
-   * non-zero amount while disabled, `fastFinality` set on a pre-2.0.0 pool, or `sender` given and
-   * being neither the pool `owner` nor its (set) `rateLimitAdmin`. On a **v1.5.1 or v1.6.0** pool
-   * the enabled-bucket bound is stricter still (`0 < rate < capacity`), so a `rate` of `0n` or a
-   * `rate` equal to `capacity` is also rejected there — v1.6.1 and v2.0.0 allow both. A
-   * **v1.5.0** pool accepts only a single-element `updates`.
+   * (`remoteChainSelector`, `fastFinality`) pair, a non-`uint64` selector, a rate above its
+   * capacity while enabled, a non-zero amount while disabled, `fastFinality` set on a pre-2.0.0
+   * pool, or `sender` given and being neither the pool `owner` nor its (set) `rateLimitAdmin`.
+   * On a **v1.5.1 or v1.6.0** pool the enabled-bucket bound is stricter still
+   * (`0 < rate < capacity`), so a `rate` of `0n` or a `rate` equal to `capacity` is also rejected
+   * there — v1.6.1 and v2.0.0 allow both. A **v1.5.0** pool accepts only a single-element
+   * `updates`.
    * @example
    * ```typescript
    * const unsigned = await cct.generateUnsignedSetChainRateLimiterConfigs({
@@ -1148,9 +1157,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    *
    * A zero `newRateLimitAdmin` is accepted and clears the delegation, leaving the owner as the
    * only account that can change rate limits.
-   * @throws {@link CCTOperationUnsupportedError} on a **v2.0.0** pool — 2.0.0 removed the
-   * standalone `setRateLimitAdmin(address)` selector and folded the role into a three-field
-   * dynamic config; use {@link generateUnsignedSetDynamicConfig} / {@link setDynamicConfig} there
+   *
+   * A **v2.0.0** pool has no standalone `setRateLimitAdmin(address)`, so this reads
+   * `getDynamicConfig()` and encodes `setDynamicConfig(router, newRateLimitAdmin, feeAdmin)`,
+   * writing `router` and `feeAdmin` back as read. That calldata depends on chain state at build
+   * time: if `router` or `feeAdmin` changes before a multisig signs, the tx writes the old value
+   * back. Use {@link generateUnsignedSetDynamicConfig} for exact control over all three fields.
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `poolAddress` is the zero
    * address, or `sender` is given and is not the pool owner
    * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
@@ -1171,9 +1183,10 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   /**
    * Assigns the pool's rate-limit admin role, signing + submitting with `opts.wallet`. `sender`
    * defaults to the wallet's address and must equal it — the wallet must be the pool owner.
+   * @remarks On a v2.0.0 pool this writes `setDynamicConfig`, keeping the on-chain `router` and
+   * `feeAdmin`; see {@link generateUnsignedSetRateLimitAdmin}.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool — use {@link setDynamicConfig}
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` is given and is not
    * the wallet's address, or the wallet is not the pool owner
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
@@ -1204,8 +1217,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * silently reverting an unrelated config change made in the interim.
    *
    * Read the current triple with {@link getTokenPoolState} and pass it back explicitly, so what
-   * is signed is exactly what was reviewed. This is also the migration path off
-   * {@link setRateLimitAdmin} for a 2.0.0 pool.
+   * is signed is exactly what was reviewed. To change only `rateLimitAdmin` and accept that
+   * trade-off, {@link generateUnsignedSetRateLimitAdmin} does the read for you at build time.
    *
    * Owner-only, for the same escalation reason as {@link generateUnsignedSetRateLimitAdmin}.
    * Zero `rateLimitAdmin` / `feeAdmin` clear those delegations; `router` must be non-zero, since
@@ -1238,7 +1251,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    * current triple with {@link getTokenPoolState} and pass back whatever you are not changing, as
    * below. A missing field is a validation error, never "leave that one alone" — nothing is
    * backfilled from `getDynamicConfig()`; see {@link generateUnsignedSetDynamicConfig} for why.
-   * On a 2.0.0 pool this replaces {@link setRateLimitAdmin}.
+   * To change only `rateLimitAdmin`, {@link setRateLimitAdmin} does that read for you at build
+   * time.
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
    * @throws {@link CCTOperationUnsupportedError} on a pre-v2.0.0 pool — use {@link setRateLimitAdmin}
@@ -4452,3 +4466,5 @@ export type {
   ExplorerVerificationInput,
 } from './operation.ts'
 export type { TransactionResult } from '../operation.ts'
+export type { SimulateEVMTxOptions, SimulateEVMTxResult } from './simulate.ts'
+export { simulateEVMTx } from './simulate.ts'

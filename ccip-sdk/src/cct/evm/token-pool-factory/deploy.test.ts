@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { AbiCoder, getAddress, makeError } from 'ethers'
+import { AbiCoder, ZeroAddress, getAddress, makeError } from 'ethers'
 
 // registers the EVM and Solana chain families, for the remotes' own formats
 import type { EVMChain } from '../../../evm/index.ts'
@@ -13,6 +13,7 @@ import {
   CCTContractVersionUnsupportedError,
   CCTParamsInvalidError,
 } from '../../errors.ts'
+import { DEPLOYABLE_TOKEN_POOL_TYPES, getTokenPoolArtifact } from '../token-pool/contracts.ts'
 import { FACTORY_POOL_TYPE, TOKEN_POOL_FACTORY_INTERFACE } from './contracts.ts'
 import {
   deployTokenAndTokenPoolViaFactory,
@@ -90,6 +91,55 @@ function decode(fn: 'deployTokenAndTokenPool' | 'deployTokenPoolWithExistingToke
 }
 
 const guarded = guardFactorySalt(normalizeFactorySalt('t', SALT), SENDER)
+
+describe('factory deployment supports every deployable pool type except BurnToAddressTokenPool', () => {
+  for (const type of DEPLOYABLE_TOKEN_POOL_TYPES) {
+    if (type === 'BurnToAddressTokenPool') continue
+    for (const existingToken of [false, true]) {
+      it(`${type}: ${existingToken ? 'existing' : 'new'} token uses matching bytecode and constructor`, async () => {
+        const common = { factory: FACTORY, sender: SENDER, salt: SALT, type }
+        const r = existingToken
+          ? await deployTokenPoolWithExistingTokenViaFactory(stubChain(), {
+              ...common,
+              token: EXISTING_TOKEN,
+              localTokenDecimals: 18,
+            })
+          : await deployTokenAndTokenPoolViaFactory(stubChain(), {
+              ...common,
+              token: TOKEN,
+            })
+        const call = decode(
+          existingToken ? 'deployTokenPoolWithExistingToken' : 'deployTokenAndTokenPool',
+          r.transaction.transactions[0]!.data as string,
+        )
+        const lockRelease = type === 'LockReleaseTokenPool'
+        assert.equal(
+          call.localPoolType,
+          BigInt(lockRelease ? FACTORY_POOL_TYPE.LockRelease : FACTORY_POOL_TYPE.BurnMint),
+        )
+        assert.equal(call.lockBox, ZeroAddress)
+        const token = existingToken ? EXISTING_TOKEN : r.token!
+        assert.equal(
+          r.lockBox,
+          lockRelease ? predictFactoryLockBox(FACTORY, guarded, token) : undefined,
+        )
+        const artifact = getTokenPoolArtifact(type)
+        assert.equal(call.tokenPoolInitCode, artifact.bytecode)
+        const args = [token, 18, ZeroAddress, RMN, ROUTER]
+        if (lockRelease) args.push(r.lockBox!)
+        assert.equal(
+          r.pool,
+          predictFactoryPool(
+            FACTORY,
+            guarded,
+            artifact.bytecode,
+            artifact.iface.encodeDeploy(args),
+          ),
+        )
+      })
+    }
+  }
+})
 
 describe('deployTokenAndTokenPoolViaFactory', () => {
   it('BurnMint: deploys CrossChainToken + BurnMintTokenPool, predicts both, encodes PoolType=BURN_MINT', async () => {
@@ -394,13 +444,18 @@ describe('token-pool-factory deploy — security hardening', () => {
     )
   })
 
-  it('rejects a pool type the factory has no PoolType for, for untyped callers', () => {
-    // the factory deploys only BurnMint and LockRelease; a JS caller can still pass anything
-    for (const type of ['SiloedLockReleaseTokenPool', 'BurnFromMintTokenPool']) {
+  it('rejects unsupported pool types for untyped callers', () => {
+    for (const type of ['BurnToAddressTokenPool', 'UnknownTokenPool']) {
       assert.throws(
         () =>
           deployTokenAndTokenPoolViaFactoryUnchecked(
-            { factory: FACTORY, sender: SENDER, salt: SALT, type: type as never, token: TOKEN },
+            {
+              factory: FACTORY,
+              sender: SENDER,
+              salt: SALT,
+              type: type as never,
+              token: TOKEN,
+            },
             { rmnProxy: RMN, router: ROUTER },
           ),
         (e: unknown) => e instanceof CCTParamsInvalidError && e.context.param === 'type',

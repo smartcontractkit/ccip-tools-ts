@@ -76,6 +76,13 @@ export type FetchVerificationsOpts = {
    * the last source: tried in order, and only while the API and indexers leave `policy` uncovered.
    */
   verifiers?: readonly string[]
+  /**
+   * Last-resort source, called only while `policy` is still uncovered after the API, indexers and
+   * `verifiers`. It receives the required CCVs still missing and returns results for them, e.g.
+   * token-verifier attestations composed from the token issuer's offchain data. Its results are
+   * collected like any other source's, and failures are reported in the thrown error's context.
+   */
+  fallback?: (missingCCVs: readonly string[]) => Promise<readonly VerifierResult[]>
   /** Transport for `verifiers` (default: {@link grpcWebTransport}). */
   verifierTransport?: VerifierTransport
   /**
@@ -126,10 +133,10 @@ function assertIndexerUrls(indexer: unknown): asserts indexer is readonly string
  * Fetch CCV verifications for a CCIP v2.0 message.
  *
  * Sources, by precedence: `opts.known`; then the API client raced against every indexer URL via
- * {@link Promise.any}; then `opts.verifiers`, one at a time. Without `opts.policy` the first managed
- * source to answer wins. With it, partial answers are merged per destination CCV until the policy
- * is covered, and the verifiers are contacted only if the API and indexers leave it uncovered, so
- * routine reads stay on managed infrastructure.
+ * {@link Promise.any}; then `opts.verifiers`, one at a time; then `opts.fallback`. Without
+ * `opts.policy` the first managed source to answer wins. With it, partial answers are merged per
+ * destination CCV until the policy is covered, and the verifiers and fallback are contacted only if
+ * the API and indexers leave it uncovered, so routine reads stay on managed infrastructure.
  *
  * When `opts.watch` is supplied the function retries on
  * {@link CCIPMessageNotVerifiedYetError} at `opts.pollInterval` ms intervals
@@ -155,6 +162,7 @@ export async function fetchVerifications(
     policy,
     known = [],
     verifiers = [],
+    fallback,
     verifierTransport = grpcWebTransport(fetchFn),
     getAddress = (address) => (typeof address === 'string' ? address : hexlify(address)),
   }: FetchVerificationsOpts = {},
@@ -261,6 +269,17 @@ export async function fetchVerifications(
     }
     if (covered()) return selected()
 
+    let fallbackError: string | undefined
+    const stillMissing = missingRequired()
+    if (policy && fallback && stillMissing.length) {
+      try {
+        collect(await fallback(stillMissing))
+      } catch (err) {
+        fallbackError = err instanceof Error ? err.message : String(err)
+      }
+      if (covered()) return selected()
+    }
+
     lastErr = new CCIPMessageNotVerifiedYetError(messageId, {
       cause: managedErr,
       context: {
@@ -269,6 +288,7 @@ export async function fetchVerifications(
           optionalCovered: `${optionalCovered()}/${policy.optionalThreshold}`,
         }),
         ...(verifierFailures.length && { verifierFailures }),
+        ...(fallbackError && { fallbackError }),
       },
     })
     if (!watch) throw lastErr
