@@ -1,10 +1,11 @@
 /**
- * Integration tests for the destination-liquidity preflight — read-only.
+ * Read-only mainnet integration tests: the destination-liquidity preflight, and the CCIP v2.0
+ * token-verifier fallback (`getVerifications` composing CCTP/Lombard `ccvData`).
  *
  * The pool-direct `releaseOrMint` simulation is a pure `eth_call`, so these run directly against
  * live RPCs (no anvil fork needed): a CCIP 2.0 lane (Arbitrum One → Ethereum) whose dest pool is a
  * healthy `BurnMintTokenPool 2.0.0`, plus the Lombard (LBTC) prod lanes between Ethereum and
- * Monad.
+ * Monad. The fallback tests replay already-executed messages at the block before their receipt.
  *
  * Deliberately none of these networks is Sepolia or Fuji: those two are the hubs every other live
  * suite locks (see `useResource`), so keeping this one off them lets it run in parallel with the
@@ -17,16 +18,19 @@ import assert from 'node:assert/strict'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { hexlify, randomBytes, zeroPadValue } from 'ethers'
+import { Contract, hexlify, randomBytes, zeroPadValue } from 'ethers'
 
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
 import { reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
-import { useResource } from '../../../scripts/useResource.ts'
+import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
+import { CCIPAPIClient } from '../api/index.ts'
+import type { Chain } from '../chain.ts'
 import { CCIPDestSimulationUnavailableError } from '../errors/index.ts'
 import { estimateReceiveExecution } from '../gas.ts'
-import { CCIPVersion } from '../types.ts'
+import { type CCIPRequest, type CCIPVerifications, CCIPVersion } from '../types.ts'
+import { interfaces } from './const.ts'
 import { simulateReleaseOrMint } from './simulate.ts'
 import { EVMChain } from './index.ts'
 
@@ -235,6 +239,125 @@ describe(
         },
       })
       assert.equal(viaWrapper, direct)
+    })
+  },
+)
+
+describe(
+  'Token verifier fallback integration (live RPC, read-only)',
+  { skip, timeout: 300_000 },
+  () => {
+    useResourceForDescribe(['api'])
+
+    /**
+     * Collect `request`'s verifications on `dest` with the managed sources disabled (besides any
+     * `ccvData` given for the non-token CCVs), so this exercises the fallback itself rather than an
+     * indexer that caught up since the message executed; then simulate the real `execute` at the block before its receipt, where the
+     * message (and the issuer's nonce or payload) is still unused.
+     */
+    async function collectAndSimulate(
+      dest: Chain & { provider: EVMChain['provider'] },
+      request: CCIPRequest,
+      offRamp: string,
+      receiptTxHash: string,
+      ccvData?: Record<string, string>,
+    ) {
+      const collected = (await dest.getVerifications({
+        offRamp,
+        request,
+        indexer: [],
+        ccvData,
+      })) as Extract<CCIPVerifications, { verifications: unknown }>
+      const { encodedMessage } = request.message as { encodedMessage: string }
+      const tx = await new Contract(offRamp, interfaces.OffRamp_v2_0, dest.provider)
+        .getFunction('execute')
+        .populateTransaction(
+          encodedMessage,
+          collected.verifications.map((v) => v.destAddress),
+          collected.verifications.map((v) => hexlify(v.ccvData)),
+          0n,
+        )
+      const { blockNumber } = await dest.getTransaction(receiptTxHash)
+      await dest.provider.call({ ...tx, from: offRamp, blockTag: blockNumber - 1 })
+      return collected.verifications
+    }
+
+    // HyperEVM -> Arbitrum One USDC/CCTP message whose only required CCV is the CCTP verifier;
+    // the CCIP API still reported that verifier as PENDING after the message executed
+    it('composes CCTP ccvData accepted by the real CCTP verifier', async () => {
+      const MESSAGE_ID = '0xe00b56173b7363e7cf700aae1e42f3689d89e84d3dfb720ca4f3b58c2fc5e9d2'
+      const SOURCE_TX = '0xed1cd756106d4fc00fc3b5f4b2a2f64f6bce3216b86416ef77b759b9150b7a1c'
+      const CCTP_VERIFIER = '0xBfD2109d3ff5b6f09281BDb52ca6b56D7Bb1ff12'
+      const request = await CCIPAPIClient.fromUrl().getMessageById(MESSAGE_ID)
+      const arbitrumChain = await EVMChain.fromUrl(ARBITRUM_RPC, { apiClient: null })
+      try {
+        const verifications = await collectAndSimulate(
+          arbitrumChain,
+          request,
+          request.metadata.offRamp!,
+          request.metadata.receiptTransactionHash!,
+        )
+        const cctp = verifications.find((v) => v.destAddress === CCTP_VERIFIER)
+        assert.ok(cctp, 'the fallback must compose a result for the CCTP verifier')
+
+        // independently compare with Circle's public response
+        const circle = (await (
+          await fetch(`https://iris-api.circle.com/v2/messages/19?transactionHash=${SOURCE_TX}`)
+        ).json()) as { messages: { status: string; message: string; attestation: string }[] }
+        const attested = circle.messages.find((m) => m.status === 'complete')
+        assert.ok(attested, 'Circle must have the attestation')
+        assert.equal(
+          hexlify(cctp.ccvData),
+          hexlify(`0x91b3338e${attested.message.slice(2)}${attested.attestation.slice(2)}`),
+        )
+      } finally {
+        arbitrumChain.provider.destroy()
+      }
+    })
+
+    // Ethereum -> Monad LBTC message through LombardTokenPool 2.1: the payload hash is only in the
+    // source CCIPMessageSent's verifierBlobs, so the request is read from the source chain
+    it('composes Lombard ccvData accepted by the real Lombard verifier', async () => {
+      const SOURCE_TX = '0xe6006b2b65b353b5283b1f670d92a7dfd9f2345c952d14550db4ff3ffbc57d51'
+      const LOMBARD_RESOLVER = '0xd314336866369adf98EDC14F95Ed05eD87CC74A8'
+      const OFF_RAMP = '0xa315658c5E11b0Ca99dE255F07F10E6C584E4e01'
+      const ethereumChain = await EVMChain.fromUrl(ETHEREUM_RPC, { apiClient: null })
+      const monadChain = await EVMChain.fromUrl(MONAD_RPC, { apiClient: null })
+      try {
+        const [request] = await ethereumChain.getMessagesInTx(SOURCE_TX)
+        assert.ok(request)
+        const api = CCIPAPIClient.fromUrl()
+        const { metadata } = await api.getMessageById(request.message.messageId)
+        // the committee verifier's signatures come from the API, the Lombard CCV's from the fallback
+        const fromApi = await api.getVerifications(request.message.messageId)
+        const lombardFromApi = fromApi.find((v) => v.destAddress === LOMBARD_RESOLVER)
+        const verifications = await collectAndSimulate(
+          monadChain,
+          request,
+          OFF_RAMP,
+          metadata.receiptTransactionHash!,
+          Object.fromEntries(
+            fromApi
+              .filter((v) => v !== lombardFromApi)
+              .map((v) => [v.destAddress, hexlify(v.ccvData)]),
+          ),
+        )
+        const lombard = verifications.find((v) => v.destAddress === LOMBARD_RESOLVER)
+        assert.ok(lombard, 'the fallback must compose a result for the Lombard verifier')
+        // [LombardVerifier 2.1.0 tag][payloadLength][payload][proofLength][proof]: the tag and the
+        // payload match what the CCV posted; the proof may carry a different subset of the notary
+        // signatures (the posted one zeroes those beyond the threshold), and the simulated
+        // `execute` above is what proves it valid
+        const ours = hexlify(lombard.ccvData)
+        const posted = hexlify(lombardFromApi!.ccvData)
+        const payloadEnd = 2 + 2 * (4 + 2 + parseInt(ours.slice(10, 14), 16))
+        assert.equal(ours.slice(0, 10), '0x5b9253ce')
+        assert.equal(ours.slice(0, payloadEnd), posted.slice(0, payloadEnd))
+        assert.equal(ours.length, posted.length)
+      } finally {
+        ethereumChain.provider.destroy()
+        monadChain.provider.destroy()
+      }
     })
   },
 )

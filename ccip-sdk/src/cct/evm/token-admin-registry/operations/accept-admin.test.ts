@@ -185,10 +185,32 @@ describe('AcceptAdmin (cct/evm token-admin-registry operation)', () => {
       )
     })
 
-    it('rejects a missing sender', async () => {
+    it('builds without a sender for multisig admins, skipping only the pending-administrator check', async () => {
+      // The pending administrator is OTHER, not the caller: without `sender` there is nobody to
+      // compare it against, but the registry is still read to confirm something is pending.
+      const provider = stubProvider({ pendingAdministrator: OTHER })
+      const unsigned = await new AcceptAdmin().generate(
+        stubChain({ provider: provider as never }),
+        { tokenAddress: TOKEN, address: ADDRESS },
+      )
+      const tx = unsigned.transactions[0]!
+      assert.equal(tx.to, TAR)
+      assert.equal(tx.from, undefined)
+      assert.equal(tx.data, SELECTOR + word(TOKEN))
+      assert.equal(provider.calls.length, 1, 'pending state is still read')
+    })
+
+    it('still rejects when no administrator is pending and sender is omitted', async () => {
       await assert.rejects(
-        () => new AcceptAdmin().generate(stubChain(), { tokenAddress: TOKEN, address: ADDRESS }),
-        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
+        () =>
+          new AcceptAdmin().generate(
+            stubChain({ provider: stubProvider({ administrator: OTHER }) as never }),
+            { tokenAddress: TOKEN, address: ADDRESS },
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'acceptAdmin' &&
+          /nothing to accept/.test(err.message),
       )
     })
 
@@ -297,6 +319,22 @@ describe('AcceptAdmin (cct/evm token-admin-registry operation)', () => {
         wallet: fakeSigner(),
       })
       assert.deepEqual(result, { hash: HASH })
+    })
+
+    it('checks the defaulted wallet sender against the pending administrator', async () => {
+      // generate() skips the check without a sender; execute() must not, since it always knows
+      // the signer. fakeSigner() reports SENDER, but OTHER is pending.
+      await assert.rejects(
+        () =>
+          new AcceptAdmin().execute(
+            stubChain({ provider: stubProvider({ pendingAdministrator: OTHER }) as never }),
+            { tokenAddress: TOKEN, address: ADDRESS, wallet: fakeSigner() },
+          ),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.param === 'sender' &&
+          /must be the pending token administrator/.test(err.message),
+      )
     })
 
     it('binds a lowercase sender to a checksummed wallet address', async () => {

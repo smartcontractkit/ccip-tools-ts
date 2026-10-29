@@ -92,7 +92,7 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
-import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
+import { type TokenVerifier, CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { buildMessageForDest, decodeMessage } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -107,6 +107,7 @@ import {
   type ExecutionState,
   type Lane,
   type LeanNumbers,
+  type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
@@ -163,7 +164,11 @@ import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
 import { type MessageV1TokenTransfer, encodeMessageV1 } from './messageCodec.ts'
 import type { CCIPMessage_V1_6_EVM, CleanAddressable } from './messages.ts'
-import { encodeEVMOffchainTokenData } from './offchain.ts'
+import {
+  encodeEVMOffchainTokenData,
+  encodeEVMTokenCcvData,
+  getEVMTokenVerifiers,
+} from './offchain.ts'
 import {
   type PoolInterfaceVersion,
   describeRevert,
@@ -2763,6 +2768,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
     // fallback <=v1.6
     return super.getVerifications(opts)
+  }
+
+  /** {@inheritDoc Chain.getTokenVerifiers} */
+  protected override getTokenVerifiers(
+    ccv: string,
+    sourceChainSelector: bigint,
+  ): Promise<TokenVerifier[]> {
+    return getEVMTokenVerifiers(this, ccv, sourceChainSelector)
+  }
+
+  /** {@inheritDoc Chain.encodeTokenCcvData} */
+  protected override encodeTokenCcvData(
+    versionTag: string,
+    data: NonNullable<OffchainTokenData>,
+  ): string {
+    return encodeEVMTokenCcvData(versionTag, data)
   }
 
   /** {@inheritDoc Chain.getExecutionReceipts} */

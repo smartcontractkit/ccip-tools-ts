@@ -1,13 +1,15 @@
 /**
- * setRateLimitAdmin — assigns the TokenPool role allowed to change rate limits alongside the
- * owner (v1.5.0–v1.6.1 only).
+ * setRateLimitAdmin: assigns the TokenPool role allowed to change rate limits alongside the owner.
  *
- * @remarks **Removed in v2.0.0.** The standalone `setRateLimitAdmin(address)` selector does not
- * exist on a 2.0.0 pool: the role was folded into a three-field dynamic config
- * (`router`/`rateLimitAdmin`/`feeAdmin`) written in one shot by `setDynamicConfig`. The encoder
- * table therefore pins an explicit `null` ceiling at 2.0.0 so a 2.0.0 pool is reported
- * unsupported instead of floor-matching the 1.5.0 encoder and emitting calldata for a selector
- * the pool does not implement. Use {@link SetDynamicConfig} there.
+ * @remarks **v2.0.0 has no standalone setter.** 2.0.0 removed `setRateLimitAdmin(address)` and
+ * folded the role into a dynamic config (`router`/`rateLimitAdmin`/`feeAdmin`) that
+ * `setDynamicConfig` overwrites as a whole. On a 2.0.0 pool this op reads `getDynamicConfig()`
+ * at build time and encodes `setDynamicConfig(router, newRateLimitAdmin, feeAdmin)`, writing
+ * `router` and `feeAdmin` back as read.
+ *
+ * Unlike {@link SetDynamicConfig}, the 2.0.0 calldata therefore depends on chain state at build
+ * time: if `router` or `feeAdmin` changes before a multisig signs, the tx writes the old value
+ * back. Use {@link SetDynamicConfig} for exact control over all three fields.
  *
  * Owner-only, deliberately: unlike the rate-limit *config* ops — which the pool accepts from
  * either the owner or the current `rateLimitAdmin` — this op assigns the role itself, so
@@ -27,6 +29,7 @@ import {
   TokenPoolVersion,
   assertPoolOwner,
   getTokenPoolInterface,
+  readTokenPoolDynamicConfig,
   resolveEncoder,
   resolveTokenPool,
 } from '../contracts.ts'
@@ -56,27 +59,53 @@ export type SetRateLimitAdminParams = {
   sender?: string
 }
 
-/** Encodes `setRateLimitAdmin` calldata against the resolved pool {@link Interface}. */
-type Encoder = (iface: Interface, params: SetRateLimitAdminParams) => UnsignedEVMTx
+/**
+ * Encodes the role assignment against the resolved pool {@link Interface}. Takes `chain` and is
+ * async because the v2.0.0 encoder reads the fields it must preserve.
+ */
+type Encoder = (
+  chain: EVMChain,
+  iface: Interface,
+  params: SetRateLimitAdminParams,
+) => Promise<UnsignedEVMTx>
 
-const encodeSetRateLimitAdmin: Encoder = (iface, { poolAddress, newRateLimitAdmin }) =>
-  callTx(poolAddress, iface.encodeFunctionData('setRateLimitAdmin', [newRateLimitAdmin]))
+/** v1.5.0–v1.6.1: the standalone `setRateLimitAdmin(address)`. */
+const encodeSetRateLimitAdmin: Encoder = async (
+  _chain,
+  iface,
+  { poolAddress, newRateLimitAdmin },
+) => callTx(poolAddress, iface.encodeFunctionData('setRateLimitAdmin', [newRateLimitAdmin]))
 
 /**
- * Assigns a TokenPool's rate-limit admin role (v1.5.0–v1.6.1). Owner-only; removed in v2.0.0 in
- * favour of {@link SetDynamicConfig}.
+ * v2.0.0: `setDynamicConfig(router, rateLimitAdmin, feeAdmin)` overwrites all three fields, so
+ * `router` and `feeAdmin` are read from `getDynamicConfig()` and written back as read.
+ */
+const encodeSetDynamicConfigV2_0_0: Encoder = async (
+  chain,
+  iface,
+  { poolAddress, newRateLimitAdmin },
+) => {
+  const { router, feeAdmin } = await readTokenPoolDynamicConfig(chain, poolAddress)
+  return callTx(
+    poolAddress,
+    iface.encodeFunctionData('setDynamicConfig', [router, newRateLimitAdmin, feeAdmin]),
+  )
+}
+
+/**
+ * Assigns a TokenPool's rate-limit admin role. Owner-only. On v2.0.0 it writes
+ * `setDynamicConfig`, keeping the on-chain `router` and `feeAdmin`.
  */
 export class SetRateLimitAdmin extends EVMOperation<SetRateLimitAdminParams> {
   readonly name = 'setRateLimitAdmin'
 
   /**
-   * One 1.5.0 entry covers 1.5.1, 1.6.0 and 1.6.1 by floor-match (the encoding never changed), and
-   * the explicit `null` at 2.0.0 is load-bearing, not decoration: without it a 2.0.0 pool would
-   * floor-match the 1.5.0 encoder and produce calldata for a selector that version removed.
+   * One 1.5.0 entry covers 1.5.1, 1.6.0 and 1.6.1 by floor-match (the encoding never changed).
+   * 2.0.0 needs its own entry: it removed the selector the 1.5.0 encoder emits.
    */
-  private readonly encoders: Partial<Record<TokenPoolVersion, Encoder | null>> = {
+  private readonly encoders: Partial<Record<TokenPoolVersion, Encoder>> = {
     [TokenPoolVersion.V1_5_0]: encodeSetRateLimitAdmin,
-    [TokenPoolVersion.V2_0_0]: null,
+    [TokenPoolVersion.V2_0_0]: encodeSetDynamicConfigV2_0_0,
   }
 
   /** Validates both addresses before any RPC; a zero `newRateLimitAdmin` clears the role. */
@@ -88,17 +117,18 @@ export class SetRateLimitAdmin extends EVMOperation<SetRateLimitAdminParams> {
   }
 
   /**
-   * Resolves the pool's type/version, confirms `sender` (when given) is the pool owner, then
-   * floor-matches the encoder against that version.
+   * Resolves the pool's type/version and floor-matches the encoder, then encodes while
+   * confirming `sender` (when given) is the pool owner.
    * @remarks The owner check lives here, not only in {@link execute}, so the offline / multisig
    * path gets it too: `generateUnsignedSetRateLimitAdmin` with an unauthorized `sender` would
    * otherwise hand back a fully-formed transaction that reverts `Unauthorized` only after being
    * reviewed and signed. Every sibling owner-gated pool write gates in `buildUnsigned` for the
    * same reason.
-   * @remarks Ordered *after* the encoder so a 2.0.0 pool reports the real problem (removed
-   * selector) rather than spending a round trip and failing on an authorization detail.
-   * @throws {@link CCTOperationUnsupportedError} on a v2.0.0 pool — the selector was removed;
-   * use {@link SetDynamicConfig}
+   * @remarks Encoder resolution runs *before* any read so a version with no encoder reports the
+   * real problem (unsupported) rather than spending a round trip and failing on an authorization
+   * detail. Encoding (which reads `getDynamicConfig()` on v2.0.0) and the owner check are
+   * independent, so they run in parallel.
+   * @throws {@link CCTOperationUnsupportedError} if no encoder covers the pool's version
    * @throws {@link CCTParamsInvalidError} if `sender` is given and is not the pool owner
    */
   protected async buildUnsigned(
@@ -107,9 +137,11 @@ export class SetRateLimitAdmin extends EVMOperation<SetRateLimitAdminParams> {
   ): Promise<UnsignedEVMTx> {
     const { type, version } = await resolveTokenPool(chain, params.poolAddress)
     const encode = resolveEncoder(this.encoders, version, this.name)
-    const unsigned = encode(getTokenPoolInterface(type, version), params)
-    if (params.sender !== undefined)
-      await assertPoolOwner(this.name, chain, params.poolAddress, params.sender)
+    const [unsigned] = await Promise.all([
+      encode(chain, getTokenPoolInterface(type, version), params),
+      params.sender !== undefined &&
+        assertPoolOwner(this.name, chain, params.poolAddress, params.sender),
+    ])
     return unsigned
   }
 }

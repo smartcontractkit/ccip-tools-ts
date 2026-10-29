@@ -7,7 +7,7 @@ import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../err
 import type { EVMChain } from '../../../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../../../networks.ts'
 import { parseTypeAndVersion } from '../../../../utils.ts'
-import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
 import {
   type TokenPoolFamily,
   type TokenPoolType,
@@ -18,7 +18,10 @@ import { type SetRateLimitAdminParams, SetRateLimitAdmin } from './set-rate-limi
 
 const POOL = '0x' + '11'.repeat(20)
 const OWNER = '0x' + '22'.repeat(20)
+const CURRENT_ADMIN = '0x' + '33'.repeat(20)
 const NEW_ADMIN = '0x' + '44'.repeat(20)
+const ROUTER = '0x' + '55'.repeat(20)
+const FEE_ADMIN = '0x' + '66'.repeat(20)
 const NOT_THE_OWNER = '0x' + '88'.repeat(20)
 const HASH = '0x' + 'ab'.repeat(32)
 
@@ -28,6 +31,11 @@ const HASH = '0x' + 'ab'.repeat(32)
  */
 const IFACE = new Interface(['function setRateLimitAdmin(address rateLimitAdmin)'])
 const dataFor = (admin: string) => IFACE.encodeFunctionData('setRateLimitAdmin', [admin])
+const IFACE_V2_0_0 = new Interface([
+  'function setDynamicConfig(address router, address rateLimitAdmin, address feeAdmin)',
+])
+const dataForV2_0_0 = (router: string, rateLimitAdmin: string, feeAdmin: string) =>
+  IFACE_V2_0_0.encodeFunctionData('setDynamicConfig', [router, rateLimitAdmin, feeAdmin])
 
 /** Pool type reported by `typeAndVersion` for each ABI family. */
 const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
@@ -38,26 +46,33 @@ const POOL_TYPE: Record<TokenPoolFamily, TokenPoolType> = {
 
 /**
  * EVMChain stub: `typeAndVersion` reports the requested family/version, and `provider.call`
- * answers `owner()` (the only read this op makes) off the pool's own Interface. Every other
- * selector reverts, which is what pins "no other RPC".
+ * answers `owner()` and, on a 2.0.0 pool, `getDynamicConfig()` off the pool's own Interface.
+ * Every other selector reverts, which is what pins "no other RPC".
  */
 function stubChain({
   family = 'BurnMint',
   version = TokenPoolVersion.V1_5_0,
   owner = OWNER,
+  dynamicConfig = [ROUTER, CURRENT_ADMIN, FEE_ADMIN],
   onCall,
 }: {
   family?: TokenPoolFamily
   version?: TokenPoolVersion
   owner?: string
-  onCall?: () => void
+  dynamicConfig?: [router: string, rateLimitAdmin: string, feeAdmin: string]
+  onCall?: (selector?: string) => void
 } = {}): EVMChain {
   const iface = getTokenPoolInterface(POOL_TYPE[family], version)
+  const results: Record<string, unknown[]> = { owner: [owner] }
+  if (iface.hasFunction('getDynamicConfig')) results.getDynamicConfig = dynamicConfig
   return {
     provider: {
       call: async ({ data }: { data: string }) => {
-        onCall?.()
-        if (data.slice(0, 10) !== iface.getFunction('owner')!.selector)
+        onCall?.(data.slice(0, 10))
+        const fn = Object.keys(results).find(
+          (name) => iface.getFunction(name)!.selector === data.slice(0, 10),
+        )
+        if (!fn)
           throw makeError('execution reverted', 'CALL_EXCEPTION', {
             action: 'call',
             data: '0x',
@@ -66,7 +81,7 @@ function stubChain({
             invocation: null,
             revert: null,
           })
-        return iface.encodeFunctionResult('owner', [owner])
+        return iface.encodeFunctionResult(fn, results[fn]!)
       },
     },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
@@ -104,7 +119,7 @@ function generate(chain: EVMChain, overrides: Partial<SetRateLimitAdminParams> =
   })
 }
 
-/** Versions that still declare `setRateLimitAdmin`; 2.0.0 removed it. */
+/** Versions that still declare `setRateLimitAdmin`; 2.0.0 folded it into `setDynamicConfig`. */
 const SUPPORTED = [
   TokenPoolVersion.V1_5_0,
   TokenPoolVersion.V1_5_1,
@@ -181,20 +196,105 @@ describe('SetRateLimitAdmin (cct/evm)', () => {
       })
     }
 
-    it('rejects a 2.0.0 pool — the selector was removed, use setDynamicConfig', async () => {
-      await assert.rejects(
-        () => generate(stubChain({ version: TokenPoolVersion.V2_0_0 })),
-        (err: unknown) =>
-          err instanceof CCTOperationUnsupportedError &&
-          err.context.operation === 'setRateLimitAdmin' &&
-          err.context.version === TokenPoolVersion.V2_0_0,
+    it('never reads getDynamicConfig on a v1.x pool, which has no dynamic config', async () => {
+      const selectors: (string | undefined)[] = []
+      await generate(stubChain({ onCall: (selector) => selectors.push(selector) }))
+      // typeAndVersion, then owner()
+      assert.deepEqual(selectors, [
+        undefined,
+        getTokenPoolInterface('BurnMintTokenPool', TokenPoolVersion.V1_5_0).getFunction('owner')!
+          .selector,
+      ])
+    })
+  })
+
+  describe('v2.0.0', () => {
+    const V2 = TokenPoolVersion.V2_0_0
+    const ifaceV2 = getTokenPoolInterface('BurnMintTokenPool', V2)
+
+    for (const family of ['BurnMint', 'LockRelease', 'SiloedLockRelease'] as const) {
+      // Distinct router, current admin and fee admin: writing back the current admin, or swapping
+      // router and feeAdmin, must fail byte parity.
+      it(`encodes setDynamicConfig(router, newRateLimitAdmin, feeAdmin) for a ${family} pool, keeping router and feeAdmin as read`, async () => {
+        const unsigned = await generate(stubChain({ family, version: V2 }))
+        const tx = unsigned.transactions[0]!
+
+        assert.equal(unsigned.transactions.length, 1)
+        assert.equal(tx.to, POOL)
+        assert.equal(tx.from, OWNER)
+        assert.equal(tx.data, dataForV2_0_0(ROUTER, NEW_ADMIN, FEE_ADMIN))
+      })
+    }
+
+    it('allows the zero address to clear the role without clearing feeAdmin', async () => {
+      const unsigned = await generate(stubChain({ version: V2 }), {
+        newRateLimitAdmin: ZeroAddress,
+      })
+      assert.equal(unsigned.transactions[0]!.data, dataForV2_0_0(ROUTER, ZeroAddress, FEE_ADMIN))
+    })
+
+    it('keeps an unset feeAdmin unset rather than rejecting it', async () => {
+      const unsigned = await generate(
+        stubChain({ version: V2, dynamicConfig: [ROUTER, CURRENT_ADMIN, ZeroAddress] }),
+      )
+      assert.equal(unsigned.transactions[0]!.data, dataForV2_0_0(ROUTER, NEW_ADMIN, ZeroAddress))
+    })
+
+    it('reads getDynamicConfig and checks owner() when sender is supplied', async () => {
+      const selectors: (string | undefined)[] = []
+      await generate(stubChain({ version: V2, onCall: (selector) => selectors.push(selector) }))
+      // typeAndVersion first; the two reads after it run in parallel, so their order is not pinned
+      assert.equal(selectors.length, 3)
+      assert.equal(selectors[0], undefined)
+      assert.deepEqual(
+        new Set(selectors.slice(1)),
+        new Set([
+          ifaceV2.getFunction('getDynamicConfig')!.selector,
+          ifaceV2.getFunction('owner')!.selector,
+        ]),
       )
     })
 
-    it('reports 2.0.0 unsupported for the LockRelease family too', async () => {
+    it('reads getDynamicConfig but skips the owner read when sender is not supplied', async () => {
+      const selectors: (string | undefined)[] = []
+      const unsigned = await generate(
+        stubChain({ version: V2, onCall: (selector) => selectors.push(selector) }),
+        { sender: undefined },
+      )
+      assert.equal(unsigned.transactions[0]!.from, undefined)
+      assert.deepEqual(selectors, [undefined, ifaceV2.getFunction('getDynamicConfig')!.selector])
+    })
+
+    it('rejects a sender that is not the pool owner', async () => {
       await assert.rejects(
-        () => generate(stubChain({ family: 'LockRelease', version: TokenPoolVersion.V2_0_0 })),
-        CCTOperationUnsupportedError,
+        () => generate(stubChain({ version: V2, owner: NOT_THE_OWNER })),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'setRateLimitAdmin' &&
+          err.context.param === 'sender',
+      )
+    })
+
+    it('rejects invalid params before the getDynamicConfig read', async () => {
+      let called = false
+      await assert.rejects(
+        () =>
+          generate(stubChain({ version: V2, onCall: () => (called = true) }), {
+            newRateLimitAdmin: 'not-an-address',
+          }),
+        CCTParamsInvalidError,
+      )
+      assert.equal(called, false)
+    })
+
+    it('signs and submits as the owner, resolving to the tx hash', async () => {
+      assert.deepEqual(
+        await op.execute(stubChain({ version: V2 }), {
+          poolAddress: POOL,
+          newRateLimitAdmin: NEW_ADMIN,
+          wallet: fakeSigner(),
+        }),
+        { hash: HASH },
       )
     })
   })

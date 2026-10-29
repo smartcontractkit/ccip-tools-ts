@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
+import { concat, hexlify } from 'ethers'
+
 import { NetworkType } from './networks.ts'
-import { getLbtcAttestation, getOffchainTokenData, getUsdcAttestation } from './offchain.ts'
+import {
+  CCTP_V2_CCV_TAG,
+  getAttestedVersionTag,
+  getLbtcAttestation,
+  getLbtcPayloadHash,
+  getOffchainTokenData,
+  getUsdcAttestation,
+  parseCctpV2ExtraData,
+} from './offchain.ts'
 
 const origFetch = globalThis.fetch
 
@@ -379,5 +389,192 @@ describe('getOffchainTokenData', () => {
     assert.deepEqual(body, { messageHash: [lbtcHashHex] })
     assert.equal(result[0]!._tag, 'lbtc')
     assert.equal(result[0]!.attestation, lbtcAttestation)
+  })
+})
+
+describe('CCTP v2 helpers', () => {
+  const messageId = '0x' + '42'.repeat(32)
+  const versionTag = '0x91b3338e'
+  const cctpMessage = hexlify(concat([new Uint8Array(376), versionTag, messageId]))
+
+  it('should parse the 4-byte CCTP v2 tag', () => {
+    assert.deepEqual(parseCctpV2ExtraData(CCTP_V2_CCV_TAG), { tag: CCTP_V2_CCV_TAG })
+  })
+
+  it('should parse the 40-byte CCTP v2 payload and its source domain', () => {
+    const extraData = hexlify(concat([CCTP_V2_CCV_TAG, '0x00000005', '0x' + '11'.repeat(32)]))
+    assert.deepEqual(parseCctpV2ExtraData(extraData), {
+      tag: CCTP_V2_CCV_TAG,
+      sourceDomain: 5,
+    })
+  })
+
+  it('should reject payloads that are not CCTP v2', () => {
+    assert.equal(parseCctpV2ExtraData('0x' + '00'.repeat(4)), undefined)
+    assert.equal(parseCctpV2ExtraData('0x' + '00'.repeat(32)), undefined)
+  })
+
+  it('should read the version tag from the CCTP hook data', () => {
+    assert.equal(getAttestedVersionTag(cctpMessage, messageId), versionTag)
+  })
+
+  it('should reject a CCTP message that does not end with the message id', () => {
+    assert.equal(getAttestedVersionTag(cctpMessage, '0x' + '43'.repeat(32)), undefined)
+  })
+
+  it('should read the version tag from a Lombard bridged message', () => {
+    const lombardPayload = hexlify(concat(['0x' + '00'.repeat(200), versionTag, messageId]))
+    assert.equal(getAttestedVersionTag(lombardPayload, messageId), versionTag)
+  })
+})
+
+describe('getUsdcAttestation by message id', () => {
+  const messageId = '0x' + '42'.repeat(32)
+  const origFetchFn = globalThis.fetch
+  const mockedFetchJson = mock.fn(() =>
+    Promise.resolve({
+      messages: [
+        {
+          status: 'complete' as const,
+          eventNonce: '1',
+          attestation: '0xwrong',
+          message: '0x' + '11'.repeat(32),
+        },
+        {
+          status: 'complete' as const,
+          eventNonce: '2',
+          attestation: '0xright',
+          message: hexlify(concat(['0x' + '00'.repeat(376), '0x91b3338e', messageId])),
+        },
+      ],
+    }),
+  )
+  const mockedFetch = mock.fn(() => Promise.resolve({ json: mockedFetchJson }))
+
+  beforeEach(() => {
+    mockedFetch.mock.resetCalls()
+    mockedFetchJson.mock.resetCalls()
+    globalThis.fetch = mockedFetch as any
+  })
+
+  afterEach(() => {
+    globalThis.fetch = origFetchFn
+    mockedFetch.mock.restore()
+    mockedFetchJson.mock.restore()
+  })
+
+  it('should select the CCTP message whose hook data carries the CCIP message id', async () => {
+    const result = await getUsdcAttestation(
+      { sourceDomain: 5, txHash: '0xdeadbeef', messageId },
+      NetworkType.Testnet,
+    )
+
+    assert.equal(result.attestation, '0xright')
+    assert.equal(mockedFetch.mock.calls.length, 1)
+  })
+})
+
+describe('getOffchainTokenData for CCTP v2', () => {
+  const messageId = '0x' + '42'.repeat(32)
+  const versionTag = '0x91b3338e'
+  const cctpMessage = hexlify(concat([new Uint8Array(376), versionTag, messageId]))
+  const attestation = '0x' + 'ab'.repeat(65)
+  const origFetchFn = globalThis.fetch
+  const mockedFetchJson = mock.fn(() =>
+    Promise.resolve({
+      messages: [
+        { status: 'complete' as const, eventNonce: '0', attestation, message: cctpMessage },
+      ],
+    }),
+  )
+  const mockedFetch = mock.fn((_url: string) => Promise.resolve({ json: mockedFetchJson }))
+
+  function makeRequest(extraData: string) {
+    return {
+      log: { transactionHash: '0x' + 'ab'.repeat(32) },
+      message: {
+        sourceChainSelector: 16423721717087811551n, // solana-devnet (testnet)
+        messageId,
+        tokenAmounts: [{ extraData }],
+      },
+    }
+  }
+
+  beforeEach(() => {
+    mockedFetch.mock.resetCalls()
+    mockedFetchJson.mock.resetCalls()
+    globalThis.fetch = mockedFetch as any
+  })
+
+  afterEach(() => {
+    globalThis.fetch = origFetchFn
+    mockedFetch.mock.restore()
+    mockedFetchJson.mock.restore()
+  })
+
+  it('should use the supplied source domain for a 4-byte v2 payload', async () => {
+    const result = await getOffchainTokenData(makeRequest(CCTP_V2_CCV_TAG) as any, {
+      logger: { debug: () => {}, warn: () => {} } as any,
+      usdcSourceDomain: 5,
+    })
+
+    assert.equal(mockedFetch.mock.calls[0]!.arguments[0]!.includes('/messages/5?'), true)
+    assert.equal(result[0]!._tag, 'usdc')
+    assert.equal(result[0]!.message, cctpMessage)
+    assert.equal(result[0]!.attestation, attestation)
+  })
+
+  it('should read the source domain from a 40-byte v2 payload', async () => {
+    const extraData = hexlify(concat([CCTP_V2_CCV_TAG, '0x00000005', '0x' + '11'.repeat(32)]))
+    const result = await getOffchainTokenData(makeRequest(extraData) as any, {
+      logger: { debug: () => {}, warn: () => {} } as any,
+    })
+
+    assert.equal(mockedFetch.mock.calls[0]!.arguments[0]!.includes('/messages/5?'), true)
+    assert.equal(result[0]!._tag, 'usdc')
+  })
+
+  it('should skip a 4-byte v2 payload without a source-domain hint', async () => {
+    const result = await getOffchainTokenData(makeRequest(CCTP_V2_CCV_TAG) as any, {
+      logger: { debug: () => {}, warn: () => {} } as any,
+    })
+
+    assert.equal(mockedFetch.mock.calls.length, 0)
+    assert.equal(result[0], undefined)
+  })
+})
+
+describe('getLbtcPayloadHash', () => {
+  // the receipts and verifierBlobs of a real Ethereum -> Monad LBTC v2 send
+  const lombardResolver = '0xd314336866369adf98EDC14F95Ed05eD87CC74A8'
+  const payloadHash = '0x5aa68f9d03e8227a6863ad17613bdfec46d9c0e98d3457ea1ddd6588caf6e2f6'
+  const message = {
+    receipts: [
+      { issuer: lombardResolver },
+      { issuer: '0x2CaAfd3B4Cf606220580c885Bd2B448FB93dC03b' }, // committee verifier
+      { issuer: '0x626BdEe51E85A127eb6A08ed79c68a4b7AC80b4A' }, // token pool
+      { issuer: '0x6608d995bBDE874De5292bFD289643c88D176ED3' }, // executor
+    ],
+    verifierBlobs: [payloadHash, '0xe9a05a20'],
+  }
+
+  it("should take the Lombard CCV's blob", () => {
+    assert.equal(getLbtcPayloadHash(message, [lombardResolver.toLowerCase()]), payloadHash)
+  })
+
+  it("should not take another CCV's 32-byte blob", () => {
+    const unrelated = {
+      receipts: [
+        { issuer: '0x2CaAfd3B4Cf606220580c885Bd2B448FB93dC03b' },
+        { issuer: lombardResolver },
+      ],
+      verifierBlobs: ['0x' + '77'.repeat(32), '0x'],
+    }
+    assert.equal(getLbtcPayloadHash(unrelated, [lombardResolver]), undefined)
+  })
+
+  it('should find nothing when the request carries no source receipts', () => {
+    assert.equal(getLbtcPayloadHash({}, [lombardResolver]), undefined)
+    assert.equal(getLbtcPayloadHash({ verifierBlobs: [payloadHash] }, [lombardResolver]), undefined)
   })
 })

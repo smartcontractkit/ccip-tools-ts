@@ -86,10 +86,10 @@ export type RegisterAdminParams = {
    */
   registrationMethod?: RegisterAdminMethod
   /**
-   * Address the registration is authorized against. Optional here, unlike `transferAdmin` and
-   * `acceptAdmin` which reject an omitted `sender`: leaving it out SKIPS the token-authority probe
-   * in {@link RegisterAdmin.buildUnsigned}, so the tx builds without that check and can then only
-   * fail on-chain. {@link RegisterAdmin.execute} defaults it to the signing wallet.
+   * Address the registration is authorized against. Optional, as on `transferAdmin` and
+   * `acceptAdmin`: omitting it skips the token-authority probe in
+   * {@link RegisterAdmin.buildUnsigned}, so a wrong signer only fails on-chain.
+   * {@link RegisterAdmin.execute} defaults it to the signing wallet.
    */
   sender?: string
 }

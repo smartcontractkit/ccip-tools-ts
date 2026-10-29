@@ -58,6 +58,8 @@ const customErrors = [
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 export const TokenPoolAndProxyABI = parseAbi(['function getPreviousPool() view returns (address)'])
+/** The 4-byte tag a CCIP v2.0 verifier implementation's `ccvData` must start with. */
+export const VerifierABI = parseAbi(['function versionTag() view returns (bytes4)'])
 
 export const interfaces = {
   Router: new Interface(Router_ABI),
