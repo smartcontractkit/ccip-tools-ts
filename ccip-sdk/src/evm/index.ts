@@ -1472,7 +1472,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const [type, version] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
       return address
-    } else if (type.includes('TokenPool')) {
+    } else if (type.includes('TokenPool') || type === 'CrossChainPoolToken') {
       address = (await this.getTokenPoolConfig(address)).router
       return this.getTokenAdminRegistryFor(address, destChainSelector)
     } else if (type === 'Router') {
