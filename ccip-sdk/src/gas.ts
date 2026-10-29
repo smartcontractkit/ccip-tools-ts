@@ -170,7 +170,9 @@ export async function sourceToDestTokenAddresses<S extends { token: string }>({
   )
   if (!sourcePoolAddress)
     throw new CCIPTokenNotInRegistryError(sourceTokenAddress, tokenAdminRegistry)
-  const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector)
+  const remotes = await source.getTokenPoolRemotes(sourcePoolAddress, destChainSelector, {
+    token: sourceTokenAddress,
+  })
   return {
     ...sourceTokenAmount,
     sourcePoolAddress,

@@ -20,9 +20,10 @@ import {
   type GetBalanceOpts,
   type LogFilter,
   type TokenInfo,
+  type TokenPoolConfigOpts,
   type TokenPoolRemote,
+  type TokenPoolRemotesOpts,
   type TokenPrice,
-  type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
 import {
@@ -918,7 +919,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   /** {@inheritDoc Chain.getTokenPoolConfig} */
   async getTokenPoolConfig(
     tokenPool: string,
-    _feeOpts?: TokenTransferFeeOpts,
+    _opts?: TokenPoolConfigOpts,
   ): Promise<{
     token: string
     router: string
@@ -961,6 +962,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
+    _opts?: TokenPoolRemotesOpts,
   ): Promise<Record<string, TokenPoolRemote>> {
     type RawRateLimiterState_ = {
       capacity: string

@@ -2701,6 +2701,38 @@ export class CCIPTokenPoolInfoNotFoundError extends CCIPError {
 }
 
 /**
+ * Thrown when a pool read needs the local token, but none is given: the pool serves multiple
+ * tokens (a multi-token pool), so the pool address alone does not select one token's
+ * configuration.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getTokenPoolConfig(tokenPool)
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenPoolTokenRequiredError) {
+ *     const config = await chain.getTokenPoolConfig(tokenPool, { token })
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTokenPoolTokenRequiredError extends CCIPError {
+  override readonly name = 'CCIPTokenPoolTokenRequiredError'
+  /** Creates a token pool token required error. */
+  constructor(tokenPool: string, typeAndVersion: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.TOKEN_POOL_TOKEN_REQUIRED,
+      `TokenPool ${tokenPool} (${typeAndVersion}) serves multiple tokens; pass the local token`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, tokenPool, typeAndVersion },
+      },
+    )
+  }
+}
+
+/**
  * Thrown when SPL token is invalid or not Token-2022.
  *
  * @example

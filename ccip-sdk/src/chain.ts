@@ -537,6 +537,32 @@ export type TokenTransferFeeOpts = {
 }
 
 /**
+ * Options for {@link Chain.getTokenPoolConfig}.
+ *
+ * @remarks
+ * Set `destChainSelector` to also fetch the token transfer fee config for that destination;
+ * `finality` defaults to `'finalized'` and `tokenArgs` to `'0x'`.
+ */
+export type TokenPoolConfigOpts = Partial<TokenTransferFeeOpts> & {
+  /**
+   * The local token whose configuration to read. Required for pools that serve multiple tokens
+   * (multi-token pools), which otherwise throw {@link CCIPTokenPoolTokenRequiredError}; ignored by
+   * single-token pools.
+   */
+  token?: string
+}
+
+/** Options for {@link Chain.getTokenPoolRemotes} and {@link Chain.getTokenPoolRemote}. */
+export type TokenPoolRemotesOpts = {
+  /**
+   * The local token whose remotes to read. Required for pools that serve multiple tokens
+   * (multi-token pools), which otherwise throw {@link CCIPTokenPoolTokenRequiredError}; ignored by
+   * single-token pools.
+   */
+  token?: string
+}
+
+/**
  * Available lane feature keys.
  * These represent features or thresholds that can be configured per-lane.
  */
@@ -713,7 +739,7 @@ export type TokenPoolConfig = {
   decimals?: number
   /**
    * Token transfer fee configuration from the pool contract.
-   * Only present when {@link TokenTransferFeeOpts} is provided to
+   * Only present when {@link TokenPoolConfigOpts.destChainSelector} is provided to
    * {@link Chain.getTokenPoolConfig} and the pool supports it (v2.0+).
    */
   tokenTransferFeeConfig?: TokenTransferFeeConfig
@@ -729,6 +755,21 @@ export type TokenPoolConfig = {
    * For LockReleaseTokenPool v2+, the address of the associated LockBox contract.
    */
   lockBox?: string
+  /**
+   * For multi-token pools, the PoolConfigManager that holds the configuration of each token.
+   */
+  poolConfigManager?: string
+  /**
+   * For multi-token pools, the ConnectionPolicyStore behind {@link TokenPoolConfig.poolConfigManager}.
+   * It stores the connection records and emits their configuration events.
+   */
+  connectionPolicyStore?: string
+  /**
+   * For multi-token pools, the SecurityPolicyStore behind {@link TokenPoolConfig.poolConfigManager}.
+   * It stores the rate limit, fee and security records, and emits their configuration and
+   * rate limit consumption events.
+   */
+  securityPolicyStore?: string
   /**
    * Min finalityDepth and finality flags for Faster-Than-Finality (FTF) and FCR (safe),
    * if TokenPool version \>= v2.0.0 and FTF is supported on this lane.
@@ -1465,6 +1506,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @param tokenPool - TokenPool address
    * @returns Promise resolving to token or mint address
+   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens, since a
+   *   pool address alone does not select one of them
    *
    * @example Get token for pool
    * ```typescript
@@ -1552,7 +1595,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (!token || token.match(/^(0x)?0*$/i)) continue
       registry ??= await this.getTokenAdminRegistryFor(router, destChainSelector)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
-      const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector)
+      const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector, { token })
       if (!remote.outboundRateLimiterState) continue
       if (amount > remote.outboundRateLimiterState.tokens) {
         throw new CCIPRateLimitExceededError('OUTBOUND', remote.outboundRateLimiterState, {
@@ -1598,7 +1641,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       if (!token || token.match(/^(0x)?0*$/i)) continue
       registry ??= await this.getTokenAdminRegistryFor(offRamp)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
-      const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!)
+      const { typeAndVersion, lockBox } = await this.getTokenPoolConfig(tokenPool!, { token })
 
       // `ta.amount` is source-denominated whenever `extraData` declares the source decimals.
       // Convert for the comparisons below, but never touch `ta.amount`: EVMChain's override
@@ -1650,7 +1693,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         }
       }
 
-      const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector)
+      const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector, {
+        token,
+      })
       if (!remote.inboundRateLimiterState) continue
       // EVM pools debit the inbound bucket in local units only from 1.6.1
       // (TokenPool._validateReleaseOrMint); 1.5.1 and 1.6.0 consume the source-denominated
@@ -2293,6 +2338,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           const { finalityDepth, finalitySafe } = await this.getTokenPoolFinality(
             tokenPool,
             opts.destChainSelector,
+            opts.token,
           )
           if (finalityDepth != null) result[LaneFeature.FINALITY_FAST] = finalityDepth
           else delete result[LaneFeature.FINALITY_FAST]
@@ -2301,7 +2347,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           fastRateLimitsApply = Boolean(finalityDepth || finalitySafe)
         }
 
-        const remote = await this.getTokenPoolRemote(tokenPool, opts.destChainSelector)
+        const remote = await this.getTokenPoolRemote(tokenPool, opts.destChainSelector, {
+          token: opts.token,
+        })
         result[LaneFeature.RATE_LIMITS] = remote.outboundRateLimiterState
         if (fastRateLimitsApply && 'fastOutboundRateLimiterState' in remote) {
           result[LaneFeature.FAST_RATE_LIMITS] = remote.fastOutboundRateLimiterState
@@ -2333,14 +2381,16 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @param tokenPool - Token pool address.
    * @param _destChainSelector - Destination chain selector of the lane.
+   * @param token - The local token, for pools that serve multiple tokens.
    * @returns The pool's `finalityDepth`/`finalitySafe` from {@link Chain.getTokenPoolConfig},
    *   pool-wide by default; families configuring finality per remote chain read the lane's.
    */
   protected async getTokenPoolFinality(
     tokenPool: string,
     _destChainSelector: bigint,
+    token?: string,
   ): Promise<Partial<FinalityAllowed>> {
-    const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool)
+    const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool, { token })
     return { finalityDepth, finalitySafe }
   }
 
@@ -2568,14 +2618,25 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * }
    * ```
    *
+   * @example Multi-token pool
+   * ```typescript
+   * // a pool that serves multiple tokens needs the local token to select its configuration
+   * const config = await chain.getTokenPoolConfig(poolAddress, { token: tokenAddress })
+   * ```
+   *
    * @param tokenPool - Token pool contract address.
-   * @param feeOpts - Optional parameters to also fetch token transfer fee config.
+   * @param opts - Optional parameters:
+   *   - `token` — the local token; required for multi-token pools, ignored by others.
+   *   - `destChainSelector` (with optional `finality` and `tokenArgs`) — to also fetch the token
+   *     transfer fee config for that destination.
    * @returns {@link TokenPoolConfig} containing token, router, version info, and optionally fee config.
    * @throws {@link CCIPNotImplementedError} on Sui or TON chains
+   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens and
+   *   `opts.token` is not given
    */
   abstract getTokenPoolConfig(
     tokenPool: string,
-    feeOpts?: TokenTransferFeeOpts,
+    opts?: TokenPoolConfigOpts,
   ): Promise<TokenPoolConfig>
 
   /**
@@ -2613,12 +2674,16 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @param tokenPool - Token pool address on the current chain.
    * @param remoteChainSelector - Optional chain selector to filter results to a single destination.
+   * @param opts - Optional `token`: the local token; required for multi-token pools, ignored by others.
    * @returns Record where keys are chain names (e.g., "ethereum-mainnet") and values are {@link TokenPoolRemote} configs.
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remoteChainSelector is specified but not configured.
+   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens and
+   *   `opts.token` is not given
    */
   abstract getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
+    opts?: TokenPoolRemotesOpts,
   ): Promise<Record<string, TokenPoolRemote>>
   /**
    * Fetch remote chain configuration for a token pool for a specific destination.
@@ -2638,14 +2703,18 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @param tokenPool - Token pool address on the current chain.
    * @param remoteChainSelector - Chain selector of the desired remote chain.
+   * @param opts - Optional `token`: the local token; required for multi-token pools, ignored by others.
    * @returns TokenPoolRemote config for the specified remote chain.
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if no configuration found for the specified remote chain.
+   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens and
+   *   `opts.token` is not given
    */
   async getTokenPoolRemote(
     tokenPool: string,
     remoteChainSelector: bigint,
+    opts?: TokenPoolRemotesOpts,
   ): Promise<TokenPoolRemote> {
-    const remotes = await this.getTokenPoolRemotes(tokenPool, remoteChainSelector)
+    const remotes = await this.getTokenPoolRemotes(tokenPool, remoteChainSelector, opts)
     const network = networkInfo(remoteChainSelector)
     const remoteConfig = remotes[network.name]
     if (!remoteConfig) {
