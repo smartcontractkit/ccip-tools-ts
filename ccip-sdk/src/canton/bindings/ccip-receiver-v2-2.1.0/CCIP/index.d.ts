@@ -1,3 +1,3 @@
-import * as CCIPReceiver from './CCIPReceiver'
+import * as CCIPReceiver from './CCIPReceiver';
 
-export { CCIPReceiver }
+export { CCIPReceiver };

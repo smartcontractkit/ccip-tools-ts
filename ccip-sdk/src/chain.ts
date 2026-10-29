@@ -239,6 +239,9 @@ export type CantonConfig = {
   /** CCIP operator party (CCIPSender signatory / fee recipient on ledger). */
   ccipParty: string
 
+  // If enabled, CantonChain will not automatically create contracts:
+  // CCIPSender, CCIPReceiver, PerPartyRouter
+  disableAutomaticContractCreation: boolean
   /**
    * JSON Web Token for authentication with the Canton Ledger API.
    *

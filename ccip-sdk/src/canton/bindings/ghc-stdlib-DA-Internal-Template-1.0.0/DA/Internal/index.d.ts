@@ -1,3 +1,3 @@
-import * as Template from './Template'
+import * as Template from './Template';
 
-export { Template }
+export { Template };

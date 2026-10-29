@@ -1,3 +1,3 @@
-import * as ClientV2 from './ClientV2'
+import * as ClientV2 from './ClientV2';
 
-export { ClientV2 }
+export { ClientV2 };

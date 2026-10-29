@@ -30,6 +30,35 @@ export interface CantonInstrumentId {
 }
 
 /**
+ * Parse a Canton instrument string `tokenId@tokenAdmin` into
+ * {@link CantonInstrumentId} for ledger Holding filters and CCIP fee/token fields.
+ *
+ * @example
+ * ```ts
+ * parseCantonInstrumentId(
+ *   'link-token@ccipOwner::1220e382…',
+ * )
+ * // => { id: 'link-token', admin: 'ccipOwner::1220e382…' }
+ * ```
+ *
+ * @throws {@link CCIPArgumentInvalidError} if the string is not two `@`-separated parts.
+ */
+export function parseCantonInstrumentId(instrument: string): CantonInstrumentId {
+  const parts = instrument.split('@')
+  if (parts.length !== 2) {
+    throw new CCIPArgumentInvalidError(
+      'instrument',
+      `invalid Canton instrument ID "${instrument}": expected tokenId@tokenAdmin`,
+    )
+  }
+
+  return {
+    id: parts[0]!,
+    admin: parsePartyId(parts[1]!),
+  }
+}
+
+/**
  * Input for a single CCV that should verify the outbound send.
  */
 export interface CantonCCVSendInput {
@@ -89,37 +118,35 @@ export interface CantonExtraArgsV1 {
   executorMode?: 'default' | 'none'
 }
 
-/**
- * Parse a Canton instrument string `tokenId@tokenAdmin` into
- * {@link CantonInstrumentId} for ledger Holding filters and CCIP fee/token fields.
- *
- * @example
- * ```ts
- * parseCantonInstrumentId(
- *   'link-token@ccipOwner::1220e382…',
- * )
- * // => { id: 'link-token', admin: 'ccipOwner::1220e382…' }
- * ```
- *
- * @throws {@link CCIPArgumentInvalidError} if the string is not two `@`-separated parts.
- */
-export function parseCantonInstrumentId(instrument: string): CantonInstrumentId {
-  const parts = instrument.split('@')
-  if (parts.length !== 2) {
-    throw new CCIPArgumentInvalidError(
-      'instrument',
-      `invalid Canton instrument ID "${instrument}": expected tokenId@tokenAdmin`,
-    )
-  }
-
-  return {
-    id: parts[0]!,
-    admin: parsePartyId(parts[1]!),
-  }
-}
-
 export type CantonTokenInfo = {
   instrumentId: string
   symbol: string
   decimals: number
+}
+
+export class CantonIdentifier {
+  packageId: string
+  moduleName: string
+  entityName: string
+
+  constructor(packageId: string, moduleName: string, entityName: string) {
+    this.packageId = packageId
+    this.moduleName = moduleName
+    this.entityName = entityName
+  }
+
+  static fromString(identifier: string): CantonIdentifier {
+    const parts = identifier.split(':')
+    if (parts.length !== 3) {
+      throw new CCIPArgumentInvalidError(
+        'identifier',
+        `invalid Canton identifier "${identifier}": expected packageId:moduleName:entityName`,
+      )
+    }
+    return new CantonIdentifier(parts[0]!, parts[1]!, parts[2]!)
+  }
+
+  toString(): string {
+    return `${this.packageId}:${this.moduleName}:${this.entityName}`
+  }
 }

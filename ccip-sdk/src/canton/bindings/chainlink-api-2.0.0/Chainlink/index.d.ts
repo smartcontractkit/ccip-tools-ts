@@ -1,3 +1,3 @@
-import * as InstanceAddress from './InstanceAddress'
+import * as InstanceAddress from './InstanceAddress';
 
-export { InstanceAddress }
+export { InstanceAddress };

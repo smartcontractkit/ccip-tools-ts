@@ -1,3 +1,3 @@
-import * as Internal from './Internal'
+import * as Internal from './Internal';
 
-export { Internal }
+export { Internal };

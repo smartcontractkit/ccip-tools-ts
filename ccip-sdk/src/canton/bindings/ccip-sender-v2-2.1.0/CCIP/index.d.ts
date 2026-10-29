@@ -1,3 +1,3 @@
-import * as CCIPSender from './CCIPSender'
+import * as CCIPSender from './CCIPSender';
 
-export { CCIPSender }
+export { CCIPSender };

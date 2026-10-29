@@ -1,3 +1,3 @@
-import * as MetadataV1 from './MetadataV1'
+import * as MetadataV1 from './MetadataV1';
 
-export { MetadataV1 }
+export { MetadataV1 };
