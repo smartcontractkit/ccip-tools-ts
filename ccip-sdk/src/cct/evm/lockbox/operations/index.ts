@@ -1,3 +1,7 @@
+export {
+  type AcceptLockboxOwnershipParams,
+  AcceptLockboxOwnership,
+} from './accept-lockbox-ownership.ts'
 export { type DeployLockboxParams, DeployLockbox } from './deploy-lockbox.ts'
 export { type DepositToLockboxParams, DepositToLockbox } from './deposit.ts'
 export {
@@ -5,6 +9,10 @@ export {
   type GetAllLockboxAuthorizedCallersResult,
   GetAllLockboxAuthorizedCallers,
 } from './get-all-lockbox-authorized-callers.ts'
+export {
+  type TransferLockboxOwnershipParams,
+  TransferLockboxOwnership,
+} from './transfer-lockbox-ownership.ts'
 export {
   type UpdateLockboxAuthorizedCallersParams,
   UpdateLockboxAuthorizedCallers,
