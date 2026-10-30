@@ -9,7 +9,6 @@
  * JavaScript objects that the rest of the SDK can work with.
  */
 
-import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
 import { type ExecutionReceipt, ExecutionState } from '../types.ts'
 import type { CreatedEvent, JsTransaction } from './clients/ledger-api/client.ts'
 import { CantonIdentifier } from './types.ts'
@@ -74,18 +73,6 @@ export function getCreatedEventFromTransaction(
 // ---------------------------------------------------------------------------
 
 /**
- * Structured result extracted from a `CCIPMessageSent` Created event in a
- * Canton transaction response.
- */
-export interface CantonSendResultFields {
-  messageId: string
-  encodedMessage: string
-  sequenceNumber: bigint
-  nonce?: bigint
-  onRampAddress?: string
-}
-
-/**
  * Normalize a Canton `BytesHex` message ID to CCIP canonical form (`0x` + 64 hex).
  * Daml stores message IDs without the prefix; EVM-facing CCIP tooling expects it.
  */
@@ -109,163 +96,6 @@ export function normalizeCantonEncodedMessage(encodedMessage: string): string {
 // ---------------------------------------------------------------------------
 // Top-level parsers
 // ---------------------------------------------------------------------------
-
-/**
- * Walk a Canton transaction response and extract the `CCIPMessageSent` fields.
- *
- * The Canton gRPC JSON API returns Created events with the structure:
- * ```json
- * { "Event": { "Created": {
- *     "template_id": { "entity_name": "CCIPMessageSent" },
- *     "create_arguments": { "fields": [
- *       { "label": "event", "value": { "Sum": { "Record": { "fields": [...] } } } }
- *     ]}
- * }}}
- * ```
- * Field values use a `{ Sum: { Text|Numeric|... } }` envelope.
- *
- * @throws {@link CCIPError} if no `CCIPMessageSent` event is found.
- */
-export function parseCantonSendResult(
-  transaction: unknown,
-  updateId: string,
-): CantonSendResultFields {
-  const events = extractEventsFromTransaction(transaction)
-
-  for (const event of events) {
-    if (!event || typeof event !== 'object') continue
-    const rec = event as Record<string, unknown>
-
-    if (getTemplateEntityName(rec) !== 'CCIPMessageSent') continue
-
-    // Handle both naming conventions for the create arguments object
-    const createArgs = (rec.create_arguments ?? rec.createArgument) as
-      | Record<string, unknown>
-      | undefined
-
-    // Try to locate the nested `event` record (CCIPMessageSentEvent)
-    const sentEvent = extractCCIPMessageSentEvent(createArgs)
-
-    if (sentEvent) {
-      return {
-        messageId: normalizeCantonMessageId(
-          typeof sentEvent.messageId === 'string' ? sentEvent.messageId : updateId,
-        ),
-        encodedMessage: normalizeCantonEncodedMessage(
-          typeof sentEvent.encodedMessage === 'string' ? sentEvent.encodedMessage : '',
-        ),
-        sequenceNumber: toBigIntSafe(sentEvent.sequenceNumber),
-        nonce: sentEvent.nonce != null ? toBigIntSafe(sentEvent.nonce) : undefined,
-        onRampAddress:
-          typeof sentEvent.onRampAddress === 'string' ? sentEvent.onRampAddress : undefined,
-      }
-    }
-
-    // Flat fallback — fields directly on createArgument
-    if (createArgs) {
-      const flat = flattenCantonRecord(createArgs)
-      return {
-        messageId: normalizeCantonMessageId(
-          typeof flat.messageId === 'string' ? flat.messageId : updateId,
-        ),
-        encodedMessage: normalizeCantonEncodedMessage(
-          typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
-        ),
-        sequenceNumber: toBigIntSafe(flat.sequenceNumber),
-        nonce: flat.nonce != null ? toBigIntSafe(flat.nonce) : undefined,
-        onRampAddress: typeof flat.onRampAddress === 'string' ? flat.onRampAddress : undefined,
-      }
-    }
-  }
-
-  throw new CCIPError(
-    CCIPErrorCode.CANTON_API_ERROR,
-    `Canton send: no CCIPMessageSent event found in transaction ${updateId}`,
-  )
-}
-
-/**
- * Like {@link parseCantonSendResult} but returns `undefined` instead of throwing
- * when no `CCIPMessageSent` event is found. Also accepts a single created event
- * (as returned per-log by {@link CantonChain.getTransaction}).
- */
-export function tryParseCantonSendResult(
-  transaction: unknown,
-  updateId: string,
-): CantonSendResultFields | undefined {
-  try {
-    return parseCantonSendResult(transaction, updateId)
-  } catch {
-    if (!transaction || typeof transaction !== 'object') return undefined
-    const rec = transaction as Record<string, unknown>
-    if (getTemplateEntityName(rec) !== 'CCIPMessageSent') return undefined
-
-    const createArgs = (rec.create_arguments ?? rec.createArgument) as
-      | Record<string, unknown>
-      | undefined
-    const sentEvent = extractCCIPMessageSentEvent(createArgs)
-
-    if (sentEvent) {
-      return {
-        messageId: normalizeCantonMessageId(
-          typeof sentEvent.messageId === 'string' ? sentEvent.messageId : updateId,
-        ),
-        encodedMessage: normalizeCantonEncodedMessage(
-          typeof sentEvent.encodedMessage === 'string' ? sentEvent.encodedMessage : '',
-        ),
-        sequenceNumber: toBigIntSafe(sentEvent.sequenceNumber),
-        nonce: sentEvent.nonce != null ? toBigIntSafe(sentEvent.nonce) : undefined,
-        onRampAddress:
-          typeof sentEvent.onRampAddress === 'string' ? sentEvent.onRampAddress : undefined,
-      }
-    }
-
-    if (createArgs) {
-      const flat = flattenCantonRecord(createArgs)
-      return {
-        messageId: normalizeCantonMessageId(
-          typeof flat.messageId === 'string' ? flat.messageId : updateId,
-        ),
-        encodedMessage: normalizeCantonEncodedMessage(
-          typeof flat.encodedMessage === 'string' ? flat.encodedMessage : '',
-        ),
-        sequenceNumber: toBigIntSafe(flat.sequenceNumber),
-        nonce: flat.nonce != null ? toBigIntSafe(flat.nonce) : undefined,
-        onRampAddress: typeof flat.onRampAddress === 'string' ? flat.onRampAddress : undefined,
-      }
-    }
-
-    return undefined
-  }
-}
-
-/**
- * Extract the flat `CCIPMessageSentEvent` fields from a log's Canton event data.
- */
-export function extractCantonSentEventFields(data: unknown): Record<string, unknown> | undefined {
-  if (!data || typeof data !== 'object') return undefined
-  const rec = data as Record<string, unknown>
-  if (getTemplateEntityName(rec) !== 'CCIPMessageSent') return undefined
-  const createArgs = (rec.create_arguments ?? rec.createArgument) as
-    | Record<string, unknown>
-    | undefined
-  return extractCCIPMessageSentEvent(createArgs)
-}
-
-/** Find `CCIPMessageSentEvent` fields in a log payload or full transaction tree. */
-export function extractCantonSentEventFieldsFromLogData(
-  data: unknown,
-): Record<string, unknown> | undefined {
-  const direct = extractCantonSentEventFields(data)
-  if (direct) return direct
-  for (const event of extractEventsFromTransaction(data)) {
-    if (event && typeof event === 'object') {
-      const fields = extractCantonSentEventFields(event)
-      if (fields) return fields
-    }
-  }
-  return undefined
-}
 
 /**
  * Walk a Canton transaction response and extract an {@link ExecutionReceipt}.
@@ -425,66 +255,6 @@ export function extractCreatedContractId(
 // ---------------------------------------------------------------------------
 // Low-level field helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Dig into a `create_arguments` / `createArgument` object to find the nested
- * `CCIPMessageSentEvent` record and return it as a flat `label → value` map.
- *
- * The gRPC-style event format stores the nested `event` field as:
- * ```json
- * { "label": "event", "value": { "Sum": { "Record": { "fields": [...] } } } }
- * ```
- */
-export function extractCCIPMessageSentEvent(
-  arg: Record<string, unknown> | undefined,
-): Record<string, unknown> | undefined {
-  if (!arg) return undefined
-
-  // gRPC structured fields array: arg.fields = [{ label, value }]
-  if (Array.isArray(arg.fields)) {
-    for (const field of arg.fields as Array<Record<string, unknown>>) {
-      if (field.label !== 'event') continue
-      const resolved = resolveEventFieldValue(field.value)
-      if (resolved) return resolved
-    }
-  }
-
-  // Verbose/legacy JSON API mode: arg.event is already a named object
-  if (arg.event && typeof arg.event === 'object') {
-    return flattenCantonRecord(arg.event as Record<string, unknown>)
-  }
-
-  return undefined
-}
-
-/**
- * Resolve a Canton field `value` for the `event` label.
- *
- * Handles:
- * - `{ Sum: { Record: { fields: [...] } } }` — gRPC style
- * - `{ fields: [...] }` — already a Record, just flatten
- * - plain object — return as-is
- */
-export function resolveEventFieldValue(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object') return undefined
-  const v = value as Record<string, unknown>
-
-  // gRPC: { Sum: { Record: { fields: [...] } } }
-  if (v.Sum && typeof v.Sum === 'object') {
-    const sum = v.Sum as Record<string, unknown>
-    if (sum.Record && typeof sum.Record === 'object') {
-      return flattenCantonRecord(sum.Record as Record<string, unknown>)
-    }
-  }
-
-  // Already a record with a fields array
-  if (Array.isArray(v.fields)) {
-    return flattenCantonRecord(v)
-  }
-
-  // Flat object (verbose API)
-  return v
-}
 
 /**
  * Convert a Canton record `{ fields: [{ label, value }] }` into a plain

@@ -1,3 +1,5 @@
+import type * as damlTypes from '@daml/types'
+
 import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
 import type { Logger } from '../types.ts'
 import type { PartyId } from './addressCodec.ts'
@@ -86,4 +88,14 @@ export async function listActiveContractsByInterfaceId(
     if (!entry || !('JsActiveContract' in entry)) return []
     return [entry.JsActiveContract]
   })
+}
+
+// Decodes a raw JSON payload (e.g. a contract's `createArgument`) into its typed
+// representation, using the decoder of any serializable Daml type companion
+// (e.g. a generated template like `CCIPReceiver`).
+export function decodeContract<T>(
+  serializable: damlTypes.Serializable<T>,
+  createArgument: unknown,
+): Promise<T> {
+  return serializable.decoder.runPromise(createArgument)
 }

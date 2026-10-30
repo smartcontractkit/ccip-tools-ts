@@ -1,8 +1,7 @@
 import createClient from 'openapi-fetch'
 
 import { CCIPError, CCIPErrorCode } from '../../../errors/index.ts'
-import type { PartyId } from '../../addressCodec.ts'
-import type { CantonInstrumentId } from '../../types.ts'
+import type { CantonInstrumentId, PartyId } from '../../addressCodec.ts'
 import type { paths as tokenMetadataV1Paths } from './generated/token-metadata-v1.generated.d.ts'
 import type { paths as transferInstructionV1Paths } from './generated/transfer-instruction-v1.generated.d.ts'
 

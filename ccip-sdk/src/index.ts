@@ -155,8 +155,7 @@ import { SuiChain } from './sui/index.ts'
 export type { UnsignedSuiTx } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
-export type { CantonInstrumentId, SinglePartySignatures, UnsignedCantonTx } from './canton/index.ts'
-export { parseCantonInstrumentId } from './canton/types.ts'
+export type { SinglePartySignatures, UnsignedCantonTx } from './canton/index.ts'
 export {
   type CantonOperationalDefaults,
   CANTON_FEE_TOKEN_CLI_SYMBOLS,
@@ -165,7 +164,6 @@ export {
   DEFAULT_CANTON_SEND_GAS_LIMIT,
   formatCantonLinkFeeToken,
   resolveCantonSendGasLimit,
-  resolveFeeTransferFactoryAmount,
 } from './canton/defaults.ts'
 // Canton authentication (OAuth 2.0: static, clientCredentials, authorizationCode protocol helpers)
 export {

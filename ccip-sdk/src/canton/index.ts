@@ -1,6 +1,6 @@
 import type { AccountsChangedEvent } from '@canton-network/core-wallet-dapp-rpc-client'
 import type * as damlTypes from '@daml/types'
-import { type BytesLike, dataLength, hexlify, id as keccak256Utf8 } from 'ethers'
+import { type BytesLike, dataLength, hexlify } from 'ethers'
 
 import {
   type BlockInfo,
@@ -28,12 +28,7 @@ import {
   encodeFinality,
 } from '../extra-args.ts'
 import type { LeafHasher } from '../hasher/common.ts'
-import {
-  decodeMessageV1,
-  readMessageV1ChainSelectors,
-  readMessageV1OffRampAddress,
-  readMessageV1OnRampAddress,
-} from '../messages.ts'
+import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -55,6 +50,7 @@ import {
 import {
   type CantonAddress,
   type PartyId,
+  CantonInstrumentId,
   InstanceAddress,
   RawInstanceAddress,
   addressesMatch,
@@ -80,33 +76,23 @@ import {
 } from './clients/ledger-api/client.ts'
 import {
   CANTON_FEE_TOKEN_CLI_SYMBOLS,
-  excludeHoldingCidForTokenTransfer,
   formatCantonLinkFeeToken,
   resolveCantonSendGasLimit,
-  resolveFeeTransferFactoryAmount,
-  selectFeeTokenHoldingCids,
-  sumCantonHoldingAmounts,
 } from './defaults.ts'
 import {
-  extractCantonSentEventFieldsFromLogData,
-  flattenCantonRecord,
   getCreatedEventFromTransaction,
   getInterfaceCreatedEventFromTransaction,
-  normalizeCantonEncodedMessage,
+  getTemplateEntityName,
   normalizeCantonMessageId,
   parseCantonExecutionReceipt,
   resolveTimestamp,
-  toBigIntSafe,
-  tryParseCantonSendResult,
 } from './events.ts'
 import {
   type CantonExtraArgsV1,
-  type CantonInstrumentId,
   type CantonRpcProvider,
   type CantonTokenInfo,
   type UnsignedCantonTx,
   CantonIdentifier,
-  parseCantonInstrumentId,
 } from './types.ts'
 import { isCantonUpdateId } from './update-id.ts'
 
@@ -119,12 +105,10 @@ export type {
 export type {
   CantonCCVSendInput,
   CantonExtraArgsV1,
-  CantonInstrumentId,
   CantonTokenExtraArgs,
   CantonTokenInput,
   UnsignedCantonTx,
 } from './types.ts'
-export { parseCantonInstrumentId } from './types.ts'
 export {
   INSTANCE_ADDRESS_LENGTH,
   InstanceAddress,
@@ -146,14 +130,14 @@ export {
   DEFAULT_CANTON_FEE_TRANSFER_FACTORY_AMOUNT,
   DEFAULT_CANTON_LINK_INSTRUMENT_ID,
   DEFAULT_CANTON_SEND_GAS_LIMIT,
-  excludeHoldingCidForTokenTransfer,
   formatCantonLinkFeeToken,
-  resolveFeeTransferFactoryAmount,
-  selectFeeTokenHoldingCids,
-  sumCantonHoldingAmounts,
 } from './defaults.ts'
 
-import { listActiveContractsByInterfaceId, listActiveContractsByTemplateId } from './acs.ts'
+import {
+  decodeContract,
+  listActiveContractsByInterfaceId,
+  listActiveContractsByTemplateId,
+} from './acs.ts'
 import type { ITokenConfig } from './bindings/ccip-api-v2-2.0.0/CCIP/APIV2/TokenAdminRegistry/module.js'
 import {
   type ExecutorExtraArg,
@@ -174,7 +158,10 @@ import {
   PerPartyRouterFactory,
 } from './bindings/ccip-runtime-v2-2.1.1/CCIP/RuntimeV2/PerPartyRouter/module.js'
 import { type Send, CCIPSender } from './bindings/ccip-sender-v2-2.1.0/CCIP/CCIPSender/module.js'
-import type { Holding } from './bindings/splice-api-token-holding-v1-1.0.0/Splice/Api/Token/HoldingV1/module.js'
+import {
+  Holding,
+  HoldingView,
+} from './bindings/splice-api-token-holding-v1-1.0.0/Splice/Api/Token/HoldingV1/module.js'
 import type { ChoiceContext } from './bindings/splice-api-token-metadata-v1-1.0.0/Splice/Api/Token/MetadataV1/module.js'
 import type { TransferFactory } from './bindings/splice-api-token-transfer-instruction-v1-1.0.0/Splice/Api/Token/TransferInstructionV1/module.js'
 import { TokenStandardClientProvider } from './clients/tokenStandard/client.ts'
@@ -224,6 +211,14 @@ const PerPartyRouterFactoryIdentifier = CantonIdentifier.fromString(
 )
 const CCIPSenderIdentifier = CantonIdentifier.fromString(CCIPSender.templateId)
 const CCIPReceiverIdentifier = CantonIdentifier.fromString(CCIPReceiver.templateId)
+const CCIPMessageSentIdentifier = CantonIdentifier.fromString(CCIPMessageSent.templateId)
+
+const HoldingIdentifier_PkgId = CantonIdentifier.fromString(
+  '718a0f77e505a8de22f188bd4c87fe74101274e9d4cb1bfac7d09aec7158d35b:Splice.Api.Token.HoldingV1:Holding',
+) // Used for getting InterfaceViews, they don't contain the packageName only the packageId
+
+/** The token standard doesn't allow for more than this number of input holdings per transfer. */
+const MAX_TOKEN_INPUT_CIDS = 100
 
 /**
  * Canton chain implementation supporting Canton Ledger networks.
@@ -262,17 +257,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /** When set, used as a fallback for sender-required CCVs. Can be overwritten using {@link CantonExtraArgsV1} ccvRawAddresses */
   private readonly ccvs: readonly RawInstanceAddress[]
-
-  /** DAR package names for CCIP template IDs (from canton-config `packages`). */
-  private readonly ccipPackages: {
-    // TODO remove
-    perPartyRouter: string
-    ccipSender: string
-    ccipReceiver: string
-  }
-
-  /** Transfer-factory preview amount for fee payments (`canton-config.feeTransferFactoryAmount`). */
-  private readonly feeTransferFactoryAmount: string
 
   /** Default gas limit for Canton → destination sends (`canton-config.defaultSendGasLimit`). */
   private readonly defaultSendGasLimit?: number | bigint
@@ -314,12 +298,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.indexerUrl = indexerUrl
     this.fetchFn = ctx?.fetch ?? globalThis.fetch.bind(globalThis)
     this.ccvs = ctx?.cantonConfig?.ccvs?.map((ccv) => RawInstanceAddress.fromString(ccv)) ?? []
-    this.ccipPackages = {
-      perPartyRouter: ctx?.cantonConfig?.packages?.perPartyRouter ?? 'ccip-runtime-v2',
-      ccipSender: ctx?.cantonConfig?.packages?.ccipSender ?? 'ccip-sender-v2',
-      ccipReceiver: ctx?.cantonConfig?.packages?.ccipReceiver ?? 'ccip-receiver-v2',
-    }
-    this.feeTransferFactoryAmount = resolveFeeTransferFactoryAmount(ctx?.cantonConfig)
     this.defaultSendGasLimit = ctx?.cantonConfig?.defaultSendGasLimit
   }
 
@@ -726,7 +704,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       }
     }
 
-    const instrumentId = parseCantonInstrumentId(token)
+    const instrumentId = CantonInstrumentId.fromString(token)
     const registryInfoResult = await this.tokenStandardClientProvider
       .tokenMetadataV1ClientFor(instrumentId)
       .GET('/registry/metadata/v1/instruments/{instrumentId}', {
@@ -789,28 +767,20 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         'CantonChain.generateUnsignedSendMessage: sender (party ID) is required',
       )
     }
-    const senderPartyId = parsePartyId(sender) // TODO should use this.activeParty - error if different?
-
-    if (!message.feeToken) {
+    const senderPartyId = parsePartyId(sender)
+    if (senderPartyId !== this.activeParty) {
       throw new CCIPError(
-        CCIPErrorCode.METHOD_UNSUPPORTED,
-        'CantonChain.generateUnsignedSendMessage: message.feeToken is required ' +
-          '(use "tokenId@admin" format, e.g. "Amulet@DSO")',
+        CCIPErrorCode.WALLET_INVALID,
+        `CantonChain.generateUnsignedSendMessage: sender (${senderPartyId}) cannot differ from active party (${this.activeParty})`,
       )
     }
 
     const cantonArgs = message.extraArgs as CantonExtraArgsV1 | undefined
-    if (!cantonArgs?.feeTokenHoldingCids.length) {
-      throw new CCIPError(
-        CCIPErrorCode.METHOD_UNSUPPORTED,
-        'CantonChain.generateUnsignedSendMessage: message.extraArgs.feeTokenHoldingCids is required. ' +
-          'Pass at least one fee-token holding contract ID in extraArgs.',
-      )
-    }
 
     // --- parse fields ---
-    const feeTokenInstrumentId = parseCantonInstrumentId(message.feeToken)
-    const feeTokenHoldingCids = cantonArgs.feeTokenHoldingCids // TODO - fetch here
+    const feeTokenInstrumentId = message.feeToken
+      ? CantonInstrumentId.fromString(message.feeToken)
+      : CantonInstrumentId.fromString(this.getDefaultFeeToken())
     const receiverHex = stripHexPrefix(
       typeof message.receiver === 'string' ? message.receiver : hexlify(message.receiver),
     )
@@ -819,13 +789,19 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       : ''
     const hasPayload = Boolean(message.data && dataLength(message.data))
     const tokenAmounts = message.tokenAmounts ?? []
+    if (tokenAmounts.length > 1) {
+      throw new CCIPError(
+        CCIPErrorCode.METHOD_UNSUPPORTED,
+        `CantonChain.generateUnsignedSendMessage: only one token transfer is supported, got ${tokenAmounts.length}`,
+      )
+    }
     const tokenOnly = tokenAmounts.length === 1 && !hasPayload
-    const gasLimit = resolveCantonSendGasLimit(cantonArgs.gasLimit, tokenOnly, {
+    const gasLimit = resolveCantonSendGasLimit(cantonArgs?.gasLimit, tokenOnly, {
       defaultSendGasLimit: this.defaultSendGasLimit,
     })
     const executorType = (() => {
       switch (
-        cantonArgs.executorMode // TODO: Add 'withAddress' support
+        cantonArgs?.executorMode // TODO: Add 'withAddress' support
       ) {
         case 'none':
           return 'noExecutor'
@@ -834,27 +810,35 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           return ''
       }
     })()
-    const senderRequiredCCVs = cantonArgs.ccvRawAddresses
+    const senderRequiredCCVs = cantonArgs?.ccvRawAddresses
       ? cantonArgs.ccvRawAddresses.map((ccv) => RawInstanceAddress.fromString(ccv))
       : this.ccvs
-    if (cantonArgs.ccvRawAddresses === undefined && this.ccvs.length) {
+    if (cantonArgs?.ccvRawAddresses === undefined && this.ccvs.length) {
       this.logger.debug(
         'CantonChain.generateUnsignedSendMessage: using ccvs from canton config for senderRequiredCCVs',
         this.ccvs,
       )
     }
 
-    this.logger.debug('CantonChain.generateUnsignedSendMessage: fetching ACS disclosures')
+    // Assemble token inputs (see getTokenInputCids for the selection strategy)
+    const tokenTransfer =
+      tokenAmounts.length === 1
+        ? {
+            instrumentId: CantonInstrumentId.fromString(tokenAmounts[0]!.token),
+            amount: tokenAmounts[0]!.amount,
+          }
+        : undefined
+    const { feeTokenHoldingCids, tokenTransferHoldingCids } = await this.getTokenInputCids({
+      feeTokenInstrumentId,
+      tokenTransfer,
+      explicitFeeTokenHoldingCids: cantonArgs?.feeTokenHoldingCids,
+      explicitTokenTransferHoldingCids: cantonArgs?.tokenTransferHoldingCids,
+    })
 
-    if (tokenAmounts.length > 1) {
-      throw new CCIPError(
-        CCIPErrorCode.METHOD_UNSUPPORTED,
-        `CantonChain.generateUnsignedSendMessage: only one token transfer is supported, got ${tokenAmounts.length}`,
-      )
-    }
-
-    const perPartyRouterCid = await this.getOrCreatePerPartyRouter()
-    const ccipSenderCid = await this.getOrCreateCCIPSender()
+    // Resolve PerPartyRouter and CCIPSender - use Cids from extraArgs if specified
+    const perPartyRouterCid =
+      cantonArgs?.perPartyRouterCid ?? (await this.getOrCreatePerPartyRouter())
+    const ccipSenderCid = cantonArgs?.ccipSenderCid ?? (await this.getOrCreateCCIPSender())
 
     // Build the OApi message for EDS lookups
     let oapiMessage: Message = {
@@ -886,10 +870,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           value: {
             gasLimit: encodeDamlInt64(gasLimit),
             ccvs: [],
-            executor: {
-              tag: 'Executor_UseDefault',
-              value: { executorArgs: '' } as ExecutorExtraArg.Executor_UseDefault,
-            },
+            executor:
+              executorType === 'noExecutor'
+                ? {
+                    tag: 'Executor_NoExecutor',
+                    value: {},
+                  }
+                : {
+                    tag: 'Executor_UseDefault',
+                    value: { executorArgs: '' } as ExecutorExtraArg.Executor_UseDefault,
+                  },
             tokenArgs: '',
             tokenReceiver: '',
           } as GenericExtraArgsV3,
@@ -931,21 +921,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         )
       }
 
-      const tokenInstrument = parseCantonInstrumentId(tokenAmount.token)
+      const tokenInstrument = CantonInstrumentId.fromString(tokenAmount.token)
       const tokenAmountDecimal = formatCantonDecimalAmountUnits(tokenAmount.amount)
 
-      // Get token holdings
-      const tokenHoldings = await this.resolveTokenTransferHoldings({
-        party: sender,
-        instrumentId: tokenInstrument,
-        explicitHoldingCids: cantonArgs.tokenTransferHoldingCids,
-        feeTokenHoldingCids,
-        requiredAmount: tokenAmount.amount,
-      })
       oapiMessage.tokenTransfer = {
         token: { admin: tokenInstrument.admin, id: tokenInstrument.id },
         amount: tokenAmountDecimal,
-        holdingContractIds: tokenHoldings.map((holding) => holding.contractId),
+        holdingContractIds: tokenTransferHoldingCids,
       }
 
       // Query CCIP EDS to use the TAR to resolve instrumentId -> token pool address
@@ -954,20 +936,20 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         .GET('/ccip/v1/global/TokenAdminRegistry/token/{instrumentId}', {
           params: {
             path: {
-              instrumentId: hashCantonInstrumentId(tokenInstrument),
+              instrumentId: tokenInstrument.toHash(),
             },
           },
         })
       if (tokenAdminRegistryGetTokenResponse.error) {
         throw new CCIPError(
           CCIPErrorCode.CANTON_API_ERROR,
-          `CantonChain.generateUnsignedSendMessage: failed to fetch token admin registry token for ${formatInstrumentId(tokenInstrument)}: ${tokenAdminRegistryGetTokenResponse.error.error}`,
+          `CantonChain.generateUnsignedSendMessage: failed to fetch token admin registry token for ${tokenInstrument.toString()}: ${tokenAdminRegistryGetTokenResponse.error.error}`,
         )
       }
       const tokenPoolAddress = RawInstanceAddress.fromString(
         tokenAdminRegistryGetTokenResponse.data.rawInstanceAddress,
       )
-      if (cantonArgs.tokenPoolAddress) {
+      if (cantonArgs?.tokenPoolAddress) {
         // TODO: is this needed?
         const parsedTokenPoolAddress = parseInstanceAddress(cantonArgs.tokenPoolAddress)
         if (!parsedTokenPoolAddress.instanceAddress().equals(tokenPoolAddress.instanceAddress())) {
@@ -1012,8 +994,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       sendArgs.tokenTransferInput = {
         tokenPoolCid: tokenPoolSendDisclosuresResponse.data
           .contractId as damlTypes.ContractId<ITokenPool>,
-        senderInputCids: tokenHoldings.map(
-          (holding) => holding.contractId as damlTypes.ContractId<Holding>,
+        senderInputCids: tokenTransferHoldingCids.map(
+          (cid) => cid as damlTypes.ContractId<Holding>,
         ),
         context: tokenPoolSendDisclosuresResponse.data.contextData as ChoiceContext,
       }
@@ -1166,11 +1148,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     // on Canton; the acting party is the chain's active party.
     const senderPartyId = this.activeParty
 
-    const message = await this.fillCantonSendDefaults(opts.message, senderPartyId)
-
+    this.logger.debug(`CantonChain.sendMessage: generating send message...`)
     const unsigned = await this.generateUnsignedSendMessage({
       ...opts,
-      message,
       sender: senderPartyId,
     })
 
@@ -1182,10 +1162,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const timestamp = Math.floor(new Date(response.transaction.recordTime).getTime() / 1000)
     this.logger.debug(`CantonChain.sendMessage: submitted, updateId=${updateId}`)
 
-    // Get the CCIPMessageSentEvent from the transaction
+    // Locate the CCIPMessageSent created event and decode it — the same
+    // decoding used by CantonChain.decodeMessage
     const messageSentCreatedEvent = getCreatedEventFromTransaction(
       response.transaction,
-      CantonIdentifier.fromString(CCIPMessageSent.templateId),
+      CCIPMessageSentIdentifier,
     )
     if (!messageSentCreatedEvent) {
       throw new CCIPError(
@@ -1193,18 +1174,16 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         `CantonChain.sendMessage: transaction ${updateId} did not include a CCIPMessageSent created event`,
       )
     }
-    const messageSentEvent = await CCIPMessageSent.decoder
-      .runPromise(messageSentCreatedEvent.createArgument)
-      .catch((err) => {
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `CantonChain.sendMessage: failed to decode CCIPMessageSent event for transaction ${updateId}: ${err.message}`,
-        )
-      })
-
-    // Parse CCIPMessageSent from the transaction events
-    // const sendResult = parseCantonSendResult(response.transaction, updateId)
-    // const timestamp = resolveTimestamp(txRecord)
+    const messageV1 = CantonChain.decodeMessage({
+      transactionHash: updateId,
+      data: messageSentCreatedEvent,
+    })
+    if (!messageV1) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `CantonChain.sendMessage: failed to decode the CCIPMessageSent created event of transaction ${updateId}`,
+      )
+    }
 
     // Build the Lane
     const lane: Lane = {
@@ -1221,7 +1200,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       blockNumber: response.transaction.offset,
       blockTimestamp: timestamp,
       transactionHash: updateId,
-      data: response.transaction,
+      data: messageSentCreatedEvent,
     }
 
     const tx: Omit<ChainTransaction, 'logs'> = {
@@ -1231,40 +1210,22 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       from: senderPartyId,
     }
 
-    const ccipMessage = {
-      messageId: addHexPrefix(messageSentEvent.event.messageId),
-      encodedMessage: addHexPrefix(messageSentEvent.event.encodedMessage),
-      sourceChainSelector: this.network.chainSelector,
-      destChainSelector: opts.destChainSelector,
-      sequenceNumber: decimalToBigInt(messageSentEvent.event.sequenceNumber),
-      sender: senderPartyId,
-      receiver:
-        typeof opts.message.receiver === 'string'
-          ? opts.message.receiver
-          : String(opts.message.receiver),
-      data: opts.message.data ?? '',
-      tokenAmounts: (opts.message.tokenAmounts ?? []) as readonly {
-        token: string
-        amount: bigint
-      }[],
-      feeToken: `${messageSentEvent.event.feeToken.id}@${messageSentEvent.event.feeToken.admin}`,
-      feeTokenAmount: 0n,
-      receipts: messageSentEvent.event.receipts.map((receipt) => {
-        return {
-          issuer: receipt.issuerAddress,
-          destGasLimit: decimalToBigInt(receipt.destGasLimit),
-          destBytesOverhead: decimalToBigInt(receipt.destBytesOverhead),
-          feeTokenAmount: decimalToBigInt(receipt.feeTokenAmount),
-          extraArgs: receipt.extraArgs,
-        }
-      }),
-      verifierBlobs: messageSentEvent.event.verifierBlobs,
-    } as unknown as CCIPMessage
-
     return {
       lane,
       log,
-      message: ccipMessage,
+      message: {
+        ...messageV1,
+        /**
+         * Special case: populate tokenAmount.sourceTokenAddress directly from input
+         * The emitted event only contains the hashed address, which will fail when calling {@link getTokenInfo} with it.
+         */
+        tokenAmounts: messageV1.tokenAmounts.map((tokenAmount) => {
+          return {
+            ...tokenAmount,
+            sourceTokenAddress: opts.message.tokenAmounts![0]!.token, // If the emitted message contains a token amount, so must the message input.
+          }
+        }),
+      } as CCIPMessage,
       tx,
     }
   }
@@ -2201,7 +2162,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /** {@inheritDoc Chain.getFeeTokens} */
   async getFeeTokens(_router: string): Promise<Record<string, TokenInfo>> {
-    const amuletToken = await this.getDefaultFeeToken()
+    const amuletToken = this.getDefaultFeeToken()
     const linkToken = formatCantonLinkFeeToken(this.ccipParty)
     const [amuletInfo, linkInfo] = await Promise.all([
       this.getTokenInfo(amuletToken),
@@ -2214,60 +2175,165 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
-   * Resolve token-transfer sender holdings, optionally constrained to caller-supplied CIDs.
+   * Token Handling
    */
-  private async resolveTokenTransferHoldings({
-    party,
-    instrumentId,
-    explicitHoldingCids,
-    feeTokenHoldingCids,
-    requiredAmount,
-  }: {
-    party: string
-    instrumentId: CantonInstrumentId
-    explicitHoldingCids: readonly string[] | undefined
-    feeTokenHoldingCids: readonly string[]
-    requiredAmount: bigint
-  }): Promise<TokenHoldingDetails[]> {
-    const holdings = await fetchTokenHoldings(this.ledgerApiClient, party, instrumentId)
-    const byCid = new Map(holdings.map((holding) => [holding.contractId, holding]))
 
-    if (explicitHoldingCids?.length) {
-      const resolved = explicitHoldingCids.map((cid) => {
-        const holding = byCid.get(cid)
-        if (!holding) {
-          throw new CCIPError(
-            CCIPErrorCode.CANTON_API_ERROR,
-            `CantonChain.generateUnsignedSendMessage: token transfer holding ${cid} was not found, is locked, has zero balance, or does not match ${formatInstrumentId(instrumentId)}`,
-          )
+  private async listTokenHoldings(
+    instrumentId?: CantonInstrumentId,
+  ): Promise<{ contractId: string; view: HoldingView }[]> {
+    const { offset } = await this.ledgerApiClient.getLedgerEnd()
+    if (!offset) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `CantonChain.listTokenHoldings: failed to get ledger end`,
+      )
+    }
+
+    const holdings = await listActiveContractsByInterfaceId(
+      this.logger,
+      this.ledgerApiClient,
+      this.activeParty,
+      CantonIdentifier.fromString(Holding.templateId),
+    )
+
+    const holdingViews = await Promise.all(
+      holdings.map(async (holding) => {
+        for (const interfaceView of holding.createdEvent.interfaceViews ?? []) {
+          const interfaceIdentifier = CantonIdentifier.fromString(interfaceView.interfaceId)
+          if (interfaceIdentifier.equal(HoldingIdentifier_PkgId)) {
+            return {
+              contractId: holding.createdEvent.contractId,
+              view: await decodeContract(HoldingView, interfaceView.viewValue),
+            }
+          }
         }
-        return holding
-      })
-      for (const holding of resolved) {
-        if (feeTokenHoldingCids.includes(holding.contractId)) {
+        throw new CCIPError(
+          CCIPErrorCode.CANTON_API_ERROR,
+          `CantonChain.listTokenHoldings: Holding contract ${holding.createdEvent.contractId} does not have a Holding interface view`,
+        )
+      }),
+    )
+
+    return holdingViews.filter((holding) => {
+      if (instrumentId) {
+        const holdingInstrumentId = CantonInstrumentId.fromBinding(holding.view.instrumentId)
+        return holdingInstrumentId.equal(instrumentId)
+      }
+      return true
+    })
+  }
+
+  /**
+   * Assemble token input CIDs for a send:
+   * - Token transfer: select holding CIDs for the transfer token from lowest-to-highest amount until
+   *   the whole transfer amount is covered (minimizes dust). Throws if the holdings are insufficient
+   *   or if more than {@link MAX_TOKEN_INPUT_CIDS} inputs would be required.
+   * - Fee token: the fee amount isn't known yet, so pass all holdings sorted lowest-to-highest
+   *   (minimizes dust), capped at {@link MAX_TOKEN_INPUT_CIDS} distinct inputs.
+   * - If the fee token is the same instrument as the transfer token, holdings consumed by the
+   *   transfer are excluded from the fee inputs to avoid double-counting.
+   *
+   * Throws if no holdings remain to pay the fee (e.g. the token transfer consumed all of them),
+   * so callers fail early instead of at execution time.
+   *
+   * Explicit holding CIDs from `extraArgs` override auto-selection and are used as-is.
+   */
+  private async getTokenInputCids(opts: {
+    feeTokenInstrumentId: CantonInstrumentId
+    tokenTransfer?: { instrumentId: CantonInstrumentId; amount: bigint }
+    explicitFeeTokenHoldingCids?: string[]
+    explicitTokenTransferHoldingCids?: string[]
+  }): Promise<{ feeTokenHoldingCids: string[]; tokenTransferHoldingCids: string[] }> {
+    const {
+      feeTokenInstrumentId,
+      tokenTransfer,
+      explicitFeeTokenHoldingCids,
+      explicitTokenTransferHoldingCids,
+    } = opts
+
+    // --- token transfer inputs ---
+    const tokenTransferHoldingCids: string[] = []
+    if (tokenTransfer) {
+      if (explicitTokenTransferHoldingCids?.length) {
+        if (explicitTokenTransferHoldingCids.length > MAX_TOKEN_INPUT_CIDS) {
           throw new CCIPError(
             CCIPErrorCode.METHOD_UNSUPPORTED,
-            `CantonChain.generateUnsignedSendMessage: fee holding and token transfer holding must be different contracts (${holding.contractId})`,
+            `CantonChain.getTokenInputCids: too many explicit token transfer holdings, ` +
+              `max ${MAX_TOKEN_INPUT_CIDS}, got ${explicitTokenTransferHoldingCids.length}`,
+          )
+        }
+        tokenTransferHoldingCids.push(...explicitTokenTransferHoldingCids)
+      } else {
+        // Select holdings from lowest-to-highest amount in order to minimize dust
+        const holdings = (await this.listTokenHoldings(tokenTransfer.instrumentId))
+          .map((holding) => ({
+            contractId: holding.contractId,
+            units: parseCantonDecimalAmountUnits(holding.view.amount),
+          }))
+          .filter((holding) => holding.units > 0n)
+          .sort((a, b) => (a.units === b.units ? 0 : a.units < b.units ? -1 : 1))
+        const available = holdings.reduce((sum, holding) => sum + holding.units, 0n)
+        if (available < tokenTransfer.amount) {
+          throw new CCIPError(
+            CCIPErrorCode.INSUFFICIENT_BALANCE,
+            `CantonChain.getTokenInputCids: insufficient ${tokenTransfer.instrumentId.toString()} holdings ` +
+              `for token transfer, need ${tokenTransfer.amount}, have ${available}`,
+          )
+        }
+        let sum = 0n
+        for (const holding of holdings) {
+          tokenTransferHoldingCids.push(holding.contractId)
+          sum += holding.units
+          if (sum >= tokenTransfer.amount) break
+        }
+        if (tokenTransferHoldingCids.length > MAX_TOKEN_INPUT_CIDS) {
+          throw new CCIPError(
+            CCIPErrorCode.METHOD_UNSUPPORTED,
+            `CantonChain.getTokenInputCids: covering the token transfer amount requires ` +
+              `${tokenTransferHoldingCids.length} holdings, the token standard only allows ` +
+              `${MAX_TOKEN_INPUT_CIDS} inputs`,
           )
         }
       }
-      return resolved
     }
 
-    const feeCidSet = new Set(feeTokenHoldingCids)
-    const requiredAmountDecimal = formatCantonDecimalAmountUnits(requiredAmount)
-    const holding = holdings.find(
-      (candidate) =>
-        !feeCidSet.has(candidate.contractId) &&
-        parseCantonDecimalAmountUnits(candidate.amount) >= requiredAmount,
-    )
-    if (!holding) {
+    // --- fee token inputs ---
+    const sameAsTransferToken =
+      tokenTransfer != null && tokenTransfer.instrumentId.equal(feeTokenInstrumentId)
+    let feeTokenHoldingCids: string[]
+    if (explicitFeeTokenHoldingCids?.length) {
+      if (explicitFeeTokenHoldingCids.length > MAX_TOKEN_INPUT_CIDS) {
+        throw new CCIPError(
+          CCIPErrorCode.METHOD_UNSUPPORTED,
+          `CantonChain.getTokenInputCids: too many explicit fee token holdings, ` +
+            `max ${MAX_TOKEN_INPUT_CIDS}, got ${explicitFeeTokenHoldingCids.length}`,
+        )
+      }
+      feeTokenHoldingCids = [...explicitFeeTokenHoldingCids]
+    } else {
+      // Pass all holdings, sorted from lowest-to-highest amount in order to minimize dust
+      const transferCids = new Set(tokenTransferHoldingCids)
+      feeTokenHoldingCids = (await this.listTokenHoldings(feeTokenInstrumentId))
+        .map((holding) => ({
+          contractId: holding.contractId,
+          units: parseCantonDecimalAmountUnits(holding.view.amount),
+        }))
+        .filter((holding) => holding.units > 0n)
+        // Don't double-count holdings that are already consumed by the token transfer
+        .filter((holding) => !sameAsTransferToken || !transferCids.has(holding.contractId))
+        .sort((a, b) => (a.units === b.units ? 0 : a.units < b.units ? -1 : 1))
+        .slice(0, MAX_TOKEN_INPUT_CIDS)
+        .map((holding) => holding.contractId)
+    }
+    if (!feeTokenHoldingCids.length) {
       throw new CCIPError(
-        CCIPErrorCode.METHOD_UNSUPPORTED,
-        `CantonChain.generateUnsignedSendMessage: no unlocked holding for ${formatInstrumentId(instrumentId)} with at least ${requiredAmountDecimal}; pass message.extraArgs.tokenTransferHoldingCids`,
+        CCIPErrorCode.INSUFFICIENT_BALANCE,
+        `CantonChain.getTokenInputCids: no ${feeTokenInstrumentId.toString()} holdings left to pay the fee` +
+          (sameAsTransferToken ? ' (all holdings are consumed by the token transfer)' : ''),
       )
     }
-    return [holding]
+
+    return { feeTokenHoldingCids, tokenTransferHoldingCids }
   }
 
   // ─── Discovery helpers ──────────────────────────────────────────────────
@@ -2275,169 +2341,65 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   /**
    * Returns the registry-default fee token (Amulet) for this Canton chain.
    */
-  private async getDefaultFeeToken(): Promise<string> {
+  private getDefaultFeeToken(): string {
     return this.nativeToken.instrumentId
-  }
-
-  /**
-   * Fill in Canton-specific fields that {@link generateUnsignedSendMessage}
-   * requires but the generic `sendMessage` caller (e.g. the CLI) does not
-   * know how to populate: a default `feeToken` if missing, and at least one
-   * `feeTokenHoldingCids` entry discovered from `party`'s holdings.
-   */
-  private async fillCantonSendDefaults(
-    message: Parameters<Chain['sendMessage']>[0]['message'],
-    party: string,
-  ): Promise<Parameters<Chain['sendMessage']>[0]['message']> {
-    const feeToken = message.feeToken || (await this.getDefaultFeeToken())
-    const extraArgs = (message.extraArgs ?? {}) as Partial<CantonExtraArgsV1>
-    if (extraArgs.feeTokenHoldingCids?.length) {
-      return { ...message, feeToken }
-    }
-
-    const holdings = await fetchTokenHoldings(
-      this.ledgerApiClient,
-      party,
-      parseCantonInstrumentId(feeToken),
-    )
-    if (!holdings.length) {
-      throw new CCIPError(
-        CCIPErrorCode.METHOD_UNSUPPORTED,
-        `CantonChain.sendMessage: no fee-token holdings found for party ${party} on instrument ${feeToken}`,
-      )
-    }
-
-    const feeInstrument = parseCantonInstrumentId(feeToken)
-    const excludeFromFee: string[] = []
-    const tokenAmount = message.tokenAmounts?.[0]
-    if (tokenAmount && tokenAmount.amount > 0n) {
-      const tokenInstrument = parseCantonInstrumentId(tokenAmount.token)
-      if (sameInstrumentId(feeInstrument, tokenInstrument)) {
-        const tokenHoldingCid = excludeHoldingCidForTokenTransfer(
-          holdings,
-          formatCantonDecimalAmountUnits(tokenAmount.amount),
-        )
-        if (!tokenHoldingCid) {
-          throw new CCIPError(
-            CCIPErrorCode.METHOD_UNSUPPORTED,
-            `CantonChain.sendMessage: no unlocked ${feeToken} holding with at least ${formatCantonDecimalAmountUnits(tokenAmount.amount)} for token transfer (fee and transfer share the same instrument)`,
-          )
-        }
-        excludeFromFee.push(tokenHoldingCid)
-      }
-    }
-
-    const feeTokenHoldingCids = selectFeeTokenHoldingCids(
-      holdings,
-      this.feeTransferFactoryAmount,
-      excludeFromFee,
-    )
-    const minFeeUnits = parseCantonDecimalAmountUnits(this.feeTransferFactoryAmount)
-    const feeSumUnits = sumCantonHoldingAmounts(holdings, feeTokenHoldingCids)
-    if (feeSumUnits < minFeeUnits) {
-      throw new CCIPError(
-        CCIPErrorCode.METHOD_UNSUPPORTED,
-        `CantonChain.sendMessage: combined fee-token holdings on ${feeToken} total ${formatCantonDecimalAmountUnits(feeSumUnits)}; transfer factory preview requires at least ${this.feeTransferFactoryAmount}`,
-      )
-    }
-
-    if (feeTokenHoldingCids.length > 1) {
-      this.logger.debug(
-        `CantonChain.sendMessage: selected ${feeTokenHoldingCids.length} fee-token holdings (combined ${formatCantonDecimalAmountUnits(feeSumUnits)} ${feeToken}) for transfer-factory preview`,
-      )
-    }
-
-    return {
-      ...message,
-      feeToken,
-      extraArgs: { ...extraArgs, feeTokenHoldingCids },
-    }
   }
 
   // ─── Static methods ───────────────────────────────────────────────────────
 
   /**
-   * Try to decode a CCIP message from a Canton log/event.
-   * @returns undefined (Canton message format not yet supported)
+   * Decode a CCIP message from a Canton `CCIPMessageSent` created event.
+   *
+   * `log.data` must be a single CreatedEvent, as returned per-log by
+   * {@link CantonChain.getTransaction} (and by {@link CantonChain.sendMessage}).
+   * The event's `createArgument` is decoded with the Daml bindings decoder.
+   *
+   * @returns The decoded {@link CCIPMessage}, or `undefined` if `log.data`
+   *   isn't a decodable `CCIPMessageSent` created event.
    */
   static decodeMessage(log: Pick<ChainLog, 'data' | 'transactionHash'>): CCIPMessage | undefined {
-    const updateId = log.transactionHash
-    const sendResult = tryParseCantonSendResult(log.data, updateId)
-    if (!sendResult) return undefined
+    const { data } = log
+    if (!data || typeof data !== 'object') return undefined
+    const ev = data as Record<string, unknown>
 
-    const sentEvent = extractCantonSentEventFieldsFromLogData(log.data)
+    if (getTemplateEntityName(ev) !== CCIPMessageSentIdentifier.entityName) return undefined
 
-    const destRaw =
-      sentEvent?.destChainSelector ??
-      sentEvent?.destinationChainSelector ??
-      sentEvent?.dest_chain_selector
-    const srcRaw = sentEvent?.sourceChainSelector ?? sentEvent?.source_chain_selector
-
-    let destChainSelector = destRaw != null ? toBigIntSafe(destRaw) : undefined
-    let sourceChainSelector = srcRaw != null ? toBigIntSafe(srcRaw) : undefined
-
-    // CCIPMessageSentEvent on Canton omits sourceChainSelector; read both from the wire payload.
-    if (sourceChainSelector == null || destChainSelector == null) {
-      try {
-        const selectors = readMessageV1ChainSelectors(sendResult.encodedMessage)
-        sourceChainSelector ??= selectors.sourceChainSelector
-        destChainSelector ??= selectors.destChainSelector
-      } catch {
-        if (sourceChainSelector == null || destChainSelector == null) return undefined
-      }
-    }
-
-    let sender = typeof sentEvent?.sender === 'string' ? sentEvent.sender : ''
-    let receiver = typeof sentEvent?.receiver === 'string' ? sentEvent.receiver : ''
-
-    if (!sender && log.data && typeof log.data === 'object') {
-      const rec = log.data as Record<string, unknown>
-      const createArgs = (rec.create_arguments ?? rec.createArgument) as
-        | Record<string, unknown>
-        | undefined
-      if (createArgs) {
-        const flat = flattenCantonRecord(createArgs)
-        if (typeof flat.sender === 'string') sender = flat.sender
-      }
-    }
-
-    let onRampAddress = sendResult.onRampAddress ?? ''
-    let offRampAddress = ''
-
+    let sent: CCIPMessageSent
     try {
-      const decoded = decodeMessageV1(sendResult.encodedMessage)
-      onRampAddress = decoded.onRampAddress || onRampAddress
-      offRampAddress = decoded.offRampAddress
-      if (!sender) sender = decoded.sender
-      if (!receiver) receiver = decoded.receiver
+      sent = CCIPMessageSent.decoder.runWithException(ev.createArgument)
     } catch {
-      try {
-        offRampAddress = readMessageV1OffRampAddress(sendResult.encodedMessage)
-      } catch {
-        // optional when wire layout is incomplete
-      }
-      try {
-        if (!onRampAddress) onRampAddress = readMessageV1OnRampAddress(sendResult.encodedMessage)
-      } catch {
-        // optional when wire layout is incomplete
-      }
+      return undefined
     }
+    const event = sent.event
+    const encodedMessage = addHexPrefix(event.encodedMessage)
+
+    const messageV1 = decodeMessageV1(encodedMessage)
 
     return {
-      messageId: sendResult.messageId,
-      encodedMessage: normalizeCantonEncodedMessage(sendResult.encodedMessage),
-      sourceChainSelector,
-      destChainSelector,
-      sequenceNumber: sendResult.sequenceNumber,
-      nonce: sendResult.nonce ?? 0n,
-      sender,
-      receiver,
-      onRampAddress,
-      offRampAddress,
-      data: normalizeCantonEncodedMessage(sendResult.encodedMessage),
-      tokenAmounts: [],
-      feeToken: '',
-      feeTokenAmount: 0n,
+      messageId: addHexPrefix(event.messageId || log.transactionHash),
+      encodedMessage,
+      sourceChainSelector: messageV1.sourceChainSelector,
+      destChainSelector: decimalToBigInt(event.destChainSelector),
+      sequenceNumber: decimalToBigInt(event.sequenceNumber),
+      sender: sent.sender,
+      receiver: messageV1.receiver,
+      onRampAddress: messageV1.onRampAddress,
+      offRampAddress: messageV1.offRampAddress,
+      data: encodedMessage,
+      tokenAmounts: messageV1.tokenTransfer,
+      feeToken: `${event.feeToken.id}@${event.feeToken.admin}`,
+      feeTokenAmount: event.receipts.reduce(
+        (acc, receipt) => acc + decimalToBigInt(receipt.feeTokenAmount),
+        0n,
+      ),
+      receipts: event.receipts.map((receipt) => ({
+        issuer: receipt.issuerAddress,
+        destGasLimit: decimalToBigInt(receipt.destGasLimit),
+        destBytesOverhead: decimalToBigInt(receipt.destBytesOverhead),
+        feeTokenAmount: decimalToBigInt(receipt.feeTokenAmount),
+        extraArgs: receipt.extraArgs,
+      })),
+      verifierBlobs: event.verifierBlobs,
     } as unknown as CCIPMessage
   }
 
@@ -2530,206 +2492,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 // ---------------------------------------------------------------------------
 // Module-private helpers
 // ---------------------------------------------------------------------------
-
-type ActiveContractDetails = {
-  contractId: string
-  templateId: string
-  createdEventBlob: string
-  synchronizerId: string
-  createArgument: unknown
-  interfaceViews?: unknown[]
-  disclosedContract: DisclosedContract
-}
-
-type TokenHoldingDetails = ActiveContractDetails & {
-  amount: string
-  instrumentId: CantonInstrumentId
-}
-
-async function fetchTokenHoldings(
-  ledgerApiClient: LedgerApiClient,
-  party: string,
-  instrumentId: CantonInstrumentId,
-): Promise<TokenHoldingDetails[]> {
-  const { offset = 0 } = await ledgerApiClient.getLedgerEnd()
-
-  const responses = await ledgerApiClient.getActiveContracts({
-    activeAtOffset: offset,
-    eventFormat: {
-      filtersByParty: {
-        [party]: {
-          cumulative: [
-            {
-              identifierFilter: {
-                InterfaceFilter: {
-                  value: {
-                    interfaceId: '#splice-api-token-holding-v1:Splice.Api.Token.HoldingV1:Holding',
-                    includeInterfaceView: true,
-                    includeCreatedEventBlob: true,
-                  },
-                },
-              },
-            },
-          ],
-        },
-      },
-      verbose: true,
-    },
-  })
-
-  const holdings: TokenHoldingDetails[] = []
-  for (const response of responses) {
-    const active = activeContractFromResponse(response)
-    if (!active) continue
-
-    const holdingView = extractHoldingView(active)
-    if (!holdingView) continue
-    if (extractStringField(holdingView, 'owner') !== party) continue
-
-    const holdingInstrument = extractInstrumentId(holdingView)
-    if (!holdingInstrument || !sameInstrumentId(holdingInstrument, instrumentId)) continue
-
-    const amount = extractStringField(holdingView, 'amount')
-    if (!amount || parseCantonDecimalAmountUnits(amount) <= 0n) continue
-    if (extractField(holdingView, 'lock') != null) continue
-
-    holdings.push({
-      ...active,
-      amount,
-      instrumentId: holdingInstrument,
-    })
-  }
-  return holdings
-}
-
-function activeContractFromResponse(response: unknown): ActiveContractDetails | null {
-  if (!response || typeof response !== 'object') return null
-  const entry = (response as Record<string, unknown>)['contractEntry']
-  if (!entry || typeof entry !== 'object' || !('JsActiveContract' in entry)) return null
-  const active = (entry as Record<string, unknown>)['JsActiveContract']
-  if (!active || typeof active !== 'object') return null
-  const activeRecord = active as Record<string, unknown>
-  const created = activeRecord['createdEvent']
-  if (!created || typeof created !== 'object') return null
-  const createdRecord = created as Record<string, unknown>
-
-  const contractId =
-    typeof createdRecord['contractId'] === 'string' ? createdRecord['contractId'] : ''
-  const templateId =
-    typeof createdRecord['templateId'] === 'string' ? createdRecord['templateId'] : ''
-  if (!contractId || !templateId) return null
-
-  const createdEventBlob =
-    typeof createdRecord['createdEventBlob'] === 'string' ? createdRecord['createdEventBlob'] : ''
-  const synchronizerId =
-    typeof activeRecord['synchronizerId'] === 'string' ? activeRecord['synchronizerId'] : ''
-
-  return {
-    contractId,
-    templateId,
-    createdEventBlob,
-    synchronizerId,
-    createArgument: createdRecord['createArgument'],
-    interfaceViews: Array.isArray(createdRecord['interfaceViews'])
-      ? (createdRecord['interfaceViews'] as unknown[])
-      : undefined,
-    disclosedContract: {
-      contractId,
-      templateId,
-      createdEventBlob,
-      synchronizerId,
-    },
-  }
-}
-
-function extractHoldingView(active: ActiveContractDetails): unknown {
-  const holdingView = active.interfaceViews?.find((view) => {
-    if (!view || typeof view !== 'object') return false
-    const viewRecord = view as Record<string, unknown>
-    return (
-      typeof viewRecord['interfaceId'] === 'string' &&
-      viewRecord['interfaceId'].includes('HoldingV1') &&
-      viewRecord['viewValue'] != null
-    )
-  })
-  if (holdingView && typeof holdingView === 'object') {
-    return (holdingView as Record<string, unknown>)['viewValue']
-  }
-  return active.createArgument
-}
-
-function extractField(record: unknown, fieldName: string): unknown {
-  if (!record || typeof record !== 'object') return undefined
-  const obj = unwrapDamlValue(record) as Record<string, unknown>
-
-  if (Object.prototype.hasOwnProperty.call(obj, fieldName)) {
-    return unwrapDamlValue(obj[fieldName])
-  }
-
-  if (Array.isArray(obj['fields'])) {
-    for (const field of obj['fields'] as Array<Record<string, unknown>>) {
-      if (field['label'] === fieldName) return unwrapDamlValue(field['value'])
-    }
-  }
-  return undefined
-}
-
-function unwrapDamlValue(value: unknown): unknown {
-  if (!value || typeof value !== 'object') return value
-  const obj = value as Record<string, unknown>
-
-  if ('Sum' in obj && obj['Sum'] && typeof obj['Sum'] === 'object') {
-    const sum = obj['Sum'] as Record<string, unknown>
-    const first = Object.values(sum)[0]
-    return unwrapDamlValue(first)
-  }
-  if ('value' in obj && Object.keys(obj).length <= 2) {
-    return unwrapDamlValue(obj['value'])
-  }
-  if ('Text' in obj) return obj['Text']
-  if ('text' in obj) return obj['text']
-  if ('Party' in obj) return obj['Party']
-  if ('party' in obj) return obj['party']
-  if ('Numeric' in obj) return obj['Numeric']
-  if ('numeric' in obj) return obj['numeric']
-  if ('Int64' in obj) return obj['Int64']
-  if ('int64' in obj) return obj['int64']
-  if ('ContractId' in obj) return obj['ContractId']
-  if ('contractId' in obj && Object.keys(obj).length === 1) return obj['contractId']
-  return value
-}
-
-function extractStringField(record: unknown, fieldName: string): string | null {
-  const value = extractField(record, fieldName)
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'bigint') return value.toString()
-  return null
-}
-
-function extractInstrumentId(record: unknown): CantonInstrumentId | null {
-  const rawInstrument = extractField(record, 'instrumentId')
-  if (!rawInstrument || typeof rawInstrument !== 'object') return null
-  const admin = extractStringField(rawInstrument, 'admin')
-  const id = extractStringField(rawInstrument, 'id')
-  if (!admin || !id) return null
-  const adminPartyId = parsePartyId(admin)
-  return {
-    admin: adminPartyId,
-    id: id,
-  }
-}
-
-function sameInstrumentId(a: CantonInstrumentId, b: CantonInstrumentId): boolean {
-  return a.admin === b.admin && a.id === b.id
-}
-
-function formatInstrumentId(instrumentId: CantonInstrumentId): string {
-  return `${instrumentId.id}@${instrumentId.admin}`
-}
-
-function hashCantonInstrumentId(instrumentId: CantonInstrumentId): string {
-  return keccak256Utf8(`${instrumentId.id}@${instrumentId.admin}`)
-}
 
 function dedupeDisclosedContracts(contracts: readonly DisclosedContract[]): DisclosedContract[] {
   const seen = new Set<string>()
