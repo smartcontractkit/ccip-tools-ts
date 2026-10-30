@@ -45,15 +45,19 @@ import {
   UpdateAdvancedPoolHooksAuthorizedCallers,
 } from './advanced-pool-hooks/operations/index.ts'
 import {
+  type AcceptLockboxOwnershipParams,
   type DeployLockboxParams,
   type DepositToLockboxParams,
   type GetAllLockboxAuthorizedCallersParams,
   type GetAllLockboxAuthorizedCallersResult,
+  type TransferLockboxOwnershipParams,
   type UpdateLockboxAuthorizedCallersParams,
   type WithdrawFromLockboxParams,
+  AcceptLockboxOwnership,
   DeployLockbox,
   DepositToLockbox,
   GetAllLockboxAuthorizedCallers,
+  TransferLockboxOwnership,
   UpdateLockboxAuthorizedCallers,
   WithdrawFromLockbox,
 } from './lockbox/operations/index.ts'
@@ -332,6 +336,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #getAllLockboxAuthorizedCallers = new GetAllLockboxAuthorizedCallers()
   readonly #depositToLockbox = new DepositToLockbox()
   readonly #withdrawFromLockbox = new WithdrawFromLockbox()
+  readonly #transferLockboxOwnership = new TransferLockboxOwnership()
+  readonly #acceptLockboxOwnership = new AcceptLockboxOwnership()
 
   /** Wraps an {@link EVMChain}; prefer the static factory methods. */
   constructor(chain: EVMChain) {
@@ -3893,6 +3899,124 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
     opts: EVMExecuteParams<WithdrawFromLockboxParams>,
   ): Promise<TransactionResult> {
     return this.#withdrawFromLockbox.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `ERC20LockBox` `transferOwnership` tx (for multisig / offline signing).
+   * @remarks Step one of two: nothing changes until `newOwner` calls
+   * {@link acceptLockboxOwnership}, and until then the current owner keeps every privilege.
+   * Re-proposing replaces the pending address, and proposing the zero address cancels the transfer.
+   * @remarks `lockbox` is checked on-chain before any calldata is built, so a pool, token or EOA
+   * address is rejected rather than having its own ownership proposed away. The lockbox's
+   * `owner()` is read either way: `sender`, when given, is checked against it, and `newOwner` is
+   * bounded away from it.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if nothing at `lockbox` answers
+   * `typeAndVersion()`, if `sender` is not the lockbox owner, or if `newOwner` equals `sender` or
+   * the current owner (the lockbox would revert `CannotTransferToSelf`)
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCIPTypeVersionInvalidError} if `lockbox` answers `typeAndVersion()` with an
+   * unparseable string
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedTransferLockboxOwnership({
+   *   lockbox: '0xLockbox...',
+   *   newOwner: '0xNewOwner...', // must separately call acceptLockboxOwnership
+   *   sender: '0xLockboxOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedTransferLockboxOwnership(
+    opts: TransferLockboxOwnershipParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#transferLockboxOwnership.generate(this.chain, opts)
+  }
+
+  /**
+   * Proposes a new `ERC20LockBox` owner, signing + submitting with `opts.wallet` (the current
+   * lockbox owner, and what `sender` defaults to). Step one of two, per
+   * {@link generateUnsignedTransferLockboxOwnership}.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTParamsInvalidError} if any param is invalid, if nothing at `lockbox` answers
+   * `typeAndVersion()`, if `sender` differs from the wallet, if the wallet is not the lockbox
+   * owner, or if `newOwner` is the current owner
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.transferLockboxOwnership({
+   *   lockbox: '0xLockbox...',
+   *   newOwner: '0xNewOwner...',
+   *   wallet, // the current lockbox owner
+   * })
+   * ```
+   */
+  transferLockboxOwnership(
+    opts: EVMExecuteParams<TransferLockboxOwnershipParams>,
+  ): Promise<TransactionResult> {
+    return this.#transferLockboxOwnership.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `ERC20LockBox` `acceptOwnership` tx (for multisig / offline signing),
+   * completing a transfer proposed by {@link generateUnsignedTransferLockboxOwnership}.
+   * @remarks `lockbox` is checked on-chain before any calldata is built, so a pool or token address
+   * is rejected rather than completing that contract's pending transfer instead.
+   * @remarks **Nothing about the caller can be pre-flighted:** the lockbox keeps its pending owner
+   * in a `private` slot with no getter, so a tx signed by anyone other than the proposed owner is
+   * only rejected on-chain. `sender` therefore just sets `tx.from`.
+   * @throws {@link CCTParamsInvalidError} if `lockbox` or `sender` is invalid, or nothing at
+   * `lockbox` answers `typeAndVersion()`
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCIPTypeVersionInvalidError} if `lockbox` answers `typeAndVersion()` with an
+   * unparseable string
+   * @example
+   * ```typescript
+   * // signed by the address a previous transferLockboxOwnership proposed
+   * const unsigned = await cct.generateUnsignedAcceptLockboxOwnership({
+   *   lockbox: '0xLockbox...',
+   *   sender: '0xProposedOwner...',
+   * })
+   * ```
+   */
+  generateUnsignedAcceptLockboxOwnership(
+    opts: AcceptLockboxOwnershipParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#acceptLockboxOwnership.generate(this.chain, opts)
+  }
+
+  /**
+   * Completes a pending `ERC20LockBox` ownership transfer, signing + submitting with `opts.wallet`
+   * (the address {@link transferLockboxOwnership} proposed). A wallet that is not the proposed
+   * owner reverts rather than failing validation, per
+   * {@link generateUnsignedAcceptLockboxOwnership}.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTParamsInvalidError} if `lockbox` is invalid, nothing at `lockbox` answers
+   * `typeAndVersion()`, or `sender` is given and is not the wallet's address
+   * @throws {@link CCTContractTypeInvalidError} if `lockbox` is a different contract
+   * @throws {@link CCTContractVersionUnsupportedError} if `lockbox` reports an unsupported version
+   * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain, notably
+   * `MustBeProposedOwner` when the wallet is not the lockbox's proposed owner
+   * @throws {@link CCTTxFailedError} if submission fails before broadcast
+   * @throws {@link CCTTxNotConfirmedError} if it is not confirmed in time
+   * @example
+   * ```typescript
+   * const { hash } = await cct.acceptLockboxOwnership({
+   *   lockbox: '0xLockbox...',
+   *   wallet, // the proposed owner
+   * })
+   * ```
+   */
+  acceptLockboxOwnership(
+    opts: EVMExecuteParams<AcceptLockboxOwnershipParams>,
+  ): Promise<TransactionResult> {
+    return this.#acceptLockboxOwnership.execute(this.chain, opts)
   }
 
   /**
