@@ -817,7 +817,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks
    * This only builds the pool `initialize` instruction for the canonical `burn-mint` and
-   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. `authority`
+   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. Pass
+   * `poolProgramAddress` where that program is deployed at a non-canonical address. `authority`
    * must be allowed to initialize the pool.
    *
    * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
@@ -864,7 +865,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks
    * This only sends the pool `initialize` instruction for the canonical `burn-mint` and
-   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. The signer
+   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. Pass
+   * `poolProgramAddress` where that program is deployed at a non-canonical address. The signer
    * must be allowed to initialize the pool.
    *
    * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
