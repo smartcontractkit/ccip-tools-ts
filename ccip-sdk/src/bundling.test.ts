@@ -22,7 +22,16 @@ async function bundleAndRun(app: string, platform: 'node' | 'browser' = 'node') 
     logLevel: 'silent',
     platform,
     ...(platform === 'node'
-      ? { format: 'esm', packages: 'external' }
+      ? {
+          format: 'esm',
+          packages: 'external',
+          // CJS dependencies bundled via relative imports (e.g. the Canton Daml bindings) call
+          // `require()` at runtime for their external deps; the default ESM shim throws, so provide
+          // a real one backed by the SDK's node_modules
+          banner: {
+            js: "import { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url)",
+          },
+        }
       : { format: 'cjs', external: builtinModules.flatMap((m) => [m, `node:${m}`]) }),
   })
   // 'node' bundles import their external dependencies from here, as ESM on stdin; 'browser' ones

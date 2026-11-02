@@ -26,10 +26,7 @@ export function formatCantonLinkFeeToken(ccipParty: string): string {
 }
 
 /** Canton operational defaults overridable via {@link CantonConfig}. */
-export type CantonOperationalDefaults = Pick<
-  CantonConfig,
-  'defaultSendGasLimit' | 'feeTransferFactoryAmount'
->
+export type CantonOperationalDefaults = Pick<CantonConfig, 'defaultSendGasLimit'>
 
 /** Resolve send gas limit: explicit extraArgs → config → SDK default (0 for token-only, no payload). */
 export function resolveCantonSendGasLimit(

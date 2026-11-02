@@ -675,13 +675,13 @@ export type TokenPoolRemote = {
   inboundRateLimiterState: RateLimiterState
 } & (
   | {
-  /** Outbound rate limiter state for tokens leaving this chain (FTF/FCR/v2). */
-  fastOutboundRateLimiterState: RateLimiterState
-  /** Inbound rate limiter state for tokens coming into this chain (FTF/FCR/v2). */
-  fastInboundRateLimiterState: RateLimiterState
-}
+      /** Outbound rate limiter state for tokens leaving this chain (FTF/FCR/v2). */
+      fastOutboundRateLimiterState: RateLimiterState
+      /** Inbound rate limiter state for tokens coming into this chain (FTF/FCR/v2). */
+      fastInboundRateLimiterState: RateLimiterState
+    }
   | object
-  )
+)
 
 /**
  * Token pool configuration returned by {@link Chain.getTokenPoolConfig}.
@@ -843,21 +843,21 @@ export type VerificationSourcesOpts = {
  */
 export type ExecuteOpts = (
   | {
-  /** address of the OffRamp contract */
-  offRamp: string
-  /** input payload to execute message; contains proofs for v1 and verifications for v2 */
-  input: ExecutionInput
-}
+      /** address of the OffRamp contract */
+      offRamp: string
+      /** input payload to execute message; contains proofs for v1 and verifications for v2 */
+      input: ExecutionInput
+    }
   | ({
-  /**
-   * messageId of message to execute; requires `apiClient`.
-   * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API; for
-   * a v2.0 message given `verifiers` or `ccvData`, it instead collects the verifications
-   * against this destination's CCV policy (see {@link Chain.getVerifications}).
-   */
-  messageId: string
-} & VerificationSourcesOpts)
-  ) & {
+      /**
+       * messageId of message to execute; requires `apiClient`.
+       * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API; for
+       * a v2.0 message given `verifiers` or `ccvData`, it instead collects the verifications
+       * against this destination's CCV policy (see {@link Chain.getVerifications}).
+       */
+      messageId: string
+    } & VerificationSourcesOpts)
+) & {
   /** gasLimit or computeUnits limit override for the ccipReceive call */
   gasLimit?: number
   /** For EVM (v1.5..v1.6), overrides gasLimit on tokenPool call */
@@ -950,7 +950,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /** Cleanup method to release resources (e.g., close connections). */
-  destroy: (reason?: unknown) => void
+  destroy: (reason?: unknown) => void;
 
   /** Custom inspector for Node.js util.inspect. */
   [util.inspect.custom]() {
@@ -1038,23 +1038,23 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       pollInterval?: number
     } & (
       | {
-      /** @deprecated Prefer passing `log` directly to `opts` */
-      request: LeanNumbers<
-        PickDeep<
-          CCIPRequest,
-          `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
-        >
-      >
-    }
+          /** @deprecated Prefer passing `log` directly to `opts` */
+          request: LeanNumbers<
+            PickDeep<
+              CCIPRequest,
+              `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
+            >
+          >
+        }
       | {
-      log: LeanNumbers<
-        Pick<
-          ChainLog,
-          'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
-        >
-      >
-    }
-      ),
+          log: LeanNumbers<
+            Pick<
+              ChainLog,
+              'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
+            >
+          >
+        }
+    ),
   ): Promise<Awaited<ReturnType<Chain['getBlockInfo']>> | undefined> {
     return waitFinalized(this, opts)
   }
@@ -1165,7 +1165,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @see {@link getMessagesInTx} - Per-transaction message discovery
    */
-  async* getMessagesInRange(
+  async *getMessagesInRange(
     opts: Parameters<Chain['getLogs']>[0],
   ): AsyncIterableIterator<CCIPRequest> {
     yield* getMessagesInRange(this, opts)
@@ -1252,10 +1252,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @see {@link execute} - method to execute a message
    */
   async getExecutionInput({
-                            request,
-                            verifications,
-                            ...opts
-                          }: {
+    request,
+    verifications,
+    ...opts
+  }: {
     request: CCIPRequest
     verifications: CCIPVerifications
   } & Pick<LogFilter, 'page'>): Promise<ExecutionInput> {
@@ -1538,10 +1538,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @internal
    */
   async checkSendMessage({
-                           router,
-                           destChainSelector,
-                           message,
-                         }: PickDeep<
+    router,
+    destChainSelector,
+    message,
+  }: PickDeep<
     SendMessageOpts,
     'router' | 'destChainSelector' | 'message.tokenAmounts'
   >): Promise<true> {
@@ -1580,9 +1580,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @internal
    */
   async checkExecute({
-                       offRamp,
-                       message,
-                     }: {
+    offRamp,
+    message,
+  }: {
     offRamp: string
     message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'> &
       Partial<
@@ -1956,12 +1956,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   async getVerifications({
-                           offRamp,
-                           request,
-                           verifiers: _verifiers,
-                           ccvData: _ccvData,
-                           ...hints
-                         }: {
+    offRamp,
+    request,
+    verifiers: _verifiers,
+    ccvData: _ccvData,
+    ...hints
+  }: {
     /** address of offRamp or commitStore contract */
     offRamp: string
     /** CCIPRequest subset object */
@@ -2182,14 +2182,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * }
    * ```
    */
-  async* getExecutionReceipts({
-                                offRamp,
-                                sourceChainSelector,
-                                messageId,
-                                sequenceNumber,
-                                verifications,
-                                ...hints
-                              }: {
+  async *getExecutionReceipts({
+    offRamp,
+    sourceChainSelector,
+    messageId,
+    sequenceNumber,
+    verifications,
+    ...hints
+  }: {
     /** address of OffRamp contract */
     offRamp: string
     /** filter: yield only executions for this source chain */
@@ -2683,9 +2683,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   estimateReceiveExecution?(
     opts:
       | {
-      offRamp: string
-      message: Omit<EstimateMessageInput, 'onRampAddress' | 'offRampAddress'>
-    }
+          offRamp: string
+          message: Omit<EstimateMessageInput, 'onRampAddress' | 'offRampAddress'>
+        }
       | { messageId: string },
   ): Promise<number>
 
