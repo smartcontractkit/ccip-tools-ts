@@ -34,6 +34,7 @@ import {
   validateInteger,
   validateNonEmptyString,
   validateOptionalPublicKey,
+  validatePoolProgramType,
   validatePoolType,
   validatePublicKey,
   validatePublicKeys,
@@ -241,6 +242,27 @@ describe('Validate (cct/solana)', () => {
         [CUSTOM, undefined, undefined],
       ] as const) {
         assert.equal(await resolvePoolProgramType(poolChain([], type).chain, program), expected)
+      }
+    })
+
+    it('rejects a pool program that reports the other pool type', async () => {
+      // [program, custom program type, poolType, rejected]
+      for (const [program, type, poolType, rejected] of [
+        [BURN_MINT, undefined, 'burn-mint', false],
+        [BURN_MINT, undefined, 'lock-release', true],
+        [CUSTOM, 'BurnMintTokenPool', 'lock-release', true],
+        [CUSTOM, 'LockReleaseTokenPool', 'lock-release', false],
+        [CUSTOM, undefined, 'lock-release', false],
+      ] as const) {
+        const validated = validatePoolProgramType('op', poolChain([], type).chain, program, poolType)
+        if (!rejected) await validated
+        else {
+          await assert.rejects(
+            validated,
+            (err: unknown) =>
+              err instanceof CCTParamsInvalidError && err.context.param === 'poolProgramAddress',
+          )
+        }
       }
     })
 

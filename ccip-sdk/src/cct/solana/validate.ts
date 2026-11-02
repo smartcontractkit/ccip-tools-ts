@@ -339,6 +339,26 @@ export async function resolvePoolProgramType(
 }
 
 /**
+ * Rejects a pool program known to be of a different type than `poolType`. A custom program of
+ * unknown type is accepted.
+ * @throws {@link CCTParamsInvalidError} if the pool program reports the other pool type.
+ */
+export async function validatePoolProgramType(
+  operation: string,
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  poolType: TokenPoolType,
+): Promise<void> {
+  const type = await resolvePoolProgramType(chain, poolProgram)
+  if (type === undefined || type === poolType) return
+  throw new CCTParamsInvalidError(
+    operation,
+    'poolProgramAddress',
+    `must be a ${poolType} token pool program, got ${type}`,
+  )
+}
+
+/**
  * Rejects a resolved pool program known to be burn-mint. A custom program of unknown type is
  * accepted; it must have the canonical lock-release instructions and account layout.
  * @throws {@link CCTParamsInvalidError} if the pool program is burn-mint.
