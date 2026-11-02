@@ -41,9 +41,7 @@ export function loadCantonConfig(
 
   // `jwt` is required unless `auth` is present (OAuth2 provider resolves JWT on demand).
   const hasAuth = typeof parsed['auth'] === 'object' && parsed['auth'] !== null
-  const required = hasAuth
-    ? (['ccipParty', 'edsUrl', 'transferInstructionUrl'] as const)
-    : (['ccipParty', 'jwt', 'edsUrl', 'transferInstructionUrl'] as const)
+  const required = hasAuth ? ([] as const) : (['jwt'] as const)
   for (const field of required) {
     if (typeof parsed[field] !== 'string' || !parsed[field].length) {
       throw new Error(`Canton config: "${field}" is required and must be a non-empty string`)

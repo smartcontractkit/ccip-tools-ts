@@ -112,8 +112,7 @@ const globalOpts = {
   },
   'canton-config': {
     type: 'string',
-    describe:
-      'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
+    describe: 'Path to Canton config JSON file (party, ccipParty, jwt, etc.)',
   },
   indexer: {
     type: 'array',

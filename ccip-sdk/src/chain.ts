@@ -236,12 +236,20 @@ export type CantonConfig = {
   /** User ledger party for actAs, ACS queries, and transaction visibility. */
   party: string
 
-  /** CCIP operator party (CCIPSender signatory / fee recipient on ledger). */
-  ccipParty: string
+  /**
+   * CCIP operator party.
+   * Optional: overrides the network's default CCIP owner party; falls back to
+   * the chain default when omitted.
+   */
+  ccipParty?: string
 
-  // If enabled, CantonChain will not automatically create contracts:
-  // CCIPSender, CCIPReceiver, PerPartyRouter
+  /**
+   * If enabled, CantonChain will not automatically create contracts and instead
+   * throw an error if it encounters a missing contract.
+   * CCIPSender, CCIPReceiver, PerPartyRouter
+   */
   disableAutomaticContractCreation: boolean
+
   /**
    * JSON Web Token for authentication with the Canton Ledger API.
    *
@@ -254,18 +262,31 @@ export type CantonConfig = {
    */
   jwt?: string | (() => Promise<string>)
 
-  /** Base URL for the EDS (Explicit Disclosure Service) API. */
-  edsUrl: string
-
   /**
-   * Optional mapping from a Canton RawInstanceAddress owner party to that owner's
-   * external EDS base URL. When absent, `edsUrl` is used for both global and
-   * external EDS endpoints.
+   * Optional mapping from a Canton RawInstanceAddress owner party to that
+   * owner's EDS base URL, merged over (and overriding, per key) the SDK's
+   * built-in per-network defaults. Supported keys:
+   *
+   * - a party ID, e.g. `'partyOwner::1220deadbeef…' => 'https://eds.other-owner.example.com'`:
+   *   dedicated EDS base URL for that party
+   * - `'{party}'`, e.g. `'{party}' => 'https://eds.example.com/{party}'`:
+   *   URL template applied to any party without an explicit entry; the
+   *   `{party}` placeholder is replaced with the resolved party (e.g. for
+   *   DA Registry URLs embedding the party)
+   * - `'*'`, e.g. `'*' => 'https://eds.example.com'`: plain fallback used when
+   *   the party cannot be determined (e.g. an opaque hashed `InstanceAddress`)
    */
   externalEdsUrlsByOwner?: Record<string, string>
 
-  /** Base URL for the Transfer Instruction API. */
-  transferInstructionUrl: string
+  /**
+   * Optional mapping from a Canton instrument admin party to that admin's
+   * Token Standard API base URL, merged over (and overriding, per key) the
+   * SDK's built-in per-network defaults. Supports the same keys as
+   * {@link externalEdsUrlsByOwner}: party IDs, the `'{party}'` URL template
+   * (placeholder replaced with the resolved admin party, e.g. for DA Registry
+   * URLs embedding the party) and the `'*'` plain fallback.
+   */
+  externalTokenStandardUrlsByOwner?: Record<string, string>
 
   /**
    * Optional base URL for a transaction indexer to fetch CCV verifications.
@@ -279,26 +300,10 @@ export type CantonConfig = {
   chainId: string
 
   /**
-   * Optional DAR package names for ACS template filters. Prod testnet bundles
-   * PerPartyRouter in `ccip-runtime` instead of the dev default `ccip-perpartyrouter`.
-   */
-  packages?: Partial<{
-    perPartyRouter: string
-    ccipReceiver: string
-    ccipSender: string
-  }>
-
-  /**
    * Default gas limit for Canton → destination sends when `message.extraArgs.gasLimit` is omitted.
    * ccip-cli `--gas-limit` and `extraArgs.gasLimit` override this.
    */
   defaultSendGasLimit?: number | bigint
-
-  /**
-   * Transfer-factory preview amount for Canton fee-token payments.
-   * Rarely needs changing; defaults to `"1.0"`.
-   */
-  feeTransferFactoryAmount?: string
 
   /**
    * Optional Canton CCV instance addresses (hex hashes and/or raw `instanceId@party`).
@@ -670,13 +675,13 @@ export type TokenPoolRemote = {
   inboundRateLimiterState: RateLimiterState
 } & (
   | {
-      /** Outbound rate limiter state for tokens leaving this chain (FTF/FCR/v2). */
-      fastOutboundRateLimiterState: RateLimiterState
-      /** Inbound rate limiter state for tokens coming into this chain (FTF/FCR/v2). */
-      fastInboundRateLimiterState: RateLimiterState
-    }
+  /** Outbound rate limiter state for tokens leaving this chain (FTF/FCR/v2). */
+  fastOutboundRateLimiterState: RateLimiterState
+  /** Inbound rate limiter state for tokens coming into this chain (FTF/FCR/v2). */
+  fastInboundRateLimiterState: RateLimiterState
+}
   | object
-)
+  )
 
 /**
  * Token pool configuration returned by {@link Chain.getTokenPoolConfig}.
@@ -838,21 +843,21 @@ export type VerificationSourcesOpts = {
  */
 export type ExecuteOpts = (
   | {
-      /** address of the OffRamp contract */
-      offRamp: string
-      /** input payload to execute message; contains proofs for v1 and verifications for v2 */
-      input: ExecutionInput
-    }
+  /** address of the OffRamp contract */
+  offRamp: string
+  /** input payload to execute message; contains proofs for v1 and verifications for v2 */
+  input: ExecutionInput
+}
   | ({
-      /**
-       * messageId of message to execute; requires `apiClient`.
-       * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API; for
-       * a v2.0 message given `verifiers` or `ccvData`, it instead collects the verifications
-       * against this destination's CCV policy (see {@link Chain.getVerifications}).
-       */
-      messageId: string
-    } & VerificationSourcesOpts)
-) & {
+  /**
+   * messageId of message to execute; requires `apiClient`.
+   * The SDK will fetch execution inputs (offRamp, proofs/verifications) from the CCIP API; for
+   * a v2.0 message given `verifiers` or `ccvData`, it instead collects the verifications
+   * against this destination's CCV policy (see {@link Chain.getVerifications}).
+   */
+  messageId: string
+} & VerificationSourcesOpts)
+  ) & {
   /** gasLimit or computeUnits limit override for the ccipReceive call */
   gasLimit?: number
   /** For EVM (v1.5..v1.6), overrides gasLimit on tokenPool call */
@@ -945,7 +950,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   }
 
   /** Cleanup method to release resources (e.g., close connections). */
-  destroy: (reason?: unknown) => void;
+  destroy: (reason?: unknown) => void
 
   /** Custom inspector for Node.js util.inspect. */
   [util.inspect.custom]() {
@@ -977,6 +982,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   async getBlockTimestamp(block: number | bigint | 'finalized' | 'latest'): Promise<number> {
     return (await this.getBlockInfo(block)).timestamp
   }
+
   /**
    * Fetch a transaction by its hash.
    *
@@ -999,6 +1005,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getTransaction(hash: string): Promise<ChainTransaction>
+
   /**
    * Confirm a log tx is finalized or wait for it to be finalized.
    *
@@ -1031,26 +1038,27 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       pollInterval?: number
     } & (
       | {
-          /** @deprecated Prefer passing `log` directly to `opts` */
-          request: LeanNumbers<
-            PickDeep<
-              CCIPRequest,
-              `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
-            >
-          >
-        }
+      /** @deprecated Prefer passing `log` directly to `opts` */
+      request: LeanNumbers<
+        PickDeep<
+          CCIPRequest,
+          `log.${'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'}`
+        >
+      >
+    }
       | {
-          log: LeanNumbers<
-            Pick<
-              ChainLog,
-              'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
-            >
-          >
-        }
-    ),
+      log: LeanNumbers<
+        Pick<
+          ChainLog,
+          'address' | 'blockNumber' | 'transactionHash' | 'topics' | 'blockTimestamp'
+        >
+      >
+    }
+      ),
   ): Promise<Awaited<ReturnType<Chain['getBlockInfo']>> | undefined> {
     return waitFinalized(this, opts)
   }
+
   /**
    * An async generator that yields logs based on the provided options.
    * @param opts - Options object containing:
@@ -1157,7 +1165,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @see {@link getMessagesInTx} - Per-transaction message discovery
    */
-  async *getMessagesInRange(
+  async* getMessagesInRange(
     opts: Parameters<Chain['getLogs']>[0],
   ): AsyncIterableIterator<CCIPRequest> {
     yield* getMessagesInRange(this, opts)
@@ -1244,10 +1252,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @see {@link execute} - method to execute a message
    */
   async getExecutionInput({
-    request,
-    verifications,
-    ...opts
-  }: {
+                            request,
+                            verifications,
+                            ...opts
+                          }: {
     request: CCIPRequest
     verifications: CCIPVerifications
   } & Pick<LogFilter, 'page'>): Promise<ExecutionInput> {
@@ -1272,6 +1280,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       offchainTokenData,
     } as ExecutionInput
   }
+
   /**
    * Fetch typeAndVersion for a given CCIP contract address.
    *
@@ -1356,6 +1365,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   async getRouterForOnRamp(onRamp: string, destChainSelector: bigint): Promise<string> {
     return (await this.getOnRampConfig(onRamp, destChainSelector)).router
   }
+
   /**
    * Fetch the Router address set in OffRamp config.
    *
@@ -1378,6 +1388,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   async getRouterForOffRamp(offRamp: string, sourceChainSelector: bigint): Promise<string> {
     return (await this.getOffRampConfig(offRamp, sourceChainSelector)).router
   }
+
   /**
    * Get the native token address for a Router.
    *
@@ -1391,6 +1402,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getNativeTokenForRouter(router: string): Promise<string>
+
   /**
    * Fetch the OffRamps allowlisted in a Router.
    * Used to discover OffRamp connected to an OnRamp.
@@ -1406,6 +1418,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getOffRampsForRouter(router: string, sourceChainSelector: bigint): Promise<string[]>
+
   /**
    * Fetch the OnRamp registered in a Router for a destination chain.
    *
@@ -1422,6 +1435,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string>
+
   /**
    * Fetch the OnRamps addresses set in OffRamp config.
    * Used to discover OffRamp connected to an OnRamp.
@@ -1499,6 +1513,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getBalance(opts: GetBalanceOpts): Promise<bigint>
+
   /**
    * Fetch TokenAdminRegistry configured in a given OnRamp, Router, etc.
    * Needed to map a source token to its dest counterparts.
@@ -1523,10 +1538,10 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @internal
    */
   async checkSendMessage({
-    router,
-    destChainSelector,
-    message,
-  }: PickDeep<
+                           router,
+                           destChainSelector,
+                           message,
+                         }: PickDeep<
     SendMessageOpts,
     'router' | 'destChainSelector' | 'message.tokenAmounts'
   >): Promise<true> {
@@ -1565,9 +1580,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @internal
    */
   async checkExecute({
-    offRamp,
-    message,
-  }: {
+                       offRamp,
+                       message,
+                     }: {
     offRamp: string
     message: Pick<EstimateMessageInput, 'sourceChainSelector' | 'tokenAmounts' | 'finality'> &
       Partial<
@@ -1667,6 +1682,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   abstract getFee(opts: Omit<SendMessageOpts, 'approveMax'>): Promise<bigint>
+
   /**
    * Generate unsigned txs for ccipSend'ing a message.
    *
@@ -1690,6 +1706,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       sender: string
     },
   ): Promise<UnsignedTx[F]>
+
   /**
    * Send a CCIP message through a router using provided wallet.
    *
@@ -1723,6 +1740,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       txGasLimit?: number
     },
   ): Promise<CCIPRequest>
+
   /**
    * Fetch supported offchain token data for a request from this network.
    * It logs but doesn't throw in case it can't fetch attestation, as the transfers may not be
@@ -1880,6 +1898,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       payer: string
     },
   ): Promise<UnsignedTx[F]>
+
   /**
    * Execute messages in report in an offRamp.
    *
@@ -1937,12 +1956,12 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * ```
    */
   async getVerifications({
-    offRamp,
-    request,
-    verifiers: _verifiers,
-    ccvData: _ccvData,
-    ...hints
-  }: {
+                           offRamp,
+                           request,
+                           verifiers: _verifiers,
+                           ccvData: _ccvData,
+                           ...hints
+                         }: {
     /** address of offRamp or commitStore contract */
     offRamp: string
     /** CCIPRequest subset object */
@@ -2163,14 +2182,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * }
    * ```
    */
-  async *getExecutionReceipts({
-    offRamp,
-    sourceChainSelector,
-    messageId,
-    sequenceNumber,
-    verifications,
-    ...hints
-  }: {
+  async* getExecutionReceipts({
+                                offRamp,
+                                sourceChainSelector,
+                                messageId,
+                                sequenceNumber,
+                                verifications,
+                                ...hints
+                              }: {
     /** address of OffRamp contract */
     offRamp: string
     /** filter: yield only executions for this source chain */
@@ -2420,6 +2439,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     tokenPool: string,
     remoteChainSelector?: bigint,
   ): Promise<Record<string, TokenPoolRemote>>
+
   /**
    * Fetch remote chain configuration for a token pool for a specific destination.
    *
@@ -2663,9 +2683,9 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   estimateReceiveExecution?(
     opts:
       | {
-          offRamp: string
-          message: Omit<EstimateMessageInput, 'onRampAddress' | 'offRampAddress'>
-        }
+      offRamp: string
+      message: Omit<EstimateMessageInput, 'onRampAddress' | 'offRampAddress'>
+    }
       | { messageId: string },
   ): Promise<number>
 

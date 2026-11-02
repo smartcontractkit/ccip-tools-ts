@@ -336,10 +336,10 @@ Canton requires a config file with connection parameters via `--canton-config <p
     "type": "clientCredentials",
     "authUrl": "https://auth.example.com/oauth2/default"
   },
-  "edsUrl": "https://eds.example.com",
-  "transferInstructionUrl": "https://transfer-instruction.example.com",
   "externalEdsUrlsByOwner": {
-    "owner::1220...": "https://external-eds.example.com"
+    "owner::1220...": "https://external-eds.example.com",
+    "{party}": "https://eds.example.com/{party}",
+    "*": "https://eds.example.com"
   },
   "indexerUrl": "https://indexer.example.com"
 }
@@ -350,8 +350,19 @@ Set `CANTON_CLIENT_ID` and `CANTON_CLIENT_SECRET` env vars for the `clientCreden
 > [!NOTE]
 > The top-level `jwt` field is shorthand for `auth: { type: "static", jwt }` — both are equivalent. If both are present, `jwt` takes precedence.
 
-**Required fields:** `party`, `ccipParty`, `edsUrl`, `transferInstructionUrl` — plus either `jwt` (pre-obtained token) or `auth` (OIDC config, see below)  
-**Optional fields:** `jwt`, `auth`, `externalEdsUrlsByOwner`, `indexerUrl`, `chainId`, `defaultSendGasLimit`, `feeTransferFactoryAmount`, `ccvs`, `packages`
+**Required fields:** `party` — plus either `jwt` (pre-obtained token) or `auth` (OIDC config, see below)  
+**Optional fields:** `jwt`, `auth`, `ccipParty`, `externalEdsUrlsByOwner`, `externalTokenStandardUrlsByOwner`, `indexerUrl`, `chainId`, `defaultSendGasLimit`, `ccvs`,
+
+`ccipParty` (CCIP operator party) is optional: when set it overrides the network's default CCIP owner party; when omitted the chain default is used.
+
+`externalEdsUrlsByOwner` and `externalTokenStandardUrlsByOwner` map an owner/admin party to the EDS / Token Standard API base URL respectively, merged over (and overriding, per key) the SDK's built-in per-network defaults. Both support the same keys:
+
+- **Party ID** (e.g. `owner::1220...`): dedicated base URL for that party
+- **`{party}`**: URL template applied to any party without an explicit entry — the `{party}` placeholder is replaced with the resolved party, for URLs that embed the party (e.g. `https://eds.example.com/{party}`)
+- **`*`**: plain fallback used when the party cannot be determined (e.g. an opaque hashed instance address)
+
+> [!NOTE]
+> Token Standard base URLs ship with built-in per-network defaults: parties without an explicit entry resolve to a `{party}`-templated DA Registry URL (e.g. `https://api.utilities.digitalasset.com/api/token-standard/v0/registrars/{party}` on mainnet), so no configuration is needed for DA Registry instruments. Use `externalTokenStandardUrlsByOwner` to override.
 
 #### Canton authentication
 
@@ -372,9 +383,7 @@ The `auth` object supports three flows. The `static` flow wraps a pre-obtained J
   "auth": {
     "type": "clientCredentials",
     "authUrl": "https://auth.example.com"
-  },
-  "edsUrl": "https://eds.example.com",
-  "transferInstructionUrl": "https://transfer-instruction.example.com"
+  }
 }
 ```
 

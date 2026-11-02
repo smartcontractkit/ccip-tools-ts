@@ -38,8 +38,6 @@ const cantonChain = await CantonChain.fromUrl('https://ledger.example.com/api/js
     party: 'sender::1220...',
     ccipParty: 'ccip::1220...',
     jwt: 'eyJ...',
-    edsUrl: 'https://eds.example.com',
-    transferInstructionUrl: 'https://transfer-instruction.example.com',
   },
 })
 ```

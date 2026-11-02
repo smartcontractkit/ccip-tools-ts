@@ -63,7 +63,7 @@ import {
   formatCantonDecimalAmountUnits,
   parseCantonDecimalAmountUnits,
 } from './amount.ts'
-import { type Message, EdsProvider } from './clients/eds/client.ts'
+import { type Message, EdsClientProvider } from './clients/eds/client.ts'
 import {
   type DisclosedContract,
   type JsCommands,
@@ -240,8 +240,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   readonly ledgerApiClient: LedgerApiClient
   activeParty: PartyId
 
-  // EDS provider, used to create clients for all EDS APIs
-  readonly edsProvider: EdsProvider
+  // EDS client provider, used to create clients for all EDS APIs
+  readonly edsClientProvider: EdsClientProvider
   // Token standard client provider
   readonly tokenStandardClientProvider: TokenStandardClientProvider
 
@@ -277,7 +277,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     ledgerApiClient: LedgerApiClient,
     partyId: string,
     disableAutomaticContractCreation: boolean,
-    edsProvider: EdsProvider,
+    edsClientProvider: EdsClientProvider,
     tokenStandardClientProvider: TokenStandardClientProvider,
     ccipParty: string,
     nativeToken: CantonTokenInfo,
@@ -289,7 +289,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.provider = provider
     this.ledgerApiClient = ledgerApiClient
     this.activeParty = parsePartyId(partyId)
-    this.edsProvider = edsProvider
+    this.edsClientProvider = edsClientProvider
     this.tokenStandardClientProvider = tokenStandardClientProvider
     this.network = network
     this.disableAutomaticContractCreation = disableAutomaticContractCreation
@@ -309,7 +309,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     {
       chainId: string
       ccipPartyId: string
+      /** Party => URL; `'{party}'` key = URL template for any known party, `'*'` = plain fallback. */
       edsUrls: ReadonlyMap<string, string>
+      /** Party => URL; `'{party}'` key = URL template for any known admin, `'*'` = plain fallback. */
       tokenStandardUrls: ReadonlyMap<string, string>
       indexerUrls: ReadonlyArray<string>
       nativeToken: CantonTokenInfo
@@ -368,6 +370,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
             'ccipOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551',
             'https://eds.testnet.ccip.chain.link',
           ],
+          [
+            '{party}',
+            'https://api.utilities.digitalasset-staging.com/api/token-standard/v0/registrars/{party}',
+          ],
           ['*', 'https://eds.testnet.ccip.chain.link'],
         ]),
         indexerUrls: TESTNET_INDEXER_URLS,
@@ -400,6 +406,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           [
             'ccipOwner::122012714685760dc1927c4cfe119ce2126c48756154e95c06f5c181da05a5519093',
             'https://eds.ccip.chain.link',
+          ],
+          [
+            // fall back to DA Registry API if party is known
+            '{party}',
+            'https://api.utilities.digitalasset.com/api/token-standard/v0/registrars/{party}',
           ],
           ['*', 'https://eds.ccip.chain.link'],
         ]),
@@ -440,8 +451,19 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       logger.info(`Primary party changed to ${primaryParty?.partyId}`)
     })
 
+    // Resolve the CCIP owner party: config override → chain default
+    const ccipPartyId = cantonConfig?.ccipParty ?? chainDefaults.ccipPartyId
+    if (!ccipPartyId) {
+      throw new CCIPError(
+        CCIPErrorCode.ADDRESS_INVALID,
+        `CantonChain.fromProvider: no ccipParty configured and no chain default for ${activeNetwork.networkId}`,
+        { context: { networkId: activeNetwork.networkId } },
+      )
+    }
+    logger.debug(`Using CCIP owner party ${ccipPartyId} for network ${activeNetwork.networkId}`)
+
     // Create EDS provider, using defaults + optional config overrides
-    const edsProvider = new EdsProvider({
+    const edsClientProvider = new EdsClientProvider({
       edsUrlsByOwner: {
         ...Object.fromEntries(chainDefaults.edsUrls),
         ...cantonConfig?.externalEdsUrlsByOwner,
@@ -452,7 +474,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const tokenStandardClientProvider = new TokenStandardClientProvider({
       urlsByAdmin: {
         ...Object.fromEntries(chainDefaults.tokenStandardUrls),
-        // TODO: add token standard config overrides - currently only EDS overrides exist
+        ...cantonConfig?.externalTokenStandardUrlsByOwner,
       },
     })
 
@@ -474,9 +496,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       ledgerApiClient,
       partyId,
       cantonConfig?.disableAutomaticContractCreation ?? false,
-      edsProvider,
+      edsClientProvider,
       tokenStandardClientProvider,
-      chainDefaults.ccipPartyId,
+      ccipPartyId,
       chainDefaults.nativeToken,
       indexerUrl,
       networkInfo(chainDefaults.chainId) as NetworkInfo<typeof ChainFamily.Canton>,
@@ -931,7 +953,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       }
 
       // Query CCIP EDS to use the TAR to resolve instrumentId -> token pool address
-      const tokenAdminRegistryGetTokenResponse = await this.edsProvider
+      const tokenAdminRegistryGetTokenResponse = await this.edsClientProvider
         .ccipClientFor(this.ccipParty)
         .GET('/ccip/v1/global/TokenAdminRegistry/token/{instrumentId}', {
           params: {
@@ -961,7 +983,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       }
 
       // Token pool disclosures
-      const tokenPoolSendDisclosuresResponse = await this.edsProvider
+      const tokenPoolSendDisclosuresResponse = await this.edsClientProvider
         .tokenPoolClientFor(tokenPoolAddress.owner)
         .POST('/ccip/v1/external/tokenPool/{address}/send', {
           params: {
@@ -1002,7 +1024,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     }
 
     // CCIP Disclosures
-    const ccipSendDisclosuresResponse = await this.edsProvider
+    const ccipSendDisclosuresResponse = await this.edsClientProvider
       .ccipClientFor(this.ccipParty)
       .POST('/ccip/v1/global/message/send', {
         params: {},
@@ -1049,7 +1071,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const ccvSendResults = await Promise.all(
       ccipSendDisclosuresResponse.data.ccvs.map(async (ccvAddress) => {
         const ccvInstanceAddress = parseInstanceAddress(ccvAddress)
-        const ccvSendDisclosuresResponse = await this.edsProvider
+        const ccvSendDisclosuresResponse = await this.edsClientProvider
           .ccvClientFor(ccvInstanceAddress)
           .POST('/ccip/v1/external/ccv/{address}/send', {
             params: {
@@ -1085,7 +1107,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       const executorAddress = RawInstanceAddress.fromString(
         ccipSendDisclosuresResponse.data.executor,
       )
-      const executorDisclosuresResponse = await this.edsProvider
+      const executorDisclosuresResponse = await this.edsClientProvider
         .executorClientFor(executorAddress.owner)
         .POST('/ccip/v1/external/executor/{address}/send', {
           params: {
@@ -1308,7 +1330,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     // Fetch CCIP disclosures
     this.logger.debug('CantonChain.generateUnsignedExecute: fetching global EDS execute data...')
-    const ccipExecuteDisclosuresResult = await this.edsProvider
+    const ccipExecuteDisclosuresResult = await this.edsClientProvider
       .ccipClientFor(this.ccipParty)
       .POST('/ccip/v1/global/message/execute', {
         body: {
@@ -1331,7 +1353,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         this.logger.debug('CantonChain.generateUnsignedExecute: CCV execute EDS address', {
           verifierAddress,
         })
-        const ccvDisclosureResult = await this.edsProvider
+        const ccvDisclosureResult = await this.edsClientProvider
           .ccvClientFor(verifierAddress)
           .POST('/ccip/v1/external/ccv/{address}/execute', {
             params: {
@@ -1371,7 +1393,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       this.logger.debug(
         `CantonChain.generateUnsignedExecute: token pool present; fetching token pool disclosures for ${tokenPoolAddress.toString()}...`,
       )
-      const tokenPoolExecuteDisclosureResult = await this.edsProvider
+      const tokenPoolExecuteDisclosureResult = await this.edsClientProvider
         .tokenPoolClientFor(tokenPoolAddress)
         .POST('/ccip/v1/external/tokenPool/{address}/execute', {
           params: {
@@ -1485,7 +1507,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           this.logger.debug(
             `CantonChain.execute: resolving verifier address ${verifierAddress.toString()} to a RawInstanceAddress via EDS...`,
           )
-          const ccvDisclosureResult = await this.edsProvider
+          const ccvDisclosureResult = await this.edsClientProvider
             .ccvClientFor(verifierAddress)
             .POST('/ccip/v1/external/ccv/{address}/execute', {
               params: {
@@ -1650,7 +1672,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    const perPartyRouterFactoryDisclosuresResponse = await this.edsProvider
+    const perPartyRouterFactoryDisclosuresResponse = await this.edsClientProvider
       .ccipClientFor(this.ccipParty)
       .POST('/ccip/v1/global/PerPartyRouter/factory', {
         body: {

@@ -1,7 +1,8 @@
 import createClient from 'openapi-fetch'
 
-import { CCIPError, CCIPErrorCode } from '../../../errors/index.ts'
+import { CCIPErrorCode } from '../../../errors/index.ts'
 import type { CantonInstrumentId, PartyId } from '../../addressCodec.ts'
+import { resolvePartyUrl } from '../url-template.ts'
 import type { paths as tokenMetadataV1Paths } from './generated/token-metadata-v1.generated.d.ts'
 import type { paths as transferInstructionV1Paths } from './generated/transfer-instruction-v1.generated.d.ts'
 
@@ -11,7 +12,11 @@ interface TokenStandardProviderConfig {
 
 export class TokenStandardClientProvider {
   // maps PartyId => Token Standard URL
-  // special case: wildcard '*' acts as a fallback
+  // wildcards:
+  // - '{party}' acts as a URL template for any known admin ({party} is replaced
+  //   with the resolved admin party ID, e.g. for DA Registry URLs embedding the
+  //   party)
+  // - '*' acts as a plain fallback
   private readonly urlsByAdmin: Record<string, string>
 
   constructor(config: TokenStandardProviderConfig) {
@@ -24,15 +29,11 @@ export class TokenStandardClientProvider {
     // If it's a CantonInstrumentId, use the admin field
     const admin =
       typeof partyOrInstrumentId === 'string' ? partyOrInstrumentId : partyOrInstrumentId.admin
-    const baseUrl = this.urlsByAdmin[admin] ?? this.urlsByAdmin['*'] ?? ''
-    if (!baseUrl) {
-      throw new CCIPError(
-        CCIPErrorCode.TOKEN_NOT_CONFIGURED,
-        `No token standard URL configured for admin ${admin}`,
-      )
-    }
 
-    return baseUrl
+    return resolvePartyUrl(this.urlsByAdmin, admin, {
+      code: CCIPErrorCode.TOKEN_NOT_CONFIGURED,
+      subject: 'token standard',
+    })
   }
 
   tokenMetadataV1ClientFor(partyOrInstrumentId: PartyId | CantonInstrumentId) {
