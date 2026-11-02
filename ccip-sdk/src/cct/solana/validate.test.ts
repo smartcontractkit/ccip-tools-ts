@@ -254,7 +254,12 @@ describe('Validate (cct/solana)', () => {
         [CUSTOM, 'LockReleaseTokenPool', 'lock-release', false],
         [CUSTOM, undefined, 'lock-release', false],
       ] as const) {
-        const validated = validatePoolProgramType('op', poolChain([], type).chain, program, poolType)
+        const validated = validatePoolProgramType(
+          'op',
+          poolChain([], type).chain,
+          program,
+          poolType,
+        )
         if (!rejected) await validated
         else {
           await assert.rejects(
