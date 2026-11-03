@@ -4,7 +4,7 @@ import axios, { type AxiosAdapter } from 'axios'
 
 import { CCIPError } from '../../errors/CCIPError.ts'
 import { CCIPErrorCode } from '../../errors/codes.ts'
-import type { components } from './generated/ledger-api.generated.ts'
+import type { JsCantonError } from '../clients/ledger-api/client.ts'
 
 // Canton JSON Ledger API requires HTTP/2.
 // On Node.js, axios uses its http adapter with native http2.connect().
@@ -12,65 +12,65 @@ import type { components } from './generated/ledger-api.generated.ts'
 const cantonHttp = axios.create({ httpVersion: 2 })
 
 /** Commands to submit to the ledger */
-export type JsCommands = components['schemas']['JsCommands']
-/** A single command */
-export type Command = components['schemas']['Command']
-/** Response from submit-and-wait operation */
-export type SubmitAndWaitResponse = components['schemas']['SubmitAndWaitResponse']
-/** Full transaction response including all events */
-export type JsSubmitAndWaitForTransactionResponse =
-  components['schemas']['JsSubmitAndWaitForTransactionResponse']
-/** A single transaction from the ledger */
-export type JsTransaction = components['schemas']['JsTransaction']
-export type GetLedgerEndResponse = components['schemas']['GetLedgerEndResponse']
-export type GetUpdateByIdRequest = components['schemas']['GetUpdateByIdRequest']
-export type UpdateFormat = components['schemas']['UpdateFormat']
-export type JsGetUpdateResponse = components['schemas']['JsGetUpdateResponse']
-export type Update = components['schemas']['Update']
-/** Request to get active contracts */
-export type GetActiveContractsRequest = components['schemas']['GetActiveContractsRequest']
-/** Response containing active contracts */
-export type JsGetActiveContractsResponse = components['schemas']['JsGetActiveContractsResponse']
-/** An active contract on the ledger */
-export type JsActiveContract = components['schemas']['JsActiveContract']
-/** An event created by a contract */
-export type CreatedEvent = components['schemas']['CreatedEvent']
-/** Error returned by Canton API */
-export type JsCantonError = components['schemas']['JsCantonError']
-/** Format for events in responses */
-export type EventFormat = components['schemas']['EventFormat']
-/** Filter for templates */
-export type TemplateFilter = components['schemas']['TemplateFilter']
-/** Wildcard filter for matching patterns */
-export type WildcardFilter = components['schemas']['WildcardFilter']
-/** Information about a connected synchronizer */
-export type ConnectedSynchronizer = components['schemas']['ConnectedSynchronizer']
-/** Response containing connected synchronizers */
-export type GetConnectedSynchronizersResponse =
-  components['schemas']['GetConnectedSynchronizersResponse']
+// export type JsCommands = components['schemas']['JsCommands']
+// /** A single command */
+// export type Command = components['schemas']['Command']
+// /** Response from submit-and-wait operation */
+// export type SubmitAndWaitResponse = components['schemas']['SubmitAndWaitResponse']
+// /** Full transaction response including all events */
+// export type JsSubmitAndWaitForTransactionResponse =
+//   components['schemas']['JsSubmitAndWaitForTransactionResponse']
+// /** A single transaction from the ledger */
+// export type JsTransaction = components['schemas']['JsTransaction']
+// export type GetLedgerEndResponse = components['schemas']['GetLedgerEndResponse']
+// export type GetUpdateByIdRequest = components['schemas']['GetUpdateByIdRequest']
+// export type UpdateFormat = components['schemas']['UpdateFormat']
+// export type JsGetUpdateResponse = components['schemas']['JsGetUpdateResponse']
+// export type Update = components['schemas']['Update']
+// /** Request to get active contracts */
+// export type GetActiveContractsRequest = components['schemas']['GetActiveContractsRequest']
+// /** Response containing active contracts */
+// export type JsGetActiveContractsResponse = components['schemas']['JsGetActiveContractsResponse']
+// /** An active contract on the ledger */
+// export type JsActiveContract = components['schemas']['JsActiveContract']
+// /** An event created by a contract */
+// export type CreatedEvent = components['schemas']['CreatedEvent']
+// /** Error returned by Canton API */
+// export type JsCantonError = components['schemas']['JsCantonError']
+// /** Format for events in responses */
+// export type EventFormat = components['schemas']['EventFormat']
+// /** Filter for templates */
+// export type TemplateFilter = components['schemas']['TemplateFilter']
+// /** Wildcard filter for matching patterns */
+// export type WildcardFilter = components['schemas']['WildcardFilter']
+// /** Information about a connected synchronizer */
+// export type ConnectedSynchronizer = components['schemas']['ConnectedSynchronizer']
+// /** Response containing connected synchronizers */
+// export type GetConnectedSynchronizersResponse =
+//   components['schemas']['GetConnectedSynchronizersResponse']
 
 // ---------------------------------------------------------------------------
 // Interactive submission types (external signing)
 // ---------------------------------------------------------------------------
 
 /** Request to prepare a transaction for external signing */
-export type JsPrepareSubmissionRequest = components['schemas']['JsPrepareSubmissionRequest']
-/** Response containing the prepared transaction and hash to sign */
-export type JsPrepareSubmissionResponse = components['schemas']['JsPrepareSubmissionResponse']
-/** Request to execute a prepared, externally-signed transaction and wait for the full transaction */
-export type JsExecuteSubmissionAndWaitForTransactionRequest =
-  components['schemas']['JsExecuteSubmissionAndWaitForTransactionRequest']
-/** Response containing the committed transaction after external signing submission */
-export type JsExecuteSubmissionAndWaitForTransactionResponse =
-  components['schemas']['JsExecuteSubmissionAndWaitForTransactionResponse']
-/** Signatures from all submitting parties */
-export type PartySignatures = components['schemas']['PartySignatures']
-/** Signatures from a single party */
-export type SinglePartySignatures = components['schemas']['SinglePartySignatures']
-/** A single cryptographic signature */
-export type Signature = components['schemas']['Signature']
-/** Hashing scheme version for interactive submissions */
-export type HashingSchemeVersion = NonNullable<JsPrepareSubmissionRequest['hashingSchemeVersion']>
+// export type JsPrepareSubmissionRequest = components['schemas']['JsPrepareSubmissionRequest']
+// /** Response containing the prepared transaction and hash to sign */
+// export type JsPrepareSubmissionResponse = components['schemas']['JsPrepareSubmissionResponse']
+// /** Request to execute a prepared, externally-signed transaction and wait for the full transaction */
+// export type JsExecuteSubmissionAndWaitForTransactionRequest =
+//   components['schemas']['JsExecuteSubmissionAndWaitForTransactionRequest']
+// /** Response containing the committed transaction after external signing submission */
+// export type JsExecuteSubmissionAndWaitForTransactionResponse =
+//   components['schemas']['JsExecuteSubmissionAndWaitForTransactionResponse']
+// /** Signatures from all submitting parties */
+// export type PartySignatures = components['schemas']['PartySignatures']
+// /** Signatures from a single party */
+// export type SinglePartySignatures = components['schemas']['SinglePartySignatures']
+// /** A single cryptographic signature */
+// export type Signature = components['schemas']['Signature']
+// /** Hashing scheme version for interactive submissions */
+// export type HashingSchemeVersion = NonNullable<JsPrepareSubmissionRequest['hashingSchemeVersion']>
 
 // ---------------------------------------------------------------------------
 // Error class

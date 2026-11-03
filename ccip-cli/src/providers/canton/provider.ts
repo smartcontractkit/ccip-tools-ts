@@ -14,7 +14,7 @@ import type {
   JsPrepareSubmissionRequest,
   JsPrepareSubmissionResponse,
   SinglePartySignatures,
-} from '@chainlink/ccip-sdk/src/canton/client/index.ts'
+} from '@chainlink/ccip-sdk/src/canton/clients/ledger-api/client.ts'
 import type { CantonRpcProvider } from '@chainlink/ccip-sdk/src/canton/types.ts'
 import { CCIPError, CCIPErrorCode, getDataBytes } from '@chainlink/ccip-sdk/src/index.ts'
 import axios from 'axios'

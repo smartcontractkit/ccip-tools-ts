@@ -46,6 +46,7 @@ import {
   type VerifierResult,
   type WithLogger,
   CCIPVersion,
+  ExecutionState,
 } from '../types.ts'
 import {
   type CantonAddress,
@@ -82,10 +83,6 @@ import {
 import {
   getCreatedEventFromTransaction,
   getInterfaceCreatedEventFromTransaction,
-  getTemplateEntityName,
-  normalizeCantonMessageId,
-  parseCantonExecutionReceipt,
-  resolveTimestamp,
 } from './events.ts'
 import {
   type CantonExtraArgsV1,
@@ -97,18 +94,12 @@ import {
 import { isCantonUpdateId } from './update-id.ts'
 
 export type {
-  HashingSchemeVersion,
-  PartySignatures,
-  Signature,
+  // HashingSchemeVersion,
+  // PartySignatures,
+  // Signature,
   SinglePartySignatures,
-} from './client/index.ts'
-export type {
-  CantonCCVSendInput,
-  CantonExtraArgsV1,
-  CantonTokenExtraArgs,
-  CantonTokenInput,
-  UnsignedCantonTx,
-} from './types.ts'
+} from './clients/ledger-api/client.ts'
+export type { CantonExtraArgsV1, UnsignedCantonTx } from './types.ts'
 export {
   INSTANCE_ADDRESS_LENGTH,
   InstanceAddress,
@@ -145,7 +136,10 @@ import {
   PerPartyRouter,
 } from './bindings/ccip-client-api-v2-2.0.0/CCIP/ClientV2/module.js'
 import type { FinalityConfig } from './bindings/ccip-codec-v2-2.0.0/CCIP/CodecV2/FinalityConfig/module.js'
-import { CCIPMessageSent } from './bindings/ccip-events-v2-2.0.0/CCIP/EventsV2/Events/index.js'
+import {
+  CCIPMessageSent,
+  ExecutionStateChanged,
+} from './bindings/ccip-events-v2-2.0.0/CCIP/EventsV2/Events/index.js'
 import type { ICrossChainVerifier } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/CrossChainVerifier/module.js'
 import type { IExecutor } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/Executor/module.js'
 import type { ITokenPool } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/TokenPool/module.js'
@@ -1595,14 +1589,31 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     // Submit and wait for the full transaction (so we get events back)
     const response = await this.submitCommands(unsigned.commands, 'Execute Message')
-    const txRecord = response.transaction as Record<string, unknown>
-    const updateId: string =
-      (typeof txRecord.update_id === 'string' ? txRecord.update_id : null) ??
-      (typeof txRecord.updateId === 'string' ? txRecord.updateId : '')
+    const updateId = response.transaction.updateId
+    const timestamp = Math.floor(new Date(response.transaction.recordTime).getTime() / 1000)
+    this.logger.debug(`CantonChain.execute: submitted, updateId=${updateId}`)
 
-    // Parse execution receipt from the transaction events
-    const receipt = parseCantonExecutionReceipt(response.transaction, updateId)
-    const timestamp = resolveTimestamp(txRecord)
+    // Locate the ExecutionStateChanged created event and decode it
+    const executionStateChangedCreatedEvent = getCreatedEventFromTransaction(
+      response.transaction,
+      CantonIdentifier.fromString(ExecutionStateChanged.templateId),
+    )
+    if (!executionStateChangedCreatedEvent) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `CantonChain.execute: transaction ${updateId} did not include an ExecutionStateChanged created event`,
+      )
+    }
+    const decodeResult = ExecutionStateChanged.decoder.run(
+      executionStateChangedCreatedEvent.createArgument,
+    )
+    if (!decodeResult.ok) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `CantonChain.execute: failed to decode ExecutionStateChanged event for transaction ${updateId}: ${decodeResult.error.message}`,
+      )
+    }
+    const executionStateChanged = decodeResult.result
 
     // Build a synthetic ChainLog — Canton doesn't have EVM-style logs, but the
     // SDK contract expects a ChainLog in the CCIPExecution.
@@ -1613,7 +1624,20 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       blockNumber: response.transaction.offset,
       blockTimestamp: timestamp,
       transactionHash: updateId,
-      data: response.transaction,
+      data: executionStateChangedCreatedEvent,
+    }
+
+    const receipt: ExecutionReceipt = {
+      messageId: addHexPrefix(executionStateChanged.event.messageId),
+      sequenceNumber: decimalToBigInt(executionStateChanged.event.sequenceNumber),
+      state:
+        executionStateChanged.event.state === 'FAILURE'
+          ? ExecutionState.Failed
+          : executionStateChanged.event.state === 'SUCCESS'
+            ? ExecutionState.Success
+            : ExecutionState.InProgress,
+      sourceChainSelector: decimalToBigInt(executionStateChanged.event.sourceChainSelector),
+      returnData: addHexPrefix(executionStateChanged.event.returnData),
     }
 
     return { receipt, log }
@@ -2119,7 +2143,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    const indexerMessageId = normalizeCantonMessageId(request.message.messageId)
+    const indexerMessageId = addHexPrefix(request.message.messageId)
     const cliIndexer = Array.isArray(opts.indexer) ? opts.indexer : undefined
     const indexerBase = resolveIndexerBaseUrl(cliIndexer, this.indexerUrl)
     if (!indexerBase) {
@@ -2416,8 +2440,6 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const { data } = log
     if (!data || typeof data !== 'object') return undefined
     const ev = data as Record<string, unknown>
-
-    if (getTemplateEntityName(ev) !== CCIPMessageSentIdentifier.entityName) return undefined
 
     let sent: CCIPMessageSent
     try {

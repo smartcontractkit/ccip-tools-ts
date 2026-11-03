@@ -1,8 +1,14 @@
 import type { CantonRpcProvider } from '../../types.ts'
 import type { components } from './ledger-api.generated.d.ts'
 
+export type SinglePartySignatures = components['schemas']['SinglePartySignatures']
+export type JsExecuteSubmissionAndWaitForTransactionRequest =
+  components['schemas']['JsExecuteSubmissionAndWaitForTransactionRequest']
+export type JsPrepareSubmissionRequest = components['schemas']['JsPrepareSubmissionRequest']
+export type JsPrepareSubmissionResponse = components['schemas']['JsPrepareSubmissionResponse']
 export type DisclosedContract = components['schemas']['DisclosedContract']
 export type GetLedgerEndResponse = components['schemas']['GetLedgerEndResponse']
+export type JsCantonError = components['schemas']['JsCantonError']
 export type JsCommands = components['schemas']['JsCommands']
 export type JsTransaction = components['schemas']['JsTransaction']
 export type JsGetUpdateResponse = components['schemas']['JsGetUpdateResponse']
