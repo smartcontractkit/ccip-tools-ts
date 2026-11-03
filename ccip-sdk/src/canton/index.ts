@@ -1,6 +1,6 @@
 import type { AccountsChangedEvent } from '@canton-network/core-wallet-dapp-rpc-client'
 import type * as damlTypes from '@daml/types'
-import { type BytesLike, dataLength, hexlify } from 'ethers'
+import { type BytesLike, dataLength, hexlify, keccak256 } from 'ethers'
 
 import {
   type BlockInfo,
@@ -48,11 +48,11 @@ import {
   CCIPVersion,
   ExecutionState,
 } from '../types.ts'
+import { getDataBytes } from '../utils.ts'
 import {
   type CantonAddress,
   type PartyId,
   CantonInstrumentId,
-  InstanceAddress,
   RawInstanceAddress,
   addressesMatch,
   addressesMissing,
@@ -1503,65 +1503,51 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    const { encodedMessage, verifications } = resolved.input
+    const { encodedMessage } = resolved.input
     const encodedMessageHex = stripHexPrefix(String(encodedMessage))
-    if (verifications.length === 0) {
+
+    // The verifications resolved from the CCIP API carry the CCV destination address in its
+    // keccak256-hashed form (as set on the source chain's onchain config), which can't be used
+    // for `requiredCCVs` or CCV disclosure fetches. Fetch the verifications from the indexer(s)
+    // instead: they return the raw (unhashed) Canton address as `destAddress`.
+    const messageId = keccak256(getDataBytes(String(encodedMessage)))
+    const collected = await this.getVerifications({
+      offRamp: resolved.offRamp,
+      request: {
+        lane: { version: CCIPVersion.V2_0 },
+        message: { messageId },
+      } as Parameters<Chain['getVerifications']>[0]['request'],
+    })
+    if (!('verifications' in collected) || collected.verifications.length === 0) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
-        'CantonChain.execute: verifications array is empty; at least one verification is required',
+        'CantonChain.execute: no verifications found on the indexer; at least one verification is required',
       )
     }
+    const { verifications } = collected
     this.logger.debug(
       `CantonChain.execute: executing message with ${verifications.length} verifications...`,
     )
-    // TODO: This must be updated to work with third-party CCVs.
-    //  CCIP API should return the RawInstanceAddress as destAddress, instead of the hashed address
-    //  just like the Indexer already does.
-    // The indexer/canton-config may carry the CCV as a keccak256 InstanceAddress hash
-    // (32 bytes), but the Daml CCIPReceiver.requiredCCVs field expects the raw
-    // RawInstanceAddress.unpack string (e.g. "committeeverifier-…@ccvOwner::1220…").
-    // Resolve the raw form via EDS before creating/updating the receiver so that
-    // requiredCCVs matches the CCV contract's instance address at Execute time.
-    const verifierAddresses: RawInstanceAddress[] = await Promise.all(
-      verifications.map(async (v) => {
-        const verifierAddress = parseInstanceAddress(v.destAddress)
-        if (verifierAddress instanceof RawInstanceAddress) {
-          this.logger.debug(
-            `CantonChain.execute: verifier address ${verifierAddress.toString()} is already a RawInstanceAddress`,
-          )
-          return verifierAddress
-        } else if (verifierAddress instanceof InstanceAddress) {
-          this.logger.debug(
-            `CantonChain.execute: resolving verifier address ${verifierAddress.toString()} to a RawInstanceAddress via EDS...`,
-          )
-          const ccvDisclosureResult = await this.edsClientProvider
-            .ccvClientFor(verifierAddress)
-            .POST('/ccip/v1/external/ccv/{address}/execute', {
-              params: {
-                path: {
-                  address: verifierAddress.toString(),
-                },
-              },
-              body: {
-                encodedMessage: encodedMessageHex,
-                receiver: partyId.toString(),
-              },
-            })
-          if (ccvDisclosureResult.error) {
-            throw new CCIPError(
-              CCIPErrorCode.CANTON_API_ERROR,
-              `CantonChain.execute: error executing CCV ${verifierAddress.toString()}: ${ccvDisclosureResult.error.error}`,
-            )
-          }
-          return RawInstanceAddress.fromString(ccvDisclosureResult.data.rawInstanceAddress)
-        } else {
-          throw new CCIPError(
-            CCIPErrorCode.METHOD_UNSUPPORTED,
-            `CantonChain.execute: unable to resolve verifier address ${v.destAddress} to a RawInstanceAddress`,
-          )
-        }
-      }),
-    )
+    // The Daml CCIPReceiver.requiredCCVs field expects the raw RawInstanceAddress.unpack string
+    // (e.g. "committeeverifier-…@ccvOwner::1220…"). The indexer returns each CCV's destination
+    // address as a hex-encoded raw address, so decode it and fail if it isn't one.
+    const verifierAddresses: RawInstanceAddress[] = verifications.map((v) => {
+      const destAddress = String(v.destAddress).trim()
+      try {
+        return destAddress.includes('@')
+          ? RawInstanceAddress.fromString(destAddress)
+          : RawInstanceAddress.fromHex(destAddress)
+      } catch (error) {
+        throw new CCIPError(
+          CCIPErrorCode.ADDRESS_INVALID,
+          `CantonChain.execute: CCV destination address ${v.destAddress} is not a raw instance address`,
+          {
+            cause: error instanceof Error ? error : undefined,
+            context: { address: v.destAddress },
+          },
+        )
+      }
+    })
     const finality = decodeFinalityFromEncodedMessage(encodedMessageHex)
     const receiverHint = typeof opts.receiver === 'string' ? opts.receiver.trim() : ''
 
@@ -1579,9 +1565,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.logger.debug(`CantonChain.execute: using CCIPReceiver contractId=${receiverCid}`)
 
     // Build the unsigned command, passing the resolved receiver CID via Canton-specific opts.
+    // Use the indexer-sourced verifications (raw CCV addresses + ccvData) rather than the
+    // API-provided ones.
     const unsigned = await this.generateUnsignedExecute({
       offRamp: resolved.offRamp,
-      input: resolved.input,
+      input: { ...resolved.input, verifications },
       receiver: opts.receiver,
       payer: partyId,
       _cantonReceiverCid: receiverCid,
@@ -2145,6 +2133,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     const indexerMessageId = addHexPrefix(request.message.messageId)
     const cliIndexer = Array.isArray(opts.indexer) ? opts.indexer : undefined
+    // TODO - configure multiple indexers and try to read from all of them
     const indexerBase = resolveIndexerBaseUrl(cliIndexer, this.indexerUrl)
     if (!indexerBase) {
       throw new CCIPError(
