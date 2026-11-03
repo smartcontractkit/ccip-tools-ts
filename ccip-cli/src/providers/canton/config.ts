@@ -1,17 +1,75 @@
 import { existsSync, readFileSync } from 'node:fs'
 
+import type { CantonRpcProvider } from '@chainlink/ccip-sdk/src/canton/types.ts'
 import type { CantonAuthConfig, CantonConfig, Logger } from '@chainlink/ccip-sdk/src/index.ts'
 
 /**
- * A Canton config as loaded from the CLI's JSON file, before the `auth` block
- * is resolved into a `jwt` (string or getter).
+ * A Canton config as loaded from the CLI's JSON file.
  *
- * The file may carry either a static `jwt` string or an `auth` block (OIDC:
- * `static` / `clientCredentials` / `authorizationCode`). The CLI resolves
- * `auth` upfront (see {@link resolveCantonTokenGetter}) and hands the SDK a
- * config with only `jwt` — the SDK never sees `auth`.
+ * Two groups of fields:
+ *
+ * - **CLI-only** — consumed by the CLI to build its `JsonRpcProvider` and
+ *   resolve authentication: `apiUrl`, `apiType`, `chainId`, `party`, and
+ *   `jwt`/`auth`. The file may carry either a static `jwt` string or an `auth`
+ *   block (OIDC: `static` / `clientCredentials` / `authorizationCode`); the CLI
+ *   resolves `auth` upfront (see {@link resolveCantonTokenGetter}) and hands
+ *   the provider the resulting token — the SDK never sees `auth`.
+ * - **SDK passthrough** — every {@link CantonConfig} field except `provider`
+ *   (which is constructed by the CLI, not user-configurable), forwarded to the
+ *   SDK via {@link toSdkCantonConfig}.
  */
-export type CantonCliConfig = CantonConfig & { auth?: CantonAuthConfig }
+export type CantonCliConfig = {
+  // --- CLI-only: connectivity & auth ---
+  /** Provider type; only `json` (or empty) is supported. */
+  apiType: string
+  /** Canton Ledger JSON API URL. */
+  apiUrl: string
+  /** CAIP-2 chain ID, e.g. `canton:testnet` — handed to the CLI's provider. */
+  chainId: string
+  /** User ledger party for actAs, ACS queries, and transaction visibility. */
+  party: string
+  /** Static, pre-obtained JWT. Shorthand for `auth: { type: "static", jwt }`. */
+  jwt?: string
+  /** OIDC auth config (`static` / `clientCredentials` / `authorizationCode`), resolved upfront by the CLI. */
+  auth?: CantonAuthConfig
+
+  // --- SDK passthrough (CantonConfig minus provider) ---
+  /** CCIP operator party; overrides the network's default CCIP owner party. */
+  ccipParty?: string
+  /** Throw instead of automatically creating missing contracts. Default: `false`. */
+  disableAutomaticContractCreation?: boolean
+  /** Owner party → EDS base URL overrides, merged over the SDK's per-network defaults. */
+  externalEdsUrlsByOwner?: Record<string, string>
+  /** Instrument admin party → Token Standard API base URL overrides, merged over the SDK's per-network defaults. */
+  externalTokenStandardUrlsByOwner?: Record<string, string>
+  /** Default CCV indexer base URL; CLI `--indexer` wins when provided. */
+  indexerUrl?: string
+  /** Default gas for Canton → destination sends when `extraArgs.gasLimit` is omitted. */
+  defaultSendGasLimit?: number
+  /** Default Canton CCV instance addresses for execute / send. */
+  ccvs?: string[]
+}
+
+/**
+ * Build the SDK's {@link CantonConfig} from a loaded CLI config and the
+ * {@link CantonRpcProvider} the CLI constructed from its own fields.
+ *
+ * Forwards every SDK-relevant field from the CLI config; the CLI-only fields
+ * (`apiUrl`, `apiType`, `chainId`, `party`, `jwt`, `auth`) are deliberately
+ * dropped — the SDK never sees them.
+ */
+export function toSdkCantonConfig(cli: CantonCliConfig, provider: CantonRpcProvider): CantonConfig {
+  return {
+    provider,
+    ccipParty: cli.ccipParty,
+    disableAutomaticContractCreation: cli.disableAutomaticContractCreation,
+    externalEdsUrlsByOwner: cli.externalEdsUrlsByOwner,
+    externalTokenStandardUrlsByOwner: cli.externalTokenStandardUrlsByOwner,
+    indexerUrl: cli.indexerUrl,
+    defaultSendGasLimit: cli.defaultSendGasLimit,
+    ccvs: cli.ccvs,
+  }
+}
 
 /**
  * Load and validate a Canton config JSON file.
@@ -62,11 +120,11 @@ export function loadCantonConfig(
  * CCIP v2 indexer URLs for verification lookups.
  * CLI `--indexer` wins when provided; otherwise uses canton-config `indexerUrl`
  * only when the lane involves Canton (EVM-only lanes keep default indexer behavior).
- * Prefer {@link resolveIndexer} from `./index.ts` in CLI commands.
+ * Prefer {@link resolveIndexer} from `../index.ts` in CLI commands.
  */
 export function resolveCliIndexer(
   cliIndexer: readonly string[] | undefined,
-  cantonConfig: Partial<CantonConfig> | undefined,
+  cantonConfig: Partial<CantonCliConfig> | undefined,
   laneInvolvesCanton: boolean,
 ): readonly string[] | undefined {
   if (cliIndexer?.length) return cliIndexer

@@ -262,15 +262,25 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   private readonly defaultSendGasLimit?: number | bigint
 
   /**
-   * Creates a new CantonChain instance.
-   * @param provider - Canton provider instance, provides all connectivity
-   * @param client - Canton Ledger API client.
-   * @param edsDisclosureProvider - EDS-based disclosure provider.
-   * @param tokenMetadataClient - Token Metadata API client.
-   * @param ccipParty - The party ID to use for CCIP operations
+   * Creates a new CantonChain instance. Internal — use
+   * {@link CantonChain.fromProvider}, which resolves these arguments from the
+   * provider and `ctx.cantonConfig`.
+   *
+   * @param provider - Canton provider instance, supplying connectivity and
+   *   JWT-authenticated requests.
+   * @param ledgerApiClient - Ledger API client built from the provider.
+   * @param partyId - Primary ledger party from the provider, used for actAs,
+   *   ACS queries, and transaction visibility (parsed into {@link activeParty}).
+   * @param disableAutomaticContractCreation - Whether to throw instead of
+   *   automatically creating missing contracts.
+   * @param edsClientProvider - EDS client provider for disclosure lookups.
+   * @param tokenStandardClientProvider - Token Standard API client provider.
+   * @param ccipParty - Resolved CCIP operator party ID.
+   * @param nativeToken - The chain's native token.
    * @param indexerUrl - Base URL of the CCV indexer service.
    * @param network - Network information for this chain.
-   * @param ctx - Context containing logger.
+   * @param ctx - Optional context: `logger`, `fetch` override, and the
+   *   `cantonConfig.ccvs` / `cantonConfig.defaultSendGasLimit` send defaults.
    */
   private constructor(
     provider: CantonRpcProvider,
@@ -425,8 +435,26 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     ],
   ])
 
-  // Instantiate a new CantonChain using the given provider.
-  // TODO: ctx must be optional, use reasonable defaults
+  /**
+   * Creates a CantonChain instance from the given {@link CantonRpcProvider}.
+   *
+   * Verifies the connection, detects the active network from the provider, and
+   * applies the chain's built-in defaults, overridable via
+   * `ctx.cantonConfig` (`ccipParty`, `externalEdsUrlsByOwner`,
+   * `externalTokenStandardUrlsByOwner`, `indexerUrl`,
+   * `disableAutomaticContractCreation`, `ccvs`, `defaultSendGasLimit` — all
+   * optional).
+   *
+   * @param provider - Canton provider instance, supplying connectivity and
+   *   JWT-authenticated requests. Built by the embedder — the CLI builds one
+   *   from its own `CantonCliConfig`.
+   * @param ctx - Optional context. `logger` defaults to `console`; all
+   *   `cantonConfig` fields are optional overrides over the chain defaults.
+   * @returns A new CantonChain instance.
+   * @throws {@link CCIPChainNotFoundError} if the provider reports a network with no chain defaults
+   * @throws {@link CCIPError} (ADDRESS_INVALID) if no `ccipParty` is configured and the chain has no default
+   * @throws {@link CCIPError} (METHOD_UNSUPPORTED) if no indexer URL can be resolved
+   */
   static async fromProvider(provider: CantonRpcProvider, ctx?: ChainContext): Promise<CantonChain> {
     const { logger = console, cantonConfig } = ctx ?? {}
 
@@ -487,7 +515,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     if (!indexerUrl) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
-        'CantonChain.fromUrl: Unable to resolve indexer URL',
+        'CantonChain.fromProvider: Unable to resolve indexer URL',
       )
     }
 
@@ -510,18 +538,23 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
    * Creates a CantonChain instance from a Canton Ledger JSON API URL.
    * Verifies the connection and detects the network.
    *
-   * @param url - Base URL for the Canton Ledger JSON API (e.g., http://localhost:7575).
-   * @param ctx - Context containing logger.
+   * The URL itself is never dialed: `ctx.cantonConfig.provider` is **required** —
+   * a `CantonRpcProvider` supplying connectivity and JWT-authenticated requests
+   * must be constructed by the embedder and passed in (this method exists to
+   * satisfy the {@link ChainStatic} interface; prefer {@link CantonChain.fromProvider}
+   * directly when you already hold a provider, as the CLI does).
+   *
+   * @param url - ignored.
+   * @param ctx - Context containing the required `cantonConfig.provider`.
    * @returns A new CantonChain instance.
-   * @throws {@link CCIPHttpError} if connection to the Canton Ledger JSON API fails
-   * @throws {@link CCIPNotImplementedError} if Canton network detection is not yet implemented
+   * @throws {@link CCIPError} (METHOD_UNSUPPORTED) when `ctx.cantonConfig.provider` is missing
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<CantonChain> {
     // Check that ctx has the necessary cantonConfig
-    if (!ctx || !ctx.cantonConfig) {
+    if (!ctx?.cantonConfig?.provider) {
       throw new CCIPError(
         CCIPErrorCode.METHOD_UNSUPPORTED,
-        'CantonChain.fromUrl: ctx.cantonConfig is required',
+        'CantonChain.fromUrl: ctx.cantonConfig.provider is required',
       )
     }
 

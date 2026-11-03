@@ -324,12 +324,15 @@ to be cleared.
 
 #### Canton Special Cases
 
-Canton requires a config file with connection parameters via `--canton-config <path>`. The Canton Ledger API URL is provided through the normal `--rpcs` mechanism.
+Canton requires a config file with connection parameters via `--canton-config <path>`.
 
 **Config file format (JSON):**
 
 ```json
 {
+  "apiType": "json",
+  "apiUrl": "https://ledger.example.com/api/json",
+  "chainId": "canton:testnet",
   "party": "sender::1220...",
   "ccipParty": "ccip::1220...",
   "auth": {
@@ -350,8 +353,15 @@ Set `CANTON_CLIENT_ID` and `CANTON_CLIENT_SECRET` env vars for the `clientCreden
 > [!NOTE]
 > The top-level `jwt` field is shorthand for `auth: { type: "static", jwt }` — both are equivalent. If both are present, `jwt` takes precedence.
 
-**Required fields:** `party` — plus either `jwt` (pre-obtained token) or `auth` (OIDC config, see below)  
-**Optional fields:** `jwt`, `auth`, `ccipParty`, `externalEdsUrlsByOwner`, `externalTokenStandardUrlsByOwner`, `indexerUrl`, `chainId`, `defaultSendGasLimit`, `ccvs`,
+**CLI-only fields** (used by the CLI to build its Canton provider; the SDK never sees them):  
+**Required:** `apiType` (`json`), `apiUrl`, `chainId` (CAIP-2, e.g. `canton:testnet`), `party` — plus either `jwt` (pre-obtained token) or `auth` (OIDC config, see below)  
+**Optional:** `jwt`, `auth`
+
+**SDK fields** (forwarded to the SDK's `CantonConfig`):  
+**Optional:** `ccipParty`, `disableAutomaticContractCreation`, `externalEdsUrlsByOwner`, `externalTokenStandardUrlsByOwner`, `indexerUrl`, `defaultSendGasLimit`, `ccvs`
+
+> [!NOTE]
+> The SDK's `provider` field is not user-configurable — the CLI constructs it from `apiType`/`apiUrl`/`chainId`/`party`/`jwt` and passes it to the SDK.
 
 `ccipParty` (CCIP operator party) is optional: when set it overrides the network's default CCIP owner party; when omitted the chain default is used.
 

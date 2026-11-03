@@ -29,7 +29,7 @@ For EVM-only usage, see [Sending Messages](/sdk/guides/sending-messages) and [Tr
 :::note
 **Sui is execution-only** — it can execute incoming messages but cannot send cross-chain messages. Token pool queries are not implemented on Sui, TON, or Canton.
 
-**Canton is partial** — it supports send and manual execution but requires a `CantonConfig` object (party IDs, JWT, EDS URLs). Fee estimation, balance queries, message tracking via `getMessagesInTx`, and registry/pool queries are not yet implemented.
+**Canton is partial** — it supports send and manual execution but requires a `CantonConfig` object (a `CantonRpcProvider` plus party IDs and EDS URLs). Fee estimation, balance queries, message tracking via `getMessagesInTx`, and registry/pool queries are not yet implemented.
 :::
 
 ## Connecting
@@ -83,22 +83,18 @@ import { CantonChain } from '@chainlink/ccip-sdk'
 
 const chain = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
   cantonConfig: {
-    party: 'sender::1220...',
+    // A CantonRpcProvider supplying connectivity and JWT-authenticated
+    // requests. Constructed by the embedder — the CLI builds one from its own
+    // canton-config (apiUrl, party, jwt/auth); web embedders bring their own.
+    provider,
     ccipParty: 'ccip::1220...',
-    // Either a static JWT string, or a () => Promise<string> getter for
-    // refreshable tokens (OAuth2). The CLI resolves its `auth` block into
-    // one of these upfront — see Canton Configuration.
-    jwt: 'eyJ...',
-    edsUrl: 'https://eds.example.com',
-    transferInstructionUrl: 'https://transfer-instruction.example.com',
     indexerUrl: 'https://indexer.example.com',
-    chainId: 'canton:TestNet',
   },
 })
 console.log('Connected to:', chain.network.name)
 ```
 
-Canton requires `cantonConfig` in the second argument to `fromUrl`. The `jwt` field accepts either a string (pre-obtained token) or a `() => Promise<string>` getter (for refreshable OAuth2 tokens). The SDK is runtime-agnostic — it never orchestrates an OAuth flow; the CLI or embedder resolves auth upfront and injects the result. See [Canton Configuration](/cli/configuration#canton-configuration) for the full config schema.
+Canton requires `cantonConfig` in the second argument to `fromUrl`. Its `provider` field is a `CantonRpcProvider` constructed by the embedder — the CLI builds one from its own config file (connectivity, `party`, `jwt`/`auth`); the SDK is runtime-agnostic and never orchestrates an OAuth flow. See [Canton Configuration](/cli/configuration#canton-configuration) for the CLI config schema.
 
 </TabItem>
 </Tabs>
@@ -297,7 +293,7 @@ const message = {
 import { CantonChain, networkInfo } from '@chainlink/ccip-sdk'
 
 const source = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
-  cantonConfig: { /* party, ccipParty, jwt (string or getter), edsUrl, transferInstructionUrl, ... */ },
+  cantonConfig: { /* provider, ccipParty, indexerUrl, ccvs, ... */ },
 })
 
 const destSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
@@ -411,7 +407,7 @@ const signature = await sendTransaction(transaction, connection)
 
 ### Configuration
 
-Canton requires a `CantonConfig` object passed via `ChainContext.cantonConfig` when calling `CantonChain.fromUrl`. Required fields: `party`, `ccipParty`, `edsUrl`, `transferInstructionUrl` — plus `jwt` (a string for a pre-obtained token, or a `() => Promise<string>` getter for refreshable OAuth2 tokens). The SDK is runtime-agnostic and never orchestrates an OAuth flow — the CLI resolves its `auth` block upfront and injects `jwt`; web/Electron embedders compose the SDK's OAuth2 protocol helpers (`buildAuthorizationRequest`, `validateAuthorizationCallback`, `exchangeAuthorizationCode`) with their own redirect/callback handling. See [Canton Configuration](/cli/configuration#canton-configuration) for the full schema.
+Canton requires a `CantonConfig` object passed via `ChainContext.cantonConfig` when calling `CantonChain.fromUrl`. Required field: `provider` — a `CantonRpcProvider` supplying connectivity and JWT-authenticated requests, constructed by the embedder. Optional fields: `ccipParty`, `disableAutomaticContractCreation`, `externalEdsUrlsByOwner`, `externalTokenStandardUrlsByOwner`, `indexerUrl`, `defaultSendGasLimit`, `ccvs`. The SDK is runtime-agnostic and never orchestrates an OAuth flow — the CLI resolves its `auth` block upfront and builds its provider with the resulting JWT; web/Electron embedders compose the SDK's OAuth2 protocol helpers (`buildAuthorizationRequest`, `validateAuthorizationCallback`, `exchangeAuthorizationCode`) with their own redirect/callback handling and construct their own provider. See [Canton Configuration](/cli/configuration#canton-configuration) for the CLI config schema.
 
 ### Identity and Addresses
 
@@ -440,7 +436,7 @@ Canton unsigned sends return `JsCommands` (Daml exercise commands with disclosed
 
 ```typescript
 const unsignedTx = await source.generateUnsignedSendMessage({
-  sender: cantonConfig.party,
+  sender: party, // your ledger party — the same one the provider authenticates as
   router: 'ccipsender',
   destChainSelector,
   message,

@@ -225,16 +225,22 @@ export type WithCantonConfig = {
 }
 
 /**
- * Configuration for connecting to a Canton Ledger API and fetch CCIP disclosures.
+ * SDK-side configuration for connecting to a Canton Ledger API and fetch CCIP
+ * disclosures. The SDK consumes only what it's given: the {@link CantonRpcProvider}
+ * (constructed by the embedder — the CLI builds one from its own `CantonCliConfig`)
+ * plus the operational overrides below.
  */
 export type CantonConfig = {
-  provider: CantonRpcProvider
-
-  apiType: string // TODO, either `json` or `gateway`
-  apiUrl: string
-
-  /** User ledger party for actAs, ACS queries, and transaction visibility. */
-  party: string
+  /**
+   * Canton RPC provider, supplying connectivity and JWT-authenticated requests.
+   *
+   * Required when constructing a chain via {@link CantonChain.fromUrl} — the
+   * provider is built by the embedder (the CLI builds one from its own
+   * `CantonCliConfig`). Optional when the provider is passed directly to
+   * {@link CantonChain.fromProvider}: its context then only carries the
+   * operational overrides below.
+   */
+  provider?: CantonRpcProvider
 
   /**
    * CCIP operator party.
@@ -247,20 +253,10 @@ export type CantonConfig = {
    * If enabled, CantonChain will not automatically create contracts and instead
    * throw an error if it encounters a missing contract.
    * CCIPSender, CCIPReceiver, PerPartyRouter
-   */
-  disableAutomaticContractCreation: boolean
-
-  /**
-   * JSON Web Token for authentication with the Canton Ledger API.
    *
-   * Pass a string for a static (pre-obtained) token, or a `() => Promise<string>`
-   * getter for a refreshable token (e.g. an OAuth2 caching provider). When a
-   * getter is supplied, the SDK clients call it per request to obtain a fresh
-   * JWT, enabling automatic refresh. The CLI resolves its `auth` block upfront
-   * and injects either a string or a getter here; web/Electron embedders inject
-   * their own.
+   * Default: `false`
    */
-  jwt?: string | (() => Promise<string>)
+  disableAutomaticContractCreation?: boolean
 
   /**
    * Optional mapping from a Canton RawInstanceAddress owner party to that
@@ -289,15 +285,11 @@ export type CantonConfig = {
   externalTokenStandardUrlsByOwner?: Record<string, string>
 
   /**
-   * Optional base URL for a transaction indexer to fetch CCV verifications.
-   * Used when `--indexer` is omitted on ccip-cli (CLI `--indexer` overrides this).
+   * Optional base URL for a transaction indexer to fetch CCV verifications,
+   * overriding the network's built-in default. A per-call `indexer` option
+   * still wins over this.
    */
   indexerUrl?: string
-
-  /**
-   * CAIP-2 chain ID in the format of `namespace:reference`, e.g. `canton:testnet`, `canton:mainnet`
-   */
-  chainId: string
 
   /**
    * Default gas limit for Canton → destination sends when `message.extraArgs.gasLimit` is omitted.

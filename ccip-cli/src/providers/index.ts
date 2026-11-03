@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 
 import type { CantonRpcProvider } from '@chainlink/ccip-sdk/src/canton/types.ts'
 import {
+  type CantonConfig,
   type Chain,
   type ChainGetter,
   type ChainTransaction,
@@ -26,13 +27,13 @@ import type { Ctx } from '../commands/index.ts'
 import type { GlobalOpts } from '../index.ts'
 import { loadAptosWallet } from './aptos.ts'
 import {
-  type CantonCliConfig,
   type CantonWalletWithSigner,
   JsonRpcProvider,
   loadCantonConfig,
   loadCantonWallet,
   resolveCantonTokenGetter,
   resolveCliIndexer,
+  toSdkCantonConfig,
 } from './canton/index.ts'
 import { loadEvmWallet } from './evm.ts'
 import { loadSolanaWallet } from './solana.ts'
@@ -177,20 +178,23 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
   }
 
   /**
-   * Resolve the Canton config into a `jwt` (string or getter) and a
-   * {@link JsonRpcProvider} upfront, so the SDK never orchestrates an OAuth
-   * flow. The resolution is lazy (only awaited when the Canton family is
+   * Resolve the Canton config into the CLI-built {@link CantonRpcProvider} and
+   * the SDK's {@link CantonConfig}, upfront, so the SDK never orchestrates an
+   * OAuth flow. The resolution is lazy (only awaited when the Canton family is
    * loaded) and memoized so repeated family loads reuse the same resolved
    * config — and the wallet (and its Ledger device, if any) is loaded exactly
    * once here: its signer, if any, is handed to the provider, which then
    * takes care of signing/submission.
    */
-  type ResolvedCantonConfig = Omit<CantonCliConfig, 'auth'> | undefined
+  type ResolvedCantonConfig =
+    | { provider: CantonRpcProvider; cantonConfig: CantonConfig }
+    | undefined
   let resolvedCantonConfig$: Promise<ResolvedCantonConfig> | undefined
   const getResolvedCantonConfig = (): Promise<ResolvedCantonConfig> => {
     if (!rawCantonConfig) return Promise.resolve(undefined)
     return (resolvedCantonConfig$ ??= (async () => {
-      // `auth` is consumed here; the SDK receives only `jwt`.
+      // `auth` is consumed here; the provider (and only the provider) receives
+      // the resolved `jwt`.
       const { auth, ...rest } = rawCantonConfig
       const jwt = auth ? await resolveCantonTokenGetter(auth, { signal: ctx.abort }) : rest.jwt
       if (!jwt) {
@@ -220,7 +224,7 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
           throw new Error('unknown cantonConfig.apiType')
       }
 
-      return { ...rest, jwt, provider } as ResolvedCantonConfig
+      return { provider, cantonConfig: toSdkCantonConfig(rest, provider) }
     })())
   }
 
@@ -244,9 +248,7 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
             abort: ctx.abort,
             apiClient:
               argv.api === false ? null : typeof argv.api === 'string' ? argv.api : undefined,
-            ...{
-              cantonConfig: cantonConfig,
-            },
+            cantonConfig: cantonConfig.cantonConfig,
           })
 
           // Keep the tx-lookup promise in the returned chain so its rejection is
