@@ -7,18 +7,10 @@
  */
 
 import { type CantonChain, decodeDamlRecord, extractFieldValue } from '../../../canton/index.ts'
+import { TRANSFER_PREAPPROVAL_TEMPLATE_ID } from '../constants.ts'
 
-/**
- * Registry-app `TransferPreapproval` template, symbolic (package-name) form.
- * Package-name filters are version-agnostic (they match contracts created
- * under any vetted version of the package) — the right form for a template
- * whose creating package is upgraded upstream.
- */
-export const TRANSFER_PREAPPROVAL_TEMPLATE_ID =
-  '#utility-registry-app-v0:Utility.Registry.App.V0.Model.TransferPreapproval:TransferPreapproval'
-
-/** Receive-context key the pool merges into transfer extraArgs for direct settlement. */
-export const TRANSFER_PREAPPROVAL_CONTEXT_KEY = 'transfer-preapproval'
+// Constants live in ../constants.ts (single home for Canton constants).
+export { TRANSFER_PREAPPROVAL_CONTEXT_KEY, TRANSFER_PREAPPROVAL_TEMPLATE_ID } from '../constants.ts'
 
 /**
  * The CID of `receiver`'s active preapproval covering `instrumentId`
@@ -29,6 +21,11 @@ export async function resolveTransferPreapprovalCid(
   receiver: string,
   instrumentId: { admin: string; id: string },
 ): Promise<string | undefined> {
+  // Why the symbolic filter: the wallet gateway's ACS proxy accepts ONLY
+  // package-name template filters (concrete package-ID lookups are rejected),
+  // and the name form matches contracts across all vetted versions of the app
+  // package — which is exactly what a preapproval created under an older app
+  // version needs.
   const contracts = await chain.findActiveContractsByTemplate(
     TRANSFER_PREAPPROVAL_TEMPLATE_ID,
     [receiver],

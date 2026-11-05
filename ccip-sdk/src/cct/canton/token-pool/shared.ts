@@ -35,33 +35,25 @@ import {
  */
 export type PoolReceiveContext = { values: Record<string, unknown> }
 
-/** CCIPFactory template ID. */
-export const FACTORY_TEMPLATE_ID = '#ccip-factory-v2:CCIP.FactoryV2:CCIPFactory'
-
-/**
- * BurnMintTokenPool template ID — the registry-pools family
- * (`CCIP.Registry.BurnMintTokenPoolV2`, package `ccip-registry-burn-mint-token-pool`).
- * This is the ONLY BurnMintTokenPool family the SDK targets: it adds the
- * mandatory `observers` field (EDS auto-detection) and the atomic
- * `Initialize` choice the production-pools family (`CCIP.BurnMintTokenPoolV2`,
- * pre-registry) lacks. Nothing in this SDK should reference the production
- * package.
- */
-export const BURN_MINT_POOL_TEMPLATE_ID =
-  '#ccip-registry-burn-mint-token-pool:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
-
-/** LockReleaseTokenPool template ID — registry-pools family (see {@link BURN_MINT_POOL_TEMPLATE_ID}). */
-export const LOCK_RELEASE_POOL_TEMPLATE_ID =
-  '#ccip-registry-lock-release-token-pool:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
-
-/** Pool type: which registry-pools template a pool is. */
-export type PoolType = 'burnMint' | 'lockRelease'
-
-/** Symbolic template ID per {@link PoolType}. */
-export const POOL_TEMPLATE_IDS: Readonly<Record<PoolType, string>> = {
-  burnMint: BURN_MINT_POOL_TEMPLATE_ID,
-  lockRelease: LOCK_RELEASE_POOL_TEMPLATE_ID,
-}
+// Template IDs / labels live in ../constants.ts (single home for Canton constants).
+import {
+  type PoolType,
+  CCIP_PUBLIC_LABEL,
+  CIP112_RECEIVER_ID_META_KEY,
+  FACTORY_TEMPLATE_ID,
+  POOL_TEMPLATE_IDS,
+  RATE_LIMITER_TEMPLATE_ID,
+} from '../constants.ts'
+export {
+  type PoolType,
+  BURN_MINT_POOL_TEMPLATE_ID,
+  CCIP_PUBLIC_LABEL,
+  CIP112_RECEIVER_ID_META_KEY,
+  FACTORY_TEMPLATE_ID,
+  LOCK_RELEASE_POOL_TEMPLATE_ID,
+  POOL_TEMPLATE_IDS,
+  RATE_LIMITER_TEMPLATE_ID,
+} from '../constants.ts'
 
 /**
  * The {@link PoolType} of a template ID (symbolic `#<pkg-name>:…` or concrete
@@ -73,10 +65,6 @@ export function poolTypeOfTemplateId(templateId: string): PoolType | undefined {
     (t) => POOL_TEMPLATE_IDS[t].split(':').slice(-2).join(':') === qualifiedName,
   )
 }
-
-/** RateLimiter template ID — registry-pools family (see {@link BURN_MINT_POOL_TEMPLATE_ID}). */
-export const RATE_LIMITER_TEMPLATE_ID =
-  '#ccip-registry-rate-limiter:CCIP.Registry.RateLimiterV2:RateLimiter'
 
 /** A contract reference for the exercise builders: a CID plus its disclosure blob. */
 export interface PoolContractRef {
@@ -422,12 +410,6 @@ export interface PoolCreateArgsInput {
    * pass `{}` to opt out). Ignored for burn-mint. */
   poolReceiveMetadata?: Record<string, string>
 }
-
-/** Standard label for CCIP pool holdings — the account DA's bridge API publicly discloses. */
-export const CCIP_PUBLIC_LABEL = 'ccip-public'
-
-/** Transfer-meta key the registry reads to select the receiver account (→ holding label). */
-export const CIP112_RECEIVER_ID_META_KEY = 'cip-112/receiver.id'
 
 /**
  * Build the full `BurnMintTokenPool`/`LockReleaseTokenPool` create-arguments
