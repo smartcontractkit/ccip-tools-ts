@@ -1,10 +1,8 @@
 /**
- * Token pool onboarding against CCIP 2.0 Solana programs, on a Surfpool fork of devnet.
+ * Token pool onboarding against CCIP 2.0 Solana programs, on a Surfpool fork of prod testnet.
  *
  * Validates that the CCIP 1.6 encoders behind {@link SolanaTokenManager} are accepted by the 2.0
- * pool and router programs. The prod testnet deployment on devnet (router `Ccip842…`, pools
- * `41FGTo…` / `8eqh…`) was upgraded in place to 2.0, the same path mainnet takes, so the SDK runs
- * against it unmodified: the program IDs mainnet uses, self-served pool initialization enabled.
+ * pool and router programs. 
  *
  * Every onboarding step runs twice: through `execute*` with the wallet signing, and through the
  * external-signer (Squads) path, where `generateUnsigned*` output is serialized with
@@ -49,7 +47,7 @@ import { refreshAccountState } from './operation.ts'
 import type { RateLimitConfig } from './token-pool/operations/set-chain-rate-limit.ts'
 import { SolanaTokenManager } from './index.ts'
 
-/** The prod testnet CCIP deployment on devnet, running the 2.0 programs since the in-place upgrade. */
+/** The prod testnet CCIP deployment on devnet, running the 2.0 programs. */
 const PROD_TESTNET = {
   router: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
   burnMintPool: '41FGToCmdaWa1dgZLKFAjvmx6e6AjVTX7SVRibvsMGVB',
