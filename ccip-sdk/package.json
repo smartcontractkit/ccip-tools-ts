@@ -75,7 +75,7 @@
     "build": "npm run clean && tsc -p ./tsconfig.build.json && cp -R ./src/canton/bindings ./dist/canton/bindings",
     "clean": "rm -rfv ./dist",
     "prepack": "node ../scripts/generate.cjs src/api/index.ts",
-    "prepare": ""
+    "prepare": "npm run build"
   },
   "files": [
     "dist",
