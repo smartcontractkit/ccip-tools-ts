@@ -1,16 +1,18 @@
 /**
  * Shared base for one-off pool config operations: a consuming pool choice that
- * returns the new pool contract ID (`SetTransferTimeout`, `SetObservers`,
- * `SetDynamicConfig`, `SetRateLimiterReferences`,
- * `ApplyTokenTransferFeeConfigUpdates`, the pool receive-context choices).
+ * returns the new pool contract ID.
  *
  * @packageDocumentation
  */
 
 import type { CantonChain } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
-import type { CantonExecuteParams, CantonGenerateParams } from '../../operation.ts'
-import { CantonOperation, extractExerciseResult } from '../../operation.ts'
+import {
+  type CantonExecuteParams,
+  type CantonGenerateParams,
+  CantonOperation,
+  extractExerciseResult,
+} from '../../operation.ts'
 import type { CantonTransactionResult } from '../../types.ts'
 
 /** Result of executing a consuming pool choice. */

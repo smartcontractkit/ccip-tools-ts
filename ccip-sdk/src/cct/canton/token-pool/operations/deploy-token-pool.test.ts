@@ -230,7 +230,10 @@ describe('deployTokenPool command building', () => {
   })
 
   it('defaults lock-release poolReceiveMetadata to the standard CCIP label', async () => {
-    const lockRelease = await op.generate(mockChain('canton:TestNet'), baseParams({ poolType: 'lockRelease' }))
+    const lockRelease = await op.generate(
+      mockChain('canton:TestNet'),
+      baseParams({ poolType: 'lockRelease' }),
+    )
     assert.deepEqual(createAndExercise(lockRelease).createArguments.poolReceiveMetadata, {
       values: { 'cip-112/receiver.id': 'ccip-public' },
     })
@@ -240,7 +243,9 @@ describe('deployTokenPool command building', () => {
       mockChain('canton:TestNet'),
       baseParams({ poolType: 'lockRelease', poolReceiveMetadata: {} }),
     )
-    assert.deepEqual(createAndExercise(unlabeled).createArguments.poolReceiveMetadata, { values: {} })
+    assert.deepEqual(createAndExercise(unlabeled).createArguments.poolReceiveMetadata, {
+      values: {},
+    })
   })
 
   it('auto-wires a transfer preapproval into lock-release poolReceiveContext', async () => {

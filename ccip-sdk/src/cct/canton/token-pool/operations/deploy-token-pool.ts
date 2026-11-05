@@ -56,10 +56,7 @@ import {
 } from '../../token-admin-registry/shared.ts'
 import type { CantonDeployResult } from '../../types.ts'
 import { parseInstrumentId, parsePartyId, parseRawInstanceAddress } from '../../validate.ts'
-import {
-  TRANSFER_PREAPPROVAL_CONTEXT_KEY,
-  resolveTransferPreapprovalCid,
-} from '../preapproval.ts'
+import { TRANSFER_PREAPPROVAL_CONTEXT_KEY, resolveTransferPreapprovalCid } from '../preapproval.ts'
 import {
   type LaneDeploySpec,
   type PoolFactoryDeps,

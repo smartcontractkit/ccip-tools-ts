@@ -27,7 +27,6 @@ const POOL_OWNER = `poolOwner::${fp('ab')}`
 const RL_ADMIN = `rateAdmin::${fp('cd')}`
 const POOL_ADDRESS = `pool-1@${POOL_OWNER}`
 const RL_IN = `rl-in@${POOL_OWNER}`
-const RL_OUT = `rl-out@${POOL_OWNER}`
 const POOL_TEMPLATES = [BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID]
 
 function activeContract(
