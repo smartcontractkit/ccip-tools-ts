@@ -30,11 +30,13 @@ A v2.0.0-only operation throws `CCTOperationUnsupportedError` when the resolved 
 | Operation group | Methods | Applies to |
 | --- | --- | --- |
 | Remote lanes | `applyChainUpdates` | All versions (one parameter shape; v1.5.0 takes one remote pool per lane) |
-| Rate limits | `setChainRateLimiterConfigs` | All versions (`fastFinality` targets the v2.0.0 FTF bucket only) |
+| Rate limits | `setChainRateLimiterConfigs`, `getCurrentRateLimiterState` | All versions (`fastFinality` targets the v2.0.0 FTF bucket only) |
 | Admin & pool registration | `registerAdmin`, `acceptAdmin`, `setPool`, ownership transfers | All versions |
-| Reads | `getTokenPoolState`, `getTokenPoolRemotes`, `getTokenAdminRegistry` | All versions |
+| Reads | `getTokenPoolState`, `getTokenPoolRemotes`, `getTokenAdminRegistry`, `getTokenPoolOwner`, `getTokenPoolToken`, `getRateLimitAdmin`, `isSupportedToken` | All versions |
+| Token decimals | `getTokenPoolTokenDecimals` | v1.5.1 and later |
+| Liquidity flag | `canAcceptLiquidity` | `LockReleaseTokenPool` v1.5.0 and v1.5.1 only |
 | Sender allowlist | `applyAllowlistUpdates`, `getAllowlist`, `getAllowlistEnabled` | All versions (the pool through v1.6.1; its bound `AdvancedPoolHooks` on v2.0.0) |
-| Transfer fees & finality | `applyTokenTransferFeeConfigUpdates`, `setAllowedFinalityConfig`, `getFee`, `getTokenTransferFeeConfig`, `getAllowedFinalityConfig` | v2.0.0 only |
+| Transfer fees & finality | `applyTokenTransferFeeConfigUpdates`, `setAllowedFinalityConfig`, `getFee`, `getTokenTransferFeeConfig`, `getAllTokenTransferFeeConfigs`, `getAllowedFinalityConfig` | v2.0.0 only |
 | CCVs & hooks | `applyCCVConfigUpdates`, `getCCVConfig`, `getAllCCVConfigs`, `getRequiredCCVs`, `setPolicyEngine`, `getPolicyEngine`, `setThresholdAmount`, `getThresholdAmount`, `updateAdvancedPoolHooksAuthorizedCallers`, `getAllAdvancedPoolHooksAuthorizedCallers`, `deployAdvancedPoolHooks`, `updateAdvancedPoolHooks`, `getAdvancedPoolHooks` | v2.0.0 only |
 | Lockbox | `getLockbox` | v2.0.0 only |
 
