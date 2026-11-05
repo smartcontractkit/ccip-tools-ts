@@ -3,11 +3,13 @@
  * and keeps their configuration in a PoolConfigManager. Hand-written from the public interfaces
  * `IMultiTokenPool`, `IGetPoolConfigManager` and `MultiTokenPool` in smartcontractkit/chainlink-ccip
  * `chains/evm/contracts/{interfaces,pools/MultiTokenPool}` at
- * ede0ec8b73e6e0dc32e317068c0a246d7aafc564.
+ * 21710ed66224ab6c141b57df81665853a29a4ede.
  * The single-token getters (`getToken()`, `getDynamicConfig()`, `getSupportedChains()`, rate
  * limiters) do not exist on these pools; `getRemoteToken(uint64)` and `isSupportedChain(uint64)`
  * revert with `LocalTokenRequired()`.
- * `getTokenTransferFeeConfig` has the same signature as on TokenPool 2.0.
+ * `getTokenTransferFeeConfig` has the same signature as on TokenPool 2.0. `getFee` reverts with
+ * `LaneFeeNotFound` when the lane, its fee record or its destination overhead record is missing;
+ * the v2 OnRamp then does not fall back to the FeeQuoter, so the send fails.
  */
 // TODO: replace with a `// generate:` gobinding block once chainlink-ccip publishes one
 export default [
@@ -92,6 +94,14 @@ export default [
     inputs: [
       { type: 'address', name: 'token' },
       { type: 'uint8', name: 'flavor' },
+    ],
+  },
+  {
+    name: 'LaneFeeNotFound',
+    type: 'error',
+    inputs: [
+      { type: 'address', name: 'localToken' },
+      { type: 'uint64', name: 'destChainSelector' },
     ],
   },
 ] as const

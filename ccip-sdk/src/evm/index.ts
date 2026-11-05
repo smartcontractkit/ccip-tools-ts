@@ -39,6 +39,8 @@ import {
   type BlockInfo,
   type ChainContext,
   type GetBalanceOpts,
+  type LaneRecordType,
+  type LaneStatus,
   type LogFilter,
   type RateLimiterState,
   type TokenPoolConfig,
@@ -65,6 +67,8 @@ import {
   CCIPFinalityNotAllowedError,
   CCIPHasherVersionUnsupportedError,
   CCIPInsufficientBalanceError,
+  CCIPLaneConfigIncompleteError,
+  CCIPLocalTokenRequiredError,
   CCIPLogDataInvalidError,
   CCIPRateLimitExceededError,
   CCIPSourceChainUnsupportedError,
@@ -73,7 +77,6 @@ import {
   CCIPTokenNotConfiguredError,
   CCIPTokenNotInRegistryError,
   CCIPTokenPoolChainConfigNotFoundError,
-  CCIPTokenPoolTokenRequiredError,
   CCIPTransactionNotFoundError,
   CCIPVersionRequiresLaneError,
   CCIPVersionUnsupportedError,
@@ -250,6 +253,54 @@ function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
  */
 function isMultiTokenPoolType(type: string): boolean {
   return type.includes('MultiTokenPool')
+}
+
+/**
+ * The record types of `PoolConfigManager.getLaneRecordLevelBatch`, in the order of its outputs;
+ * a lane level of 0 (`RecordLevel.None`) means the record is missing.
+ */
+const LANE_RECORD_TYPES = [
+  'connection',
+  'remotePool',
+  'rateLimit',
+  'fee',
+  'destOverhead',
+  'security',
+] as const satisfies readonly LaneRecordType[]
+/** Record types that an inbound transfer does not need. */
+const OUTBOUND_ONLY_RECORD_TYPES: ReadonlySet<LaneRecordType> = new Set(['fee', 'destOverhead'])
+
+/** Pause flags of a `PoolConfigManager.LaneConnection`. */
+type LanePauseFlags = {
+  isGloballyPaused: boolean
+  isTokenOutboundPaused: boolean
+  isTokenInboundPaused: boolean
+  isChainOutboundPaused: boolean
+  isChainInboundPaused: boolean
+}
+
+/**
+ * The {@link LaneStatus} of a multi-token pool lane in one direction: the broadest pause first
+ * (global, then chain, then token), then the records that a transfer in that direction needs.
+ * @param pauses - The lane's pause flags from `getLaneConnectionBatch`.
+ * @param recordLevels - The lane's `RecordLevel` per {@link LANE_RECORD_TYPES} entry.
+ * @param direction - The transfer direction.
+ */
+function toMultiTokenLaneStatus(
+  pauses: LanePauseFlags,
+  recordLevels: readonly bigint[],
+  direction: 'outbound' | 'inbound',
+): LaneStatus {
+  const outbound = direction === 'outbound'
+  if (pauses.isGloballyPaused) return { status: 'paused', scope: 'global', direction }
+  if (outbound ? pauses.isChainOutboundPaused : pauses.isChainInboundPaused)
+    return { status: 'paused', scope: 'chain', direction }
+  if (outbound ? pauses.isTokenOutboundPaused : pauses.isTokenInboundPaused)
+    return { status: 'paused', scope: 'token', direction }
+  const missing = LANE_RECORD_TYPES.filter(
+    (type, i) => !recordLevels[i] && (outbound || !OUTBOUND_ONLY_RECORD_TYPES.has(type)),
+  )
+  return missing.length ? { status: 'incomplete', missing } : { status: 'ok' }
 }
 
 // remote/alien addresses encoding for EVM
@@ -1590,15 +1641,34 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       interfaces.Router,
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
-    return contract.getFee(destChainSelector, {
-      receiver: encodeAddressToEvm(populatedMessage.receiver),
-      data: hexlify(populatedMessage.data ?? '0x'),
-      tokenAmounts: populatedMessage.tokenAmounts ?? [],
-      feeToken: populatedMessage.feeToken || ZeroAddress,
-      extraArgs: hexlify(
-        (this.constructor as typeof EVMChain).encodeExtraArgs(populatedMessage.extraArgs),
-      ),
-    })
+    return contract
+      .getFee(destChainSelector, {
+        receiver: encodeAddressToEvm(populatedMessage.receiver),
+        data: hexlify(populatedMessage.data ?? '0x'),
+        tokenAmounts: populatedMessage.tokenAmounts ?? [],
+        feeToken: populatedMessage.feeToken || ZeroAddress,
+        extraArgs: hexlify(
+          (this.constructor as typeof EVMChain).encodeExtraArgs(populatedMessage.extraArgs),
+        ),
+      })
+      .catch((err: unknown) => {
+        // a multi-token pool has no FeeQuoter fallback: its getFee reverts when the lane lacks
+        // fee records. The preflight above reports this first; this covers a change in between.
+        const revert = getErrorData(err)
+        const parsed = revert ? parseWithFragment(revert) : undefined
+        if (parsed?.[0].name === 'LaneFeeNotFound' && parsed[2]) {
+          throw new CCIPLaneConfigIncompleteError(
+            ['fee', 'destOverhead'],
+            {
+              token: getAddress(parsed[2][0] as string),
+              sourceChainSelector: this.network.chainSelector,
+              destChainSelector,
+            },
+            { cause: err instanceof Error ? err : undefined, context: { revert } },
+          )
+        }
+        throw err
+      })
   }
 
   /**
@@ -2296,8 +2366,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * @returns Token pool config containing token, router, typeAndVersion, and optionally
    *          finalityDepth, finalitySafe, tokenTransferFeeConfig, and `decimals` (v1.5.1+).
    *          LockReleaseV2 TPs also return its `lockBox` address; multi-token pools their
-   *          `poolConfigManager`, and its `connectionPolicyStore` and `securityPolicyStore`
-   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens and
+   *          `poolConfigManager`, and its `connectionPolicyStore`, `feePolicyStore` and
+   *          `securityPolicyStore`
+   * @throws {@link CCIPLocalTokenRequiredError} if the pool serves multiple tokens and
    *   `opts.token` is not given
    * @throws {@link CCIPTokenNotConfiguredError} if a multi-token pool's PoolConfigManager does
    *   not register `opts.token`
@@ -2485,15 +2556,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
   /**
    * Reads a multi-token pool's PoolConfigManager and its resolved config for one token.
-   * @throws {@link CCIPTokenPoolTokenRequiredError} if `token` is not given
+   * @throws {@link CCIPLocalTokenRequiredError} if `token` is not given
    * @throws {@link CCIPTokenNotConfiguredError} if the PoolConfigManager does not register `token`
    */
   private async getMultiTokenPoolTokenConfig(tokenPool: string, token: string | undefined) {
     if (!token)
-      throw new CCIPTokenPoolTokenRequiredError(
-        tokenPool,
-        (await this.typeAndVersion(tokenPool))[2],
-      )
+      throw new CCIPLocalTokenRequiredError(tokenPool, (await this.typeAndVersion(tokenPool))[2])
     const pool = new Contract(
       tokenPool,
       interfaces.MultiTokenPool_v2_1,
@@ -2526,8 +2594,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       // best-effort: getStaticConfig is not part of IPoolConfigManager, so a PCM without it
       // stays readable, only without its stores; anything else (transport) propagates
       pcm.getStaticConfig().then(
-        ([, connectionStore, securityStore]) => ({
+        ([, connectionStore, feeStore, securityStore]) => ({
           connectionPolicyStore: connectionStore as string,
+          feePolicyStore: feeStore as string,
           securityPolicyStore: securityStore as string,
         }),
         (err) => {
@@ -2571,7 +2640,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Multi-token pools read the token's resolved lanes from their PoolConfigManager.
    *
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remote token is not configured for a chain.
-   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens and
+   * @throws {@link CCIPLocalTokenRequiredError} if the pool serves multiple tokens and
    *   `opts.token` is not given
    */
   async getTokenPoolRemotes(
@@ -2847,8 +2916,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
-   * {@link EVMChain.getTokenPoolRemotes} for multi-token pools: the token's resolved lanes and
-   * rate limiter buckets, read in one batch each from the PoolConfigManager.
+   * {@link EVMChain.getTokenPoolRemotes} for multi-token pools: the token's resolved lanes, rate
+   * limiter buckets and record levels, read in one batch each from the PoolConfigManager. Each
+   * remote also has the lane's {@link TokenPoolRemote.outboundStatus} and
+   * {@link TokenPoolRemote.inboundStatus}.
    */
   private async getMultiTokenPoolRemotes(
     tokenPool: string,
@@ -2864,9 +2935,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       localToken: token!,
       remoteChainSelector: chain.chainSelector,
     }))
-    const [connections, rateLimits] = await Promise.all([
+    const [connections, rateLimits, recordLevels] = await Promise.all([
       resultToObject(pcm.getLaneConnectionBatch(lanes)),
       resultToObject(pcm.getCurrentRateLimiterStateBatch(lanes)),
+      pcm.getLaneRecordLevelBatch(lanes).then((levels) => levels.map((l) => [...l] as bigint[])),
     ])
     return Object.fromEntries(
       chains.map((chain, i) => {
@@ -2878,17 +2950,21 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           connection.remoteToken.match(/^(0x)?0*$/)
         )
           throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, chain.name)
+        const levels = recordLevels.map((byType) => byType[i] ?? 0n)
         return [
           chain.name,
           {
             remoteToken: decodeAddress(connection.remoteToken, chain.family),
             remotePools: connection.remotePools
+              .map(({ remotePoolAddress }) => remotePoolAddress)
               .filter((pool) => !pool.match(/^(0x)?0*$/))
               .map((pool) => decodeAddress(pool, chain.family)),
             outboundRateLimiterState: toRateLimiterState(buckets.outbound),
             inboundRateLimiterState: toRateLimiterState(buckets.inbound),
             fastOutboundRateLimiterState: toRateLimiterState(buckets.fastFinalityOutbound),
             fastInboundRateLimiterState: toRateLimiterState(buckets.fastFinalityInbound),
+            outboundStatus: toMultiTokenLaneStatus(connection, levels, 'outbound'),
+            inboundStatus: toMultiTokenLaneStatus(connection, levels, 'inbound'),
           },
         ] as const
       }),
