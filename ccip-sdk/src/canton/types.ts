@@ -46,6 +46,12 @@ export interface UnsignedCantonTx {
   commands: JsCommands
 }
 
+/** A contract created by {@link CantonChain} and the ledger update that created it. */
+export interface CantonCreatedContract {
+  contractId: string
+  updateId: string
+}
+
 /**
  * Canton-specific send parameters passed via `message.extraArgs` when calling
  * {@link CantonChain.generateUnsignedSendMessage} or {@link CantonChain.sendMessage}.

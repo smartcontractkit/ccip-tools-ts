@@ -85,6 +85,7 @@ import {
   getInterfaceCreatedEventFromTransaction,
 } from './events.ts'
 import {
+  type CantonCreatedContract,
   type CantonExtraArgsV1,
   type CantonRpcProvider,
   type CantonTokenInfo,
@@ -99,7 +100,7 @@ export type {
   // Signature,
   SinglePartySignatures,
 } from './clients/ledger-api/client.ts'
-export type { CantonExtraArgsV1, UnsignedCantonTx } from './types.ts'
+export type { CantonCreatedContract, CantonExtraArgsV1, UnsignedCantonTx } from './types.ts'
 export {
   INSTANCE_ADDRESS_LENGTH,
   InstanceAddress,
@@ -1734,7 +1735,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    return this.createPerPartyRouter()
+    return (await this.createPerPartyRouter()).contractId
   }
 
   async getPerPartyRouter(): Promise<string | undefined> {
@@ -1748,7 +1749,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     return active?.createdEvent.contractId
   }
 
-  async createPerPartyRouter(): Promise<string> {
+  async createPerPartyRouter(): Promise<CantonCreatedContract> {
     const router = await this.getPerPartyRouter()
     if (router) {
       throw new CCIPError(
@@ -1835,7 +1836,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    return createdEvent.contractId
+    return { contractId: createdEvent.contractId, updateId: transaction.updateId }
   }
 
   /*
@@ -1858,7 +1859,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    return this.createCCIPSender()
+    return (await this.createCCIPSender()).contractId
   }
 
   async getCCIPSender(): Promise<string | undefined> {
@@ -1872,7 +1873,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     return active?.createdEvent.contractId
   }
 
-  async createCCIPSender(): Promise<string> {
+  async createCCIPSender(): Promise<CantonCreatedContract> {
     const createCmd: JsCommands = {
       commandId: `ccip-create-sender-${Date.now()}`,
       commands: [
@@ -1897,7 +1898,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    return createdEvent.contractId
+    return { contractId: createdEvent.contractId, updateId: transaction.updateId }
   }
 
   /*
@@ -1923,7 +1924,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    return this.createCCIPReceiver(finality, ccvs)
+    return (await this.createCCIPReceiver(finality, ccvs)).contractId
   }
 
   async getCCIPReceiver(
@@ -2004,7 +2005,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   async createCCIPReceiver(
     finality: FinalityRequested,
     ccvs: RawInstanceAddress[],
-  ): Promise<string> {
+  ): Promise<CantonCreatedContract> {
     this.logger.debug(
       `CantonChain.createCCIPReceiver: creating CCIPReceiver for finality=${finality} and requiredCCVs=${ccvs.map((addr) => addr.toString()).join(',')}`,
     )
@@ -2036,7 +2037,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       )
     }
 
-    return createdEvent.contractId
+    return { contractId: createdEvent.contractId, updateId: transaction.updateId }
   }
 
   /**
