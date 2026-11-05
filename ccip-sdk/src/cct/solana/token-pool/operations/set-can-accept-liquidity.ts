@@ -3,7 +3,7 @@ import type { PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
   type SolanaExecuteParams,
@@ -17,9 +17,11 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  isPoolVersionAtLeast2,
   parseOptionalPublicKey,
   parsePublicKey,
   resolveExistingLockReleasePoolProgram,
+  resolvePoolProgramVersion,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
 
@@ -98,6 +100,18 @@ export class SetCanAcceptLiquidity extends SolanaOperation<
       opts.tokenAddress,
       opts.poolProgramAddress,
     )
+    // CCIP 2.0 removed the instruction: pools always accept liquidity, and inflows stop by setting
+    // the rebalancer to the default address instead.
+    const version = await resolvePoolProgramVersion(chain, poolProgram)
+    if (isPoolVersionAtLeast2(version)) {
+      throw new CCTOperationUnsupportedError(this.name, version, {
+        context: {
+          poolProgram: poolProgram.toBase58(),
+          reason:
+            'CCIP 2.0 lock-release pools always accept liquidity; to stop rebalancing, setRebalancer to the default address',
+        },
+      })
+    }
     const instruction = await createLockReleaseTokenPoolProgram(chain, poolProgram, opts.payer)
       .methods.setCanAcceptLiquidity(opts.allow)
       .accountsStrict({
