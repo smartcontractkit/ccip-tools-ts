@@ -21,6 +21,7 @@ import {
   isSolanaTokenPoolType,
 } from './programs/token-pool.ts'
 import {
+  isPoolVersionAtLeast2,
   parseOptionalPublicKey,
   parsePublicKey,
   resolveExistingLockReleasePoolProgram,
@@ -28,6 +29,7 @@ import {
   resolveExistingPoolState,
   resolveExistingTokenAccount,
   resolvePoolProgramType,
+  resolvePoolProgramVersion,
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateDelegation,
@@ -241,6 +243,35 @@ describe('Validate (cct/solana)', () => {
         [CUSTOM, undefined, undefined],
       ] as const) {
         assert.equal(await resolvePoolProgramType(poolChain([], type).chain, program), expected)
+      }
+    })
+
+    it('reads pool program versions, tolerating programs without typeVersion', async () => {
+      const versioned = {
+        typeAndVersion: async () => [
+          'lockreleaseTokenPool',
+          '2.0.0',
+          'lockrelease-token-pool 2.0.0',
+        ],
+      } as unknown as SolanaChain
+      const unversioned = {
+        typeAndVersion: () => Promise.reject(new Error('typeVersion')),
+      } as unknown as SolanaChain
+      // the prod pool program IDs run 1.6 on mainnet and 2.0 on prod testnet; ask the program
+      assert.equal(await resolvePoolProgramVersion(versioned, LOCK_RELEASE), '2.0.0')
+      assert.equal(await resolvePoolProgramVersion(unversioned, CUSTOM), undefined)
+    })
+
+    it('tells CCIP 2.0 pool versions apart from earlier and unknown ones', () => {
+      for (const [version, expected] of [
+        ['2.0.0', true],
+        ['2.1.0', true],
+        ['10.0.0', true],
+        ['1.6.2', false],
+        ['0.1.0', false],
+        [undefined, false],
+      ] as const) {
+        assert.equal(isPoolVersionAtLeast2(version), expected, String(version))
       }
     })
 
