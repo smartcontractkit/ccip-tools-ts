@@ -2,7 +2,7 @@
  * Token pool onboarding against CCIP 2.0 Solana programs, on a Surfpool fork of prod testnet.
  *
  * Validates that the CCIP 1.6 encoders behind {@link SolanaTokenManager} are accepted by the 2.0
- * pool and router programs. 
+ * pool and router programs.
  *
  * Every onboarding step runs twice: through `execute*` with the wallet signing, and through the
  * external-signer (Squads) path, where `generateUnsigned*` output is serialized with
