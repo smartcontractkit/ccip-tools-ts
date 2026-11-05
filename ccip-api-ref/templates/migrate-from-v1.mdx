@@ -1,0 +1,104 @@
+---
+id: migrate-from-v1
+title: 'Migrate from API v1'
+description: 'How to move CCIP API v1 integrations to API v2: endpoint mapping, response changes, and examples.'
+sidebar_label: Migrate from v1
+sidebar_position: 1
+custom_edit_url: null
+---
+
+# Migrate from API v1
+
+CCIP API v1 is being retired. Move your integration to API v2.
+
+## Timeline
+
+| Date                        | What happens                                                                 |
+| --------------------------- | ---------------------------------------------------------------------------- |
+| November 6, 2026, 14:00 UTC | v1 is disabled. All v1 requests return `410 Gone` with a link to this guide. |
+| November 30, 2026           | v1 is permanently retired. All v1 requests keep returning `410 Gone`.        |
+
+## Why migrate
+
+v1 returns data that is no longer accurate:
+
+- **Lane latency.** v1 `totalMs` is a 90th-percentile figure, so it overstates typical delivery time. v2 `totalMs` is a trimmed median that excludes the slowest 10% of messages. For example, Ethereum to BNB Chain reported about 18.7 minutes on v1 and 16.1 minutes on v2 on November 5, 2026.
+- **Messages.** v1 returns an empty `tokenAmounts` list for CCIP 2.0 token transfers and omits fields such as `verifiers`, `finality`, and `fees`.
+
+## Endpoint mapping
+
+Replace the base URL `https://api.ccip.chain.link/v1` with `https://api.ccip.chain.link/v2`. Only the message path changes:
+
+| v1 path                      | v2 path                      |
+| ---------------------------- | ---------------------------- |
+| `GET /lanes/latency`         | `GET /lanes/latency`         |
+| `GET /message/{messageId}`   | `GET /messages/{messageId}`  |
+| `POST /intents/quotes`       | `POST /intents/quotes`       |
+| `GET /intents/tx/{txHash}`   | `GET /intents/tx/{txHash}`   |
+| `GET /intents/id/{intentId}` | `GET /intents/id/{intentId}` |
+
+## Lane latency
+
+Existing parameters and response fields are unchanged. v2 adds fields to `lane.sourceNetworkInfo` and `lane.destNetworkInfo`, and rejects selector pairs that mix mainnet and testnet with `400`. Also:
+
+- `totalMs` is a trimmed median instead of a 90th percentile, so expect lower values.
+- Two optional query parameters are available: `numOfBlocks` (block confirmations to estimate against; `0` or omitted means full finality) and `sourceTokenAddress` (token-specific latency).
+
+```bash
+# v1
+curl "https://api.ccip.chain.link/v1/lanes/latency?sourceChainSelector=5009297550715157269&destChainSelector=11344663589394136015"
+
+# v2
+curl "https://api.ccip.chain.link/v2/lanes/latency?sourceChainSelector=5009297550715157269&destChainSelector=11344663589394136015"
+```
+
+## Message by ID
+
+The path is plural and these fields are renamed:
+
+- `feeToken` → `fees.fixedFeesDetails.tokenAddress`
+- `feeTokenAmount` → `fees.fixedFeesDetails.totalAmount`
+- `ready_for_manual_execution` → `readyForManualExecution`
+- `tokenAmounts[].tokenAddress` → `tokenAmounts[].sourceTokenAddress`
+
+EVM addresses are lowercase in v1 and checksummed (mixed case) in v2. Compare addresses case-insensitively.
+
+New in v2:
+
+- `tokenAmounts[]` also carries `destTokenAddress`, `sourcePoolAddress`, `extraData`, and `destGasAmount`.
+- `fees.bpsFeeDetails` lists proportional fees charged by token pools, when any apply.
+- `status` can also be `VERIFYING` or `VERIFIED` (CCIP 2.0 lanes) and `UNCONFIRMED` (CCIP 1.x lanes to TON). Handle unknown values, since the list can grow.
+- `sourceNetworkInfo` and `destNetworkInfo` add `displayName`, `environment`, `isPrivate`, and `deprecated`.
+- Message metadata: `sequenceNumber`, `nonce`, `onramp`, `offramp`, `version`, `sendBlockNumber`, `sendLogIndex`, `receiptBlockNumber`, `deliveryTime`, `encodedMessage`, `finality`, `finalityType`, `verifiers`, and `executor`.
+
+```bash
+# v1
+curl "https://api.ccip.chain.link/v1/message/0xe364a6e4fcd258ecad9903c5540e788a20e45edf5d5535aeb16ef302f6aba195" | jq '{feeToken, feeTokenAmount, ready_for_manual_execution}'
+
+# v2
+curl "https://api.ccip.chain.link/v2/messages/0xe364a6e4fcd258ecad9903c5540e788a20e45edf5d5535aeb16ef302f6aba195" | jq '{fee: .fees.fixedFeesDetails, readyForManualExecution}'
+```
+
+## Intents
+
+Paths, request bodies, and the `x-api-key` header are unchanged. Only the base URL moves to `/v2`.
+
+## Using the SDK instead
+
+`@chainlink/ccip-sdk` and `@chainlink/ccip-cli` 0.95.0 and later call v2. Versions 0.93.0 and 0.94.0 call v1 for lane latency, so upgrade:
+
+```ts
+import { CCIPAPIClient } from '@chainlink/ccip-sdk'
+
+const api = new CCIPAPIClient()
+const latency = await api.getLaneLatency(5009297550715157269n, 11344663589394136015n)
+const message = await api.getMessageById(
+  '0xe364a6e4fcd258ecad9903c5540e788a20e45edf5d5535aeb16ef302f6aba195',
+)
+```
+
+## Next steps
+
+- [Get Lane Latency](/api/get-lane-latency)
+- [Retrieve a Message](/api/get-message-by-id)
+- [API v2 overview](/api/)

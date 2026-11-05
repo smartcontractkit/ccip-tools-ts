@@ -205,9 +205,10 @@ const config: Config = {
             baseUrl: '/api',
           } satisfies OpenApiPlugin.Options,
           ccipApiV1: {
-            specPath: 'https://api.ccip.chain.link/v1/api-docs.json',
+            // Snapshot of the retired v1 spec: api.ccip.chain.link/v1 no longer serves it
+            specPath: 'static/openapi/ccip-api-v1.json',
             outputDir: 'docs-api/v1',
-            downloadUrl: 'https://api.ccip.chain.link/v1/api-docs.json',
+            downloadUrl: '/ccip/tools/openapi/ccip-api-v1.json',
             showSchemas: true,
             sidebarOptions: {
               groupPathsBy: 'tag',

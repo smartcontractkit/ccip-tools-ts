@@ -6,6 +6,7 @@
  * 1. The custom v2 intro page from templates/
  * 2. The custom v1 intro page from templates/
  * 3. The v1 sidebar type declaration for TypeScript
+ * 4. The v1 → v2 migration guide
  *
  * These files are stored in templates/ to survive `clean-api`.
  */
@@ -23,6 +24,10 @@ async function restoreCustomFiles() {
     {
       src: join(TEMPLATES_DIR, 'ccip-api-v2.info.mdx'),
       dest: 'docs-api/ccip-api.info.mdx',
+    },
+    {
+      src: join(TEMPLATES_DIR, 'migrate-from-v1.mdx'),
+      dest: 'docs-api/migrate-from-v1.mdx',
     },
     {
       src: join(TEMPLATES_DIR, 'ccip-api-v1.info.mdx'),
