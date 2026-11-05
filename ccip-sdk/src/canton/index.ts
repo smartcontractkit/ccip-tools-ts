@@ -84,6 +84,7 @@ import {
   getCreatedEventFromTransaction,
   getInterfaceCreatedEventFromTransaction,
 } from './events.ts'
+import { receiverFinalityMatches } from './receiver-finality.ts'
 import {
   type CantonCreatedContract,
   type CantonExtraArgsV1,
@@ -1959,26 +1960,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           this.logger.debug(
             `CantonChain.getCCIPReceiver: decoded receiverFinalityConfig=${JSON.stringify(decoded.receiverFinalityConfig)}, requiredCCVs=${decoded.requiredCCVs.map((ccv) => ccv.unpack).join(',')}`,
           )
-          // Check if finality matches
-          switch (decoded.receiverFinalityConfig.tag) {
-            case 'WaitForFinality':
-              if (finality !== 'finalized') {
-                return undefined
-              }
-              break
-            case 'WaitForSafe':
-              if (finality === 'safe') {
-                return undefined
-              }
-              break
-            case 'BlockDepth':
-              if (typeof finality !== 'number') {
-                return undefined
-              }
-              if (finality !== parseInt(decoded.receiverFinalityConfig.value)) {
-                return undefined
-              }
-              break
+          if (!receiverFinalityMatches(decoded.receiverFinalityConfig, finality)) {
+            return undefined
           }
           this.logger.debug(
             `CantonChain.getCCIPReceiver: found CCIPReceiver with contractId=${receiver.createdEvent.contractId} matching finality=${finality}`,
