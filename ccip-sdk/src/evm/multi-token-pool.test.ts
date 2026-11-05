@@ -2,18 +2,25 @@
  * Multi-token pools (`BurnMintMultiTokenPool`) serve many tokens and keep each token's configuration
  * in a PoolConfigManager (PCM). They have no `getToken()`/`getDynamicConfig()`, and their
  * single-argument lane getters revert, so pool reads must take the local token: without it they
- * throw the typed `CCIPTokenPoolTokenRequiredError`; with it they read the token's resolved
- * configuration and lanes through the PCM batch views.
+ * throw the typed `CCIPLocalTokenRequiredError`; with it they read the token's resolved
+ * configuration and lanes through the PCM batch views. The lane's pauses and record levels give
+ * its `LaneStatus`, which the send and execute preflights and `getLaneFeatures` report.
  */
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { type Interface, type JsonRpcApiProvider, makeError, zeroPadValue } from 'ethers'
 
+import { LaneFeature } from '../chain.ts'
 import {
+  CCIPError,
+  CCIPFinalityNotAllowedError,
+  CCIPLaneConfigIncompleteError,
+  CCIPLocalTokenRequiredError,
+  CCIPRateLimitExceededError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
-  CCIPTokenPoolTokenRequiredError,
+  CCIPTokenTransferPausedError,
 } from '../errors/index.ts'
 import { networkInfo } from '../networks.ts'
 import { interfaces } from './const.ts'
@@ -22,22 +29,28 @@ import { EVMChain } from './index.ts'
 const POOL = '0x' + '11'.repeat(20)
 const PCM = '0x' + '22'.repeat(20)
 const ROUTER = '0x' + '33'.repeat(20)
+const ONRAMP = '0x' + '99'.repeat(20)
 const CONNECTION_STORE = '0x' + '66'.repeat(20)
+const FEE_STORE = '0x' + '13'.repeat(20)
 const SECURITY_STORE = '0x' + '77'.repeat(20)
 const REGISTRY = '0x' + '88'.repeat(20)
 const TOKEN = '0x8FE4D867DB59E38E7bA7D98DC14ac1826c79CF9f'
 const REMOTE_TOKEN = '0x' + '44'.repeat(20)
 const REMOTE_POOL = '0x' + '55'.repeat(20)
+const SOURCE = networkInfo('ethereum-testnet-sepolia')
 const DEST = networkInfo('avalanche-testnet-fuji')
 const OTHER_DEST = networkInfo('ethereum-testnet-sepolia-arbitrum-1')
 
 const mttp = interfaces.MultiTokenPool_v2_1
 const pcm = interfaces.PoolConfigManager_v2_1
 const tokenPool = interfaces.TokenPool_v2_0
+const router = interfaces.Router
+
+type Answer = string | { revert: string }
 
 /** `eth_call` responder: answers from `answers[to][selector]`, or reverts. */
 function stubProvider(
-  answers: Record<string, Record<string, string>>,
+  answers: Record<string, Record<string, Answer>>,
 ): JsonRpcApiProvider & { calls: { to: string; selector: string }[] } {
   const calls: { to: string; selector: string }[] = []
   return {
@@ -47,10 +60,10 @@ function stubProvider(
       const selector = (tx.data ?? '').slice(0, 10)
       calls.push({ to, selector })
       const answer = answers[to]?.[selector]
-      if (answer === undefined)
+      if (answer === undefined || typeof answer === 'object')
         throw makeError('execution reverted', 'CALL_EXCEPTION', {
           action: 'call',
-          data: '0x',
+          data: typeof answer === 'object' ? answer.revert : '0x',
           reason: null,
           transaction: { to: tx.to ?? null, data: tx.data ?? '0x' },
           invocation: null,
@@ -84,40 +97,62 @@ function tokenConfigResult({
         // finalitySafe flag + 5 block confirmations for FTF
         allowedFinalityConfig: '0x00010005',
         lockOrBurnAddress: '0x' + '00'.repeat(20),
-        tokenIdentityMetadataProvider: '0x' + '00'.repeat(20),
+        additionalPoolDataProvider: '0x' + '00'.repeat(20),
         supportedChains,
         connectionPolicyName: '0x' + '00'.repeat(32),
-        chainPolicyName: '0x' + '00'.repeat(32),
+        remotePoolPolicyName: '0x' + '00'.repeat(32),
         rateLimitPolicyName: '0x' + '00'.repeat(32),
         feePolicyName: '0x' + '00'.repeat(32),
+        destOverheadPolicyName: '0x' + '00'.repeat(32),
         securityPolicyName: '0x' + '00'.repeat(32),
       },
     ],
   ])
 }
 
-function laneConnection(hasConnection: boolean) {
-  return {
-    hasConnection,
-    isOutboundPaused: false,
-    isInboundPaused: false,
+type Pauses = Partial<{
+  isGloballyPaused: boolean
+  isTokenOutboundPaused: boolean
+  isTokenInboundPaused: boolean
+  isChainOutboundPaused: boolean
+  isChainInboundPaused: boolean
+}>
+
+function laneConnection(hasConnection: boolean, pauses: Pauses = {}) {
+  const p = {
     isGloballyPaused: false,
     isTokenOutboundPaused: false,
     isTokenInboundPaused: false,
     isChainOutboundPaused: false,
     isChainInboundPaused: false,
-    omitSourceTokenAddressOnSend: false,
-    allowSourceTokenAddressMissingOnReceive: false,
-    destGasOverhead: 90_000n,
-    destBytesOverhead: 192n,
+    ...pauses,
+  }
+  return {
+    hasConnection,
+    isOutboundPaused: p.isGloballyPaused || p.isTokenOutboundPaused || p.isChainOutboundPaused,
+    isInboundPaused: p.isGloballyPaused || p.isTokenInboundPaused || p.isChainInboundPaused,
+    ...p,
+    useLegacyPoolDataOnSend: false,
     remoteToken: hasConnection ? zeroPadValue(REMOTE_TOKEN, 32) : '0x',
-    remotePools: hasConnection ? [zeroPadValue(REMOTE_POOL, 32)] : [],
+    remotePools: hasConnection
+      ? [{ remotePoolAddress: zeroPadValue(REMOTE_POOL, 32), allowLegacyPoolDataOnReceive: false }]
+      : [],
   }
 }
 
+/** Record levels (1 = Inline) for every record type of each lane; `missing` lists types at None. */
+function recordLevels(lanes: number, missing: string[] = []) {
+  const types = ['connection', 'remotePool', 'rateLimit', 'fee', 'destOverhead', 'security']
+  return pcm.encodeFunctionResult(
+    'getLaneRecordLevelBatch',
+    types.map((type) => Array<bigint>(lanes).fill(missing.includes(type) ? 0n : 1n)),
+  )
+}
+
 function mttpProvider(
-  pcmAnswers: Record<string, string> = {},
-  poolAnswers: Record<string, string> = {},
+  pcmAnswers: Record<string, Answer> = {},
+  poolAnswers: Record<string, Answer> = {},
+  otherAnswers: Record<string, Record<string, Answer>> = {},
 ) {
   return stubProvider({
     [POOL]: {
@@ -133,20 +168,98 @@ function mttpProvider(
       [sel(pcm, 'getStaticConfig')]: pcm.encodeFunctionResult('getStaticConfig', [
         REGISTRY,
         CONNECTION_STORE,
+        FEE_STORE,
         SECURITY_STORE,
       ]),
       ...pcmAnswers,
     },
+    ...otherAnswers,
   })
 }
+
+/** A multi-token pool with one lane to DEST: its pauses, missing records, buckets and fee bps. */
+function oneLaneProvider({
+  pauses = {},
+  missing = [],
+  outbound = bucket(1000n),
+  fastOutbound = bucket(1000n),
+  finalityTransferFeeBps = 0n,
+  fastFinalityTransferFeeBps = 0n,
+  otherAnswers = {},
+}: {
+  pauses?: Pauses
+  missing?: string[]
+  outbound?: ReturnType<typeof bucket>
+  fastOutbound?: ReturnType<typeof bucket>
+  finalityTransferFeeBps?: bigint
+  fastFinalityTransferFeeBps?: bigint
+  otherAnswers?: Record<string, Record<string, Answer>>
+} = {}) {
+  return mttpProvider(
+    {
+      [sel(pcm, 'getLaneConnectionBatch')]: pcm.encodeFunctionResult('getLaneConnectionBatch', [
+        [laneConnection(true, pauses)],
+      ]),
+      [sel(pcm, 'getCurrentRateLimiterStateBatch')]: pcm.encodeFunctionResult(
+        'getCurrentRateLimiterStateBatch',
+        [
+          [
+            {
+              outbound,
+              inbound: bucket(1000n),
+              fastFinalityOutbound: fastOutbound,
+              fastFinalityInbound: bucket(1000n),
+            },
+          ],
+        ],
+      ),
+      [sel(pcm, 'getLaneRecordLevelBatch')]: recordLevels(1, missing),
+    },
+    {
+      [sel(tokenPool, 'getTokenTransferFeeConfig')]: tokenPool.encodeFunctionResult(
+        'getTokenTransferFeeConfig',
+        [
+          {
+            destGasOverhead: 90_000n,
+            destBytesOverhead: 192n,
+            finalityFeeUSDCents: 25n,
+            fastFinalityFeeUSDCents: 50n,
+            finalityTransferFeeBps,
+            fastFinalityTransferFeeBps,
+            isEnabled: true,
+          },
+        ],
+      ),
+    },
+    otherAnswers,
+  )
+}
+
+/** A chain whose registry lookups resolve the token to {@link POOL}, and the router to ONRAMP. */
+function chainWithRegistry(provider: JsonRpcApiProvider) {
+  const chain = new EVMChain(provider, SOURCE)
+  chain.getTokenAdminRegistryFor = async () => REGISTRY
+  chain.getRegistryTokenConfig = async () => ({ administrator: ROUTER, tokenPool: POOL })
+  chain.getOnRampForRouter = async () => ONRAMP
+  return chain
+}
+
+const sendOpts = (amount: bigint, finality?: 'safe' | number) => ({
+  router: ROUTER,
+  destChainSelector: DEST.chainSelector,
+  message: {
+    tokenAmounts: [{ token: TOKEN, amount }],
+    ...(finality != null && { extraArgs: { finality } }),
+  },
+})
 
 describe('EVMChain multi-token pool reads', () => {
   it('getTokenPoolConfig throws the typed error without a token', async () => {
     const provider = mttpProvider()
-    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    const chain = new EVMChain(provider, SOURCE)
     await assert.rejects(chain.getTokenPoolConfig(POOL), (err: unknown) => {
-      assert.ok(err instanceof CCIPTokenPoolTokenRequiredError)
-      assert.equal(err.code, 'TOKEN_POOL_TOKEN_REQUIRED')
+      assert.ok(err instanceof CCIPLocalTokenRequiredError)
+      assert.equal(err.code, 'LOCAL_TOKEN_REQUIRED')
       assert.equal(err.isTransient, false)
       assert.equal(err.context.tokenPool, POOL)
       assert.equal(err.context.typeAndVersion, 'BurnMintMultiTokenPool 2.1.0-dev')
@@ -157,7 +270,7 @@ describe('EVMChain multi-token pool reads', () => {
   })
 
   it("getTokenPoolConfig reads the token's resolved config through the PCM", async () => {
-    const chain = new EVMChain(mttpProvider(), networkInfo('ethereum-testnet-sepolia'))
+    const chain = new EVMChain(mttpProvider(), SOURCE)
     assert.deepEqual(await chain.getTokenPoolConfig(POOL, { token: TOKEN.toLowerCase() }), {
       token: TOKEN,
       router: ROUTER,
@@ -165,6 +278,7 @@ describe('EVMChain multi-token pool reads', () => {
       decimals: 6,
       poolConfigManager: PCM,
       connectionPolicyStore: CONNECTION_STORE,
+      feePolicyStore: FEE_STORE,
       securityPolicyStore: SECURITY_STORE,
       finalityDepth: 5,
       finalitySafe: true,
@@ -185,33 +299,19 @@ describe('EVMChain multi-token pool reads', () => {
       },
       [PCM]: { [sel(pcm, 'getTokenConfigBatch')]: tokenConfigResult() },
     })
-    const chain = new EVMChain(withoutStatic, networkInfo('ethereum-testnet-sepolia'))
+    const chain = new EVMChain(withoutStatic, SOURCE)
     const config = await chain.getTokenPoolConfig(POOL, { token: TOKEN })
     assert.equal(config.poolConfigManager, PCM)
     assert.ok(!('connectionPolicyStore' in config))
+    assert.ok(!('feePolicyStore' in config))
     assert.ok(!('securityPolicyStore' in config))
   })
 
   it('getTokenPoolConfig also reads the fee config with destChainSelector', async () => {
-    const feeConfig = {
-      destGasOverhead: 90_000n,
-      destBytesOverhead: 192n,
-      finalityFeeUSDCents: 25n,
-      fastFinalityFeeUSDCents: 50n,
-      finalityTransferFeeBps: 1n,
-      fastFinalityTransferFeeBps: 2n,
-      isEnabled: true,
-    }
-    const provider = mttpProvider(
-      {},
-      {
-        [sel(tokenPool, 'getTokenTransferFeeConfig')]: tokenPool.encodeFunctionResult(
-          'getTokenTransferFeeConfig',
-          [feeConfig],
-        ),
-      },
+    const chain = new EVMChain(
+      oneLaneProvider({ finalityTransferFeeBps: 1n, fastFinalityTransferFeeBps: 2n }),
+      SOURCE,
     )
-    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
     const { tokenTransferFeeConfig } = await chain.getTokenPoolConfig(POOL, {
       token: TOKEN,
       destChainSelector: DEST.chainSelector,
@@ -231,7 +331,7 @@ describe('EVMChain multi-token pool reads', () => {
     const provider = mttpProvider({
       [sel(pcm, 'getTokenConfigBatch')]: tokenConfigResult({ isRegistered: false }),
     })
-    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    const chain = new EVMChain(provider, SOURCE)
     await assert.rejects(chain.getTokenPoolConfig(POOL, { token: TOKEN }), (err: unknown) => {
       assert.ok(err instanceof CCIPTokenNotConfiguredError)
       assert.equal(err.context.token, TOKEN)
@@ -240,7 +340,7 @@ describe('EVMChain multi-token pool reads', () => {
     })
   })
 
-  it("getTokenPoolRemotes reads the token's lanes and buckets in one batch each", async () => {
+  it("getTokenPoolRemotes reads the token's lanes, buckets and record levels in one batch each", async () => {
     const provider = mttpProvider({
       [sel(pcm, 'getLaneConnectionBatch')]: pcm.encodeFunctionResult('getLaneConnectionBatch', [
         [laneConnection(true), laneConnection(true)],
@@ -264,8 +364,9 @@ describe('EVMChain multi-token pool reads', () => {
           ],
         ],
       ),
+      [sel(pcm, 'getLaneRecordLevelBatch')]: recordLevels(2),
     })
-    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    const chain = new EVMChain(provider, SOURCE)
     const remotes = await chain.getTokenPoolRemotes(POOL, undefined, { token: TOKEN })
     assert.deepEqual(Object.keys(remotes), [DEST.name, OTHER_DEST.name])
     assert.deepEqual(remotes[DEST.name], {
@@ -275,11 +376,54 @@ describe('EVMChain multi-token pool reads', () => {
       inboundRateLimiterState: { tokens: 200n, capacity: 1000n, rate: 10n },
       fastOutboundRateLimiterState: { tokens: 300n, capacity: 1000n, rate: 10n },
       fastInboundRateLimiterState: null,
+      outboundStatus: { status: 'ok' },
+      inboundStatus: { status: 'ok' },
     })
-    assert.equal(
-      provider.calls.filter((c) => c.selector === sel(pcm, 'getLaneConnectionBatch')).length,
-      1,
+    for (const name of [
+      'getLaneConnectionBatch',
+      'getCurrentRateLimiterStateBatch',
+      'getLaneRecordLevelBatch',
+    ])
+      assert.equal(provider.calls.filter((c) => c.selector === sel(pcm, name)).length, 1)
+  })
+
+  it('getTokenPoolRemote reports the broadest pause per direction', async () => {
+    const statuses = async (pauses: Pauses) => {
+      const chain = new EVMChain(oneLaneProvider({ pauses }), SOURCE)
+      const { outboundStatus, inboundStatus } = await chain.getTokenPoolRemote(
+        POOL,
+        DEST.chainSelector,
+        { token: TOKEN },
+      )
+      return { outboundStatus, inboundStatus }
+    }
+    assert.deepEqual(await statuses({ isGloballyPaused: true, isTokenOutboundPaused: true }), {
+      outboundStatus: { status: 'paused', scope: 'global', direction: 'outbound' },
+      inboundStatus: { status: 'paused', scope: 'global', direction: 'inbound' },
+    })
+    assert.deepEqual(await statuses({ isChainInboundPaused: true, isTokenInboundPaused: true }), {
+      outboundStatus: { status: 'ok' },
+      inboundStatus: { status: 'paused', scope: 'chain', direction: 'inbound' },
+    })
+    assert.deepEqual(await statuses({ isTokenOutboundPaused: true }), {
+      outboundStatus: { status: 'paused', scope: 'token', direction: 'outbound' },
+      inboundStatus: { status: 'ok' },
+    })
+  })
+
+  it('getTokenPoolRemote reports missing records; inbound needs no fee records', async () => {
+    const chain = new EVMChain(oneLaneProvider({ missing: ['fee', 'security'] }), SOURCE)
+    const { outboundStatus, inboundStatus } = await chain.getTokenPoolRemote(
+      POOL,
+      DEST.chainSelector,
+      { token: TOKEN },
     )
+    assert.deepEqual(outboundStatus, { status: 'incomplete', missing: ['fee', 'security'] })
+    assert.deepEqual(inboundStatus, { status: 'incomplete', missing: ['security'] })
+
+    const noFees = new EVMChain(oneLaneProvider({ missing: ['destOverhead'] }), SOURCE)
+    const remote = await noFees.getTokenPoolRemote(POOL, DEST.chainSelector, { token: TOKEN })
+    assert.deepEqual(remote.inboundStatus, { status: 'ok' })
   })
 
   it('getTokenPoolRemote throws the typed errors without a token or a lane', async () => {
@@ -300,11 +444,12 @@ describe('EVMChain multi-token pool reads', () => {
           ],
         ],
       ),
+      [sel(pcm, 'getLaneRecordLevelBatch')]: recordLevels(1, ['connection']),
     })
-    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    const chain = new EVMChain(provider, SOURCE)
     await assert.rejects(
       chain.getTokenPoolRemote(POOL, DEST.chainSelector),
-      CCIPTokenPoolTokenRequiredError,
+      CCIPLocalTokenRequiredError,
     )
     await assert.rejects(
       chain.getTokenPoolRemote(POOL, DEST.chainSelector, { token: TOKEN }),
@@ -327,8 +472,153 @@ describe('EVMChain multi-token pool reads', () => {
         ]),
       },
     })
-    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    const chain = new EVMChain(provider, SOURCE)
     assert.equal(await chain.getTokenAdminRegistryFor(POOL), ROUTER)
     assert.ok(!provider.calls.some((c) => c.selector === sel(tokenPool, 'getToken')))
+  })
+})
+
+describe('EVMChain multi-token pool send preflight', () => {
+  it('checkSendMessage throws CCIPTokenTransferPausedError on an outbound pause', async () => {
+    const chain = chainWithRegistry(oneLaneProvider({ pauses: { isChainOutboundPaused: true } }))
+    await assert.rejects(chain.checkSendMessage(sendOpts(1n)), (err: unknown) => {
+      assert.ok(err instanceof CCIPTokenTransferPausedError)
+      assert.equal(err.code, 'TOKEN_TRANSFER_PAUSED')
+      assert.equal(err.context.scope, 'chain')
+      assert.equal(err.context.direction, 'outbound')
+      assert.equal(err.context.token, TOKEN)
+      assert.equal(err.context.tokenPool, POOL)
+      assert.equal(err.context.destChainSelector, DEST.chainSelector)
+      return true
+    })
+  })
+
+  it('checkSendMessage throws CCIPLaneConfigIncompleteError for a missing record', async () => {
+    const chain = chainWithRegistry(oneLaneProvider({ missing: ['destOverhead'] }))
+    await assert.rejects(chain.checkSendMessage(sendOpts(1n)), (err: unknown) => {
+      assert.ok(err instanceof CCIPLaneConfigIncompleteError)
+      assert.equal(err.code, 'LANE_CONFIG_INCOMPLETE')
+      assert.deepEqual(err.context.missing, ['destOverhead'])
+      return true
+    })
+  })
+
+  it("checkSendMessage throws CCIPFinalityNotAllowedError below the token's FTF depth", async () => {
+    const chain = chainWithRegistry(oneLaneProvider())
+    await assert.rejects(chain.checkSendMessage(sendOpts(1n, 3)), (err: unknown) => {
+      assert.ok(err instanceof CCIPFinalityNotAllowedError)
+      assert.equal(err.context.requested, 3)
+      assert.deepEqual(err.context.allowed, { finalityDepth: 5, finalitySafe: true })
+      assert.equal(err.context.tokenPool, POOL)
+      assert.match(err.message, /TokenPool/)
+      return true
+    })
+    // 'safe' and depth 5+ are allowed
+    assert.equal(await chain.checkSendMessage(sendOpts(1n, 'safe')), true)
+    assert.equal(await chain.checkSendMessage(sendOpts(1n, 7)), true)
+  })
+
+  it('checkSendMessage checks the fast bucket for the amount after the token fee', async () => {
+    // 0.5% fast fee: 1000 → 995 fits the 995-token fast bucket; the default bucket is not used
+    const chain = chainWithRegistry(
+      oneLaneProvider({
+        outbound: bucket(1n),
+        fastOutbound: bucket(995n),
+        fastFinalityTransferFeeBps: 50n,
+      }),
+    )
+    assert.equal(await chain.checkSendMessage(sendOpts(1000n, 'safe')), true)
+    await assert.rejects(chain.checkSendMessage(sendOpts(1001n, 'safe')), (err: unknown) => {
+      assert.ok(err instanceof CCIPRateLimitExceededError)
+      assert.equal(err.context.amount, 1001n - 5n)
+      assert.equal(err.context.tokens, 995n)
+      return true
+    })
+  })
+
+  it('checkSendMessage uses the default bucket when the fast bucket is disabled', async () => {
+    const chain = chainWithRegistry(
+      oneLaneProvider({ outbound: bucket(100n), fastOutbound: bucket(0n, false) }),
+    )
+    await assert.rejects(chain.checkSendMessage(sendOpts(200n, 'safe')), (err: unknown) => {
+      assert.ok(err instanceof CCIPRateLimitExceededError)
+      assert.equal(err.context.tokens, 100n)
+      return true
+    })
+  })
+
+  it('checkSendMessage deducts the default-finality fee for a finalized send', async () => {
+    // 10% fee: 110 → 99 fits the 100-token default bucket
+    const chain = chainWithRegistry(
+      oneLaneProvider({ outbound: bucket(100n), finalityTransferFeeBps: 1000n }),
+    )
+    assert.equal(await chain.checkSendMessage(sendOpts(110n)), true)
+  })
+
+  it('getLaneFeatures reports LANE_STATUS and omits a disabled FAST_RATE_LIMITS', async () => {
+    const onRampAnswers = {
+      [ONRAMP]: {
+        [sel(mttp, 'typeAndVersion')]: mttp.encodeFunctionResult('typeAndVersion', [
+          'OnRamp 2.0.0',
+        ]),
+      },
+    }
+    const paused = chainWithRegistry(
+      oneLaneProvider({
+        pauses: { isTokenOutboundPaused: true },
+        fastOutbound: bucket(0n, false),
+        otherAnswers: onRampAnswers,
+      }),
+    )
+    const features = await paused.getLaneFeatures({
+      router: ROUTER,
+      destChainSelector: DEST.chainSelector,
+      token: TOKEN,
+    })
+    assert.deepEqual(features[LaneFeature.LANE_STATUS], {
+      status: 'paused',
+      scope: 'token',
+      direction: 'outbound',
+    })
+    assert.equal(features[LaneFeature.FINALITY_FAST], 5)
+    assert.deepEqual(features[LaneFeature.RATE_LIMITS], {
+      tokens: 1000n,
+      capacity: 1000n,
+      rate: 10n,
+    })
+    assert.ok(!(LaneFeature.FAST_RATE_LIMITS in features))
+
+    const ready = chainWithRegistry(oneLaneProvider({ otherAnswers: onRampAnswers }))
+    const readyFeatures = await ready.getLaneFeatures({
+      router: ROUTER,
+      destChainSelector: DEST.chainSelector,
+      token: TOKEN,
+    })
+    assert.deepEqual(readyFeatures[LaneFeature.LANE_STATUS], { status: 'ok' })
+    assert.ok(LaneFeature.FAST_RATE_LIMITS in readyFeatures)
+  })
+
+  it('getFee maps a LaneFeeNotFound revert to CCIPLaneConfigIncompleteError', async () => {
+    const revert = mttp.encodeErrorResult('LaneFeeNotFound', [TOKEN, DEST.chainSelector])
+    const chain = chainWithRegistry(
+      oneLaneProvider({
+        otherAnswers: { [ROUTER]: { [sel(router, 'getFee')]: { revert } } },
+      }),
+    )
+    await assert.rejects(
+      chain.getFee({
+        router: ROUTER,
+        destChainSelector: DEST.chainSelector,
+        message: { receiver: REMOTE_TOKEN, tokenAmounts: [{ token: TOKEN, amount: 1n }] },
+      }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCIPLaneConfigIncompleteError)
+        assert.deepEqual(err.context.missing, ['fee', 'destOverhead'])
+        assert.equal(err.context.token, TOKEN)
+        assert.equal(err.context.revert, revert)
+        assert.ok(CCIPError.isCCIPError(err))
+        return true
+      },
+    )
   })
 })

@@ -10,25 +10,30 @@ import {
   CCIPArgumentInvalidError,
   CCIPChainFamilyMismatchError,
   CCIPExecTxRevertedError,
+  CCIPFinalityNotAllowedError,
   CCIPInsufficientBalanceError,
+  CCIPLaneConfigIncompleteError,
   CCIPLogsRequiresStartError,
   CCIPMessageNotVerifiedYetError,
   CCIPNotImplementedError,
   CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenPoolChainConfigNotFoundError,
+  CCIPTokenTransferPausedError,
 } from './errors/index.ts'
 import type { UnsignedEVMTx } from './evm/types.ts'
 import { calculateManualExecProof } from './execution.ts'
-import type {
-  EVMExtraArgsV1,
-  EVMExtraArgsV2,
-  ExtraArgs,
-  FinalityAllowed,
-  FinalityRequested,
-  GenericExtraArgsV3,
-  SVMExtraArgsV1,
-  SuiExtraArgsV1,
+import {
+  type EVMExtraArgsV1,
+  type EVMExtraArgsV2,
+  type ExtraArgs,
+  type FinalityAllowed,
+  type FinalityRequested,
+  type GenericExtraArgsV3,
+  type SVMExtraArgsV1,
+  type SuiExtraArgsV1,
+  encodeFinality,
+  isFinalityAllowed,
 } from './extra-args.ts'
 import type { EstimateMessageInput, GetRequiredCCVsMessage, GetRequiredCCVsResult } from './gas.ts'
 import type { LeafHasher } from './hasher/common.ts'
@@ -546,7 +551,7 @@ export type TokenTransferFeeOpts = {
 export type TokenPoolConfigOpts = Partial<TokenTransferFeeOpts> & {
   /**
    * The local token whose configuration to read. Required for pools that serve multiple tokens
-   * (multi-token pools), which otherwise throw {@link CCIPTokenPoolTokenRequiredError}; ignored by
+   * (multi-token pools), which otherwise throw {@link CCIPLocalTokenRequiredError}; ignored by
    * single-token pools.
    */
   token?: string
@@ -556,10 +561,30 @@ export type TokenPoolConfigOpts = Partial<TokenTransferFeeOpts> & {
 export type TokenPoolRemotesOpts = {
   /**
    * The local token whose remotes to read. Required for pools that serve multiple tokens
-   * (multi-token pools), which otherwise throw {@link CCIPTokenPoolTokenRequiredError}; ignored by
+   * (multi-token pools), which otherwise throw {@link CCIPLocalTokenRequiredError}; ignored by
    * single-token pools.
    */
   token?: string
+}
+
+/**
+ * The requested finality and token args in a message's extra args, as the pool reads them.
+ * @param extraArgs - The message's extra args, if any.
+ * @returns `finality` (default `'finalized'`) and hex `tokenArgs` (default `'0x'`).
+ */
+function getRequestedFinality(extraArgs: unknown): {
+  finality: FinalityRequested
+  tokenArgs: string
+} {
+  let finality: FinalityRequested = 'finalized'
+  let tokenArgs = '0x'
+  if (extraArgs && typeof extraArgs === 'object') {
+    if ('finality' in extraArgs && extraArgs.finality != null)
+      finality = extraArgs.finality as FinalityRequested
+    if ('tokenArgs' in extraArgs && extraArgs.tokenArgs)
+      tokenArgs = hexlify(extraArgs.tokenArgs as BytesLike)
+  }
+  return { finality, tokenArgs }
 }
 
 /**
@@ -592,6 +617,14 @@ export const LaneFeature = {
    * If absent, the default rate limits ({@link LaneFeature.RATE_LIMITS}) apply even when using a non-default finality mode.
    */
   FAST_RATE_LIMITS: 'FAST_RATE_LIMITS',
+  /**
+   * Whether the token's pool lets a transfer on this lane go through now: `'ok'`, `'paused'` (with
+   * the pause scope and direction) or `'incomplete'` (with the missing config record types).
+   * Present only when a `token` is given and it has a pool. Pools without lane-level pauses or
+   * config records (single-token pools) always report `'ok'`; multi-token pools report their pauses
+   * and missing records.
+   */
+  LANE_STATUS: 'LANE_STATUS',
 } as const
 /** Type representing one of the lane feature keys. */
 export type LaneFeature = (typeof LaneFeature)[keyof typeof LaneFeature]
@@ -612,7 +645,41 @@ export interface LaneFeatures extends Record<LaneFeature, unknown> {
    * If absent, the default rate limits ({@link LaneFeatures.RATE_LIMITS}) apply even when using a non-default finality mode.
    */
   FAST_RATE_LIMITS: RateLimiterState
+  /** Whether the token's pool lets a transfer on this lane go through now. */
+  LANE_STATUS: LaneStatus
 }
+
+/**
+ * A configuration record type of a token lane on a multi-token pool. A transfer needs one record of
+ * each type for its lane; inbound transfers do not need `'fee'` and `'destOverhead'`.
+ */
+export type LaneRecordType =
+  | 'connection'
+  | 'remotePool'
+  | 'rateLimit'
+  | 'fee'
+  | 'destOverhead'
+  | 'security'
+
+/**
+ * Whether a token pool lets a transfer of a token on a lane go through now, for one direction.
+ *
+ * @remarks
+ * - `'ok'`: no pause and no missing config record stops the transfer. Rate limits, finality and
+ *   the token's own checks (e.g. a blocklist) can still reject it.
+ * - `'paused'`: a pause stops it. `scope` is the broadest pause that applies: `'global'` (every
+ *   token and chain of the pool's stores), `'chain'` (every token to or from the remote chain) or
+ *   `'token'` (this token on every chain).
+ * - `'incomplete'`: the lane lacks the listed config records, so the transfer reverts.
+ */
+export type LaneStatus =
+  | { status: 'ok' }
+  | {
+      status: 'paused'
+      scope: 'global' | 'token' | 'chain'
+      direction: 'outbound' | 'inbound'
+    }
+  | { status: 'incomplete'; missing: LaneRecordType[] }
 
 /** Compile-time helpers to keep {@link LaneFeature} and {@link LaneFeatures} in sync. */
 type LaneFeatureKeysMatch_ = [LaneFeature] extends [keyof LaneFeatures]
@@ -698,6 +765,16 @@ export type TokenPoolRemote = {
   outboundRateLimiterState: RateLimiterState
   /** Inbound rate limiter state for tokens coming into this chain. */
   inboundRateLimiterState: RateLimiterState
+  /**
+   * Whether the pool lets transfers of the token go out to this remote chain now. Only pools with
+   * lane-level pauses and config records (multi-token pools) report it.
+   */
+  outboundStatus?: LaneStatus
+  /**
+   * Whether the pool lets transfers of the token come in from this remote chain now. Only pools
+   * with lane-level pauses and config records (multi-token pools) report it.
+   */
+  inboundStatus?: LaneStatus
 } & (
   | {
       /** Outbound rate limiter state for tokens leaving this chain (FTF/FCR/v2). */
@@ -761,13 +838,19 @@ export type TokenPoolConfig = {
   poolConfigManager?: string
   /**
    * For multi-token pools, the ConnectionPolicyStore behind {@link TokenPoolConfig.poolConfigManager}.
-   * It stores the connection records and emits their configuration events.
+   * It stores the connection and remote pool records, token profiles and pauses, and emits their
+   * configuration events.
    */
   connectionPolicyStore?: string
   /**
+   * For multi-token pools, the FeePolicyStore behind {@link TokenPoolConfig.poolConfigManager}.
+   * It stores the fee and destination overhead records, and emits their configuration events.
+   */
+  feePolicyStore?: string
+  /**
    * For multi-token pools, the SecurityPolicyStore behind {@link TokenPoolConfig.poolConfigManager}.
-   * It stores the rate limit, fee and security records, and emits their configuration and
-   * rate limit consumption events.
+   * It stores the rate limit and security (CCV and hook) records, and emits their configuration
+   * and rate limit consumption events.
    */
   securityPolicyStore?: string
   /**
@@ -1506,7 +1589,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *
    * @param tokenPool - TokenPool address
    * @returns Promise resolving to token or mint address
-   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens, since a
+   * @throws {@link CCIPLocalTokenRequiredError} if the pool serves multiple tokens, since a
    *   pool address alone does not select one of them
    *
    * @example Get token for pool
@@ -1573,11 +1656,34 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
   abstract getTokenAdminRegistryFor(address: string, destChainSelector?: bigint): Promise<string>
 
   /**
-   * Pre-flight check if the token transfers in a message is supported for given lane, and have enough rate limit
+   * Pre-flight check that the token transfers in a message can go out on a lane: each token has a
+   * pool with a config for the destination, and its outbound rate limit has enough tokens.
+   *
+   * @remarks
+   * For pools that report a lane status (multi-token pools, see
+   * {@link TokenPoolRemote.outboundStatus}), it checks, in this order: pauses, missing config
+   * records, the requested finality (`message.extraArgs.finality`) against the token's allowed
+   * finality, and the rate limit bucket of the requested finality class for the amount after the
+   * token fee, as the pool consumes it. Other pools keep the check of the default outbound bucket
+   * for the full amount. It does not simulate the pool, so token-level checks such as a blocklist
+   * or a hook can still reject the send.
+   *
+   * @param opts - The router, destination and message (`tokenAmounts`, and optional `extraArgs`).
    * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
+   * @throws {@link CCIPTokenTransferPausedError} if a pause stops the token's outbound transfers
+   * @throws {@link CCIPLaneConfigIncompleteError} if the token's lane lacks a config record that a send requires
+   * @throws {@link CCIPFinalityNotAllowedError} if the token's pool does not allow the requested finality
    * @returns true if all token transfers are supported and within the rate limit
-   * @internal
+   *
+   * @example
+   * ```typescript
+   * await chain.checkSendMessage({
+   *   router,
+   *   destChainSelector,
+   *   message: { tokenAmounts: [{ token, amount }], extraArgs: { finality: 'safe' } },
+   * })
+   * ```
    */
   async checkSendMessage({
     router,
@@ -1585,7 +1691,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     message,
   }: PickDeep<
     SendMessageOpts,
-    'router' | 'destChainSelector' | 'message.tokenAmounts'
+    'router' | 'destChainSelector' | 'message.tokenAmounts' | 'message.extraArgs'
   >): Promise<true> {
     let registry
     for (const { token, amount } of message.tokenAmounts ?? []) {
@@ -1596,15 +1702,48 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       registry ??= await this.getTokenAdminRegistryFor(router, destChainSelector)
       const { tokenPool } = await this.getRegistryTokenConfig(registry, token)
       const remote = await this.getTokenPoolRemote(tokenPool!, destChainSelector, { token })
-      if (!remote.outboundRateLimiterState) continue
-      if (amount > remote.outboundRateLimiterState.tokens) {
-        throw new CCIPRateLimitExceededError('OUTBOUND', remote.outboundRateLimiterState, {
-          token,
-          amount,
-          tokenPool: tokenPool!,
+      const lane = {
+        token,
+        tokenPool: tokenPool!,
+        sourceChainSelector: this.network.chainSelector,
+        destChainSelector,
+      }
+      let bucket = remote.outboundRateLimiterState
+      let bucketAmount = amount
+      const status = remote.outboundStatus
+      if (status) {
+        if (status.status === 'paused') throw new CCIPTokenTransferPausedError(status, lane)
+        if (status.status === 'incomplete')
+          throw new CCIPLaneConfigIncompleteError(status.missing, lane)
+        const { finality, tokenArgs } = getRequestedFinality(message.extraArgs)
+        const { finalityDepth, finalitySafe, tokenTransferFeeConfig } =
+          await this.getTokenPoolConfig(tokenPool!, {
+            token,
+            destChainSelector,
+            finality,
+            tokenArgs,
+          })
+        const allowed = { finalityDepth: finalityDepth ?? 0, ...(finalitySafe && { finalitySafe }) }
+        if (!isFinalityAllowed(finality, allowed))
+          throw new CCIPFinalityNotAllowedError(finality, allowed, { context: lane })
+        // a non-default finality consumes the fast bucket; a disabled one falls back to the
+        // default bucket, as the pool does
+        const fast = encodeFinality(finality) !== 0
+        if (fast && 'fastOutboundRateLimiterState' in remote && remote.fastOutboundRateLimiterState)
+          bucket = remote.fastOutboundRateLimiterState
+        const bps = !tokenTransferFeeConfig?.isEnabled
+          ? 0
+          : fast
+            ? tokenTransferFeeConfig.fastFinalityTransferFeeBps
+            : tokenTransferFeeConfig.finalityTransferFeeBps
+        bucketAmount = amount - (amount * BigInt(bps)) / 10_000n
+      }
+      if (!bucket) continue
+      if (bucketAmount > bucket.tokens) {
+        throw new CCIPRateLimitExceededError('OUTBOUND', bucket, {
+          ...lane,
+          amount: bucketAmount,
           registry,
-          sourceChainSelector: this.network.chainSelector,
-          destChainSelector,
         })
       }
     }
@@ -1618,6 +1757,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if tokenPool or remote config for the lane is not found
    * @throws {@link CCIPInsufficientBalanceError} if a LockRelease pool (or its lockbox) lacks liquidity
+   * @throws {@link CCIPTokenTransferPausedError} if a pause stops the token's inbound transfers
+   * @throws {@link CCIPLaneConfigIncompleteError} if the token's lane lacks a config record that a receive requires
    * @returns true if all token transfers are supported and within the rate limit
    * @internal
    */
@@ -1696,6 +1837,17 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       const remote = await this.getTokenPoolRemote(tokenPool!, message.sourceChainSelector, {
         token,
       })
+      const status = remote.inboundStatus
+      if (status && status.status !== 'ok') {
+        const lane = {
+          token,
+          tokenPool: tokenPool!,
+          sourceChainSelector: message.sourceChainSelector,
+          destChainSelector: this.network.chainSelector,
+        }
+        if (status.status === 'paused') throw new CCIPTokenTransferPausedError(status, lane)
+        throw new CCIPLaneConfigIncompleteError(status.missing, lane)
+      }
       if (!remote.inboundRateLimiterState) continue
       // EVM pools debit the inbound bucket in local units only from 1.6.1
       // (TokenPool._validateReleaseOrMint); 1.5.1 and 1.6.0 consume the source-denominated
@@ -2351,9 +2503,15 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
           token: opts.token,
         })
         result[LaneFeature.RATE_LIMITS] = remote.outboundRateLimiterState
-        if (fastRateLimitsApply && 'fastOutboundRateLimiterState' in remote) {
+        // a disabled fast bucket is absent, not unlimited: the pool then consumes the default one
+        if (
+          fastRateLimitsApply &&
+          'fastOutboundRateLimiterState' in remote &&
+          remote.fastOutboundRateLimiterState
+        ) {
           result[LaneFeature.FAST_RATE_LIMITS] = remote.fastOutboundRateLimiterState
         }
+        result[LaneFeature.LANE_STATUS] = remote.outboundStatus ?? { status: 'ok' }
       }
     }
 
@@ -2631,7 +2789,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    *     transfer fee config for that destination.
    * @returns {@link TokenPoolConfig} containing token, router, version info, and optionally fee config.
    * @throws {@link CCIPNotImplementedError} on Sui or TON chains
-   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens and
+   * @throws {@link CCIPLocalTokenRequiredError} if the pool serves multiple tokens and
    *   `opts.token` is not given
    */
   abstract getTokenPoolConfig(
@@ -2677,7 +2835,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param opts - Optional `token`: the local token; required for multi-token pools, ignored by others.
    * @returns Record where keys are chain names (e.g., "ethereum-mainnet") and values are {@link TokenPoolRemote} configs.
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remoteChainSelector is specified but not configured.
-   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens and
+   * @throws {@link CCIPLocalTokenRequiredError} if the pool serves multiple tokens and
    *   `opts.token` is not given
    */
   abstract getTokenPoolRemotes(
@@ -2706,7 +2864,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @param opts - Optional `token`: the local token; required for multi-token pools, ignored by others.
    * @returns TokenPoolRemote config for the specified remote chain.
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if no configuration found for the specified remote chain.
-   * @throws {@link CCIPTokenPoolTokenRequiredError} if the pool serves multiple tokens and
+   * @throws {@link CCIPLocalTokenRequiredError} if the pool serves multiple tokens and
    *   `opts.token` is not given
    */
   async getTokenPoolRemote(

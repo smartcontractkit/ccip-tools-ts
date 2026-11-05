@@ -32,6 +32,8 @@ export type {
   ChainStatic,
   GetBalanceOpts,
   LaneFeatures,
+  LaneRecordType,
+  LaneStatus,
   LogFilter,
   RateLimiterState,
   RegistryTokenConfig,

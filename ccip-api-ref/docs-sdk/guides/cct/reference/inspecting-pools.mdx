@@ -61,12 +61,23 @@ A multi-token pool (for example `BurnMintMultiTokenPool`) serves many tokens. A 
 const poolConfig = await chain.getTokenPoolConfig(poolAddress, { token: tokenAddress })
 console.log('PoolConfigManager:', poolConfig.poolConfigManager)
 // the stores that hold the records and emit the configuration events
-console.log('Stores:', poolConfig.connectionPolicyStore, poolConfig.securityPolicyStore)
+console.log(
+  'Stores:',
+  poolConfig.connectionPolicyStore,
+  poolConfig.feePolicyStore,
+  poolConfig.securityPolicyStore,
+)
 
 const remotes = await chain.getTokenPoolRemotes(poolAddress, undefined, { token: tokenAddress })
+for (const [chainName, remote] of Object.entries(remotes)) {
+  // 'ok', 'paused' (with scope and direction) or 'incomplete' (with the missing record types)
+  console.log(chainName, remote.outboundStatus, remote.inboundStatus)
+}
 ```
 
-Single-token pools ignore the `token` option. Without it, a multi-token pool read throws `CCIPTokenPoolTokenRequiredError`. The SDK's own preflights and estimates pass the token for you.
+Single-token pools ignore the `token` option. Without it, a multi-token pool read throws `CCIPLocalTokenRequiredError`. The SDK's own preflights and estimates pass the token for you.
+
+Each remote of a multi-token pool also has an `outboundStatus` and an `inboundStatus`. A status is `paused` when a global, chain or token pause stops transfers in that direction. It is `incomplete` when the lane lacks a config record that the transfer needs (`connection`, `remotePool`, `rateLimit`, `fee`, `destOverhead` or `security`; inbound transfers do not need the two fee records). A multi-token pool has no FeeQuoter fallback: a send on a lane without fee records reverts with `LaneFeeNotFound`. `checkSendMessage` (and so `getFee` and `getTotalFeesEstimate`) throws `CCIPTokenTransferPausedError` or `CCIPLaneConfigIncompleteError` before the send. `getLaneFeatures` with a `token` returns the outbound status as `LANE_STATUS`.
 
 ## Remote chain configuration
 

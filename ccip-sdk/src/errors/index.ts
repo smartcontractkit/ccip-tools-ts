@@ -85,7 +85,9 @@ export {
 
 // Specialized errors - Token & Registry
 export {
+  CCIPLaneConfigIncompleteError,
   CCIPLegacyTokenPoolsUnsupportedError,
+  CCIPLocalTokenRequiredError,
   CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenDecimalsUnavailableError,
@@ -93,6 +95,7 @@ export {
   CCIPTokenNotFoundError,
   CCIPTokenNotInRegistryError,
   CCIPTokenNotRegisteredError,
+  CCIPTokenTransferPausedError,
 } from './specialized.ts'
 
 // Specialized errors - Contract Type
@@ -147,7 +150,6 @@ export {
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenPoolInfoNotFoundError,
   CCIPTokenPoolStateNotFoundError,
-  CCIPTokenPoolTokenRequiredError,
   CCIPTopicsInvalidError,
   CCIPTransactionNotFinalizedError,
 } from './specialized.ts'
