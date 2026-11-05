@@ -1,0 +1,272 @@
+/**
+ * Unit tests for the Canton CCT `applyChainUpdates` operation: pool resolution
+ * by InstanceAddress alone (real `CantonChain` lookup over a stubbed ACS),
+ * remote-address parsing, and rate-limiter validation.
+ *
+ * @packageDocumentation
+ */
+
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
+// registers the chain families remote addresses are parsed as
+import '../../../../evm/index.ts'
+import '../../../../solana/index.ts'
+import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
+import { createLedgerApiClientFromProvider } from '../../../../canton/clients/ledger-api/client.ts'
+import { CantonChain } from '../../../../canton/index.ts'
+import type { CantonRpcProvider, UnsignedCantonTx } from '../../../../canton/types.ts'
+import { CCIPTxOutcomeUnavailableError } from '../../../../errors/index.ts'
+import { ChainFamily } from '../../../../networks.ts'
+import type { ChainUpdateArg } from '../../daml-types.ts'
+import { BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID } from '../shared.ts'
+import { type ChainUpdate, ApplyChainUpdates } from './apply-chain-updates.ts'
+
+const POOL_OWNER = `poolOwner::1220${'ab'.repeat(32)}`
+const POOL_ADDRESS = `pool-1@${POOL_OWNER}`
+const RL_IN = `pool-1-rl-in@${POOL_OWNER}`
+const RL_OUT = `pool-1-rl-out@${POOL_OWNER}`
+
+const EVM_SELECTOR = 16015286601757825753n // ethereum-testnet-sepolia
+const SOLANA_SELECTOR = 16423721717087811551n // solana-devnet
+const EVM_ADDRESS = '0x36e518336a67177cb102726C2DFa3D29B12f4C7b' // checksummed
+const EVM_STORED = '00000000000000000000000036e518336a67177cb102726c2dfa3d29b12f4c7b'
+const SOLANA_ADDRESS = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
+const SOLANA_STORED = '6752055c20b3e9d8746656ddf73855507f87ab6d87523e4c76a7fa36096a99eb'
+
+/** A real `CantonChain` whose ACS holds one pool of `templateId`; records each query's templates. */
+function chainWith(templateId = BURN_MINT_POOL_TEMPLATE_ID) {
+  const queries: string[][] = []
+  type Filter = { identifierFilter: { TemplateFilter: { value: { templateId: string } } } }
+  /** Test-configurable result for `prepareExecuteAndWait` submissions. */
+  let submitResult: unknown
+  /** Test-configurable response for `/v2/updates/update-by-id` lookups. */
+  let updateByIdResult: unknown
+  const provider = {
+    request: async (args: { method: string; params?: unknown }) => {
+      switch (args.method) {
+        case 'ledgerApi': {
+          const params = (args.params ?? {}) as Record<string, unknown>
+          switch (params.resource) {
+            case '/v2/state/ledger-end':
+              return { offset: 1 }
+            case '/v2/state/active-contracts': {
+              const req = params.body as {
+                eventFormat: { filtersByParty: Record<string, { cumulative: Filter[] }> }
+              }
+              const [filter] = Object.values(req.eventFormat.filtersByParty)
+              queries.push(
+                filter!.cumulative.map((c) => c.identifierFilter.TemplateFilter.value.templateId),
+              )
+              const createdEvent = {
+                contractId: '#pool',
+                templateId,
+                createdEventBlob: 'blob',
+                signatories: [POOL_OWNER],
+                createArgument: { instanceId: 'pool-1' },
+              }
+              return [
+                { contractEntry: { JsActiveContract: { synchronizerId: 'sync', createdEvent } } },
+              ]
+            }
+            case '/v2/updates/update-by-id':
+              return updateByIdResult
+            default:
+              throw new Error(`unexpected ledgerApi resource ${String(params.resource)}`)
+          }
+        }
+        case 'prepareExecuteAndWait':
+          return submitResult
+        default:
+          throw new Error(`unexpected provider method ${args.method}`)
+      }
+    },
+    on: () => provider,
+    emit: () => true,
+    removeListener: () => provider,
+  }
+  const chain = Object.assign(Object.create(CantonChain.prototype), {
+    network: { family: ChainFamily.Canton },
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    activeParty: POOL_OWNER,
+    ledgerApiClient: createLedgerApiClientFromProvider(provider as CantonRpcProvider),
+    provider,
+  }) as CantonChain
+  return {
+    chain,
+    queries,
+    /** Configure what `prepareExecuteAndWait` submissions resolve to. */
+    submit(result: unknown) {
+      submitResult = result
+    },
+    /** Configure what `/v2/updates/update-by-id` lookups resolve to. */
+    updateById(result: unknown) {
+      updateByIdResult = result
+    },
+  }
+}
+
+/** Generates an update adding one EVM lane, overridden by `update`. */
+const generate = (update: Partial<ChainUpdate> = {}) =>
+  new ApplyChainUpdates().generate(chainWith().chain, {
+    sender: POOL_OWNER,
+    poolInstanceAddress: POOL_ADDRESS,
+    chainsToAdd: [
+      {
+        remoteChainSelector: EVM_SELECTOR,
+        remotePools: [EVM_ADDRESS],
+        remoteTokenAddress: EVM_ADDRESS,
+        inboundRateLimiter: RL_IN,
+        outboundRateLimiter: RL_OUT,
+        ...update,
+      },
+    ],
+  })
+
+function exercise(tx: UnsignedCantonTx) {
+  return (
+    tx.commands.commands[0] as {
+      ExerciseCommand: { templateId: string; choiceArgument: { chainsToAdd: ChainUpdateArg[] } }
+    }
+  ).ExerciseCommand
+}
+
+describe('applyChainUpdates pool resolution', () => {
+  const hash = hashedRawInstanceAddress(POOL_ADDRESS)
+  const BURN_MINT = 'deadbeef:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
+  const LOCK_RELEASE = 'cafebabe:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+  for (const [label, templateId, poolInstanceAddress] of [
+    ['a burn-mint pool by raw address', BURN_MINT, POOL_ADDRESS],
+    ['a lock-release pool by 0x-prefixed hashed address', LOCK_RELEASE, '0x' + hash],
+    ['a lock-release pool by bare upper-case hashed address', LOCK_RELEASE, hash.toUpperCase()],
+  ] as const) {
+    it(`resolves ${label}`, async () => {
+      const { chain, queries } = chainWith(templateId)
+      const tx = await new ApplyChainUpdates().generate(chain, {
+        sender: POOL_OWNER,
+        poolInstanceAddress,
+        remoteChainSelectorsToRemove: [EVM_SELECTOR],
+      })
+
+      // one ACS query over both pool templates; the matched one is exercised
+      assert.deepEqual(queries, [[BURN_MINT_POOL_TEMPLATE_ID, LOCK_RELEASE_POOL_TEMPLATE_ID]])
+      assert.equal(exercise(tx).templateId, templateId)
+    })
+  }
+})
+
+describe('applyChainUpdates lane params', () => {
+  for (const [label, update, stored] of [
+    ['a checksummed EVM address', {}, EVM_STORED],
+    ['a lower-case unprefixed EVM address', { remotePools: [EVM_STORED.slice(24)] }, EVM_STORED],
+    [
+      'a Solana base58 pool and hex token',
+      {
+        remoteChainSelector: SOLANA_SELECTOR,
+        remotePools: [SOLANA_ADDRESS],
+        remoteTokenAddress: '0x' + SOLANA_STORED,
+      },
+      SOLANA_STORED,
+    ],
+  ] as Array<[string, Partial<ChainUpdate>, string]>) {
+    it(`stores ${label} as 32-byte bare hex`, async () => {
+      const [lane] = exercise(await generate(update)).choiceArgument.chainsToAdd
+      assert.deepEqual([lane!.remotePools, lane!.remoteTokenAddress], [[stored], stored])
+    })
+  }
+
+  const fasterThanFinality = /inboundCustomBlockConfirmationsRateLimiter".*faster than finality/
+  for (const [label, update, error] of [
+    ['a Solana pool on an EVM lane', { remotePools: [SOLANA_ADDRESS] }, /remotePools\[0\]".*EVM/],
+    [
+      'an EVM token on a Solana lane',
+      { remoteChainSelector: SOLANA_SELECTOR, remotePools: [SOLANA_ADDRESS] },
+      /remoteTokenAddress".*SVM/,
+    ],
+    ['two spellings of one pool', { remotePools: [EVM_ADDRESS, EVM_STORED] }, /\[1\]".*duplicate/],
+    ['a hashed rate limiter', { outboundRateLimiter: '0x' + 'ab'.repeat(32) }, /raw instance/],
+    [
+      'WaitForSafe without a custom limiter',
+      { finalityConfig: { type: 'WaitForSafe' } },
+      fasterThanFinality,
+    ],
+    [
+      'BlockDepth without a custom limiter',
+      { finalityConfig: { type: 'BlockDepth', blockConfirmations: 5 } },
+      fasterThanFinality,
+    ],
+  ] as Array<[string, Partial<ChainUpdate>, RegExp]>) {
+    it(`rejects ${label}`, async () => {
+      await assert.rejects(generate(update), error)
+    })
+  }
+
+  for (const [finalityConfig, limiter] of [
+    [undefined, undefined],
+    [{ type: 'BlockDepth', blockConfirmations: 5 }, `pool-1-rl-in-custom@${POOL_OWNER}`],
+  ] as const) {
+    it(`encodes the custom limiter for ${finalityConfig?.type ?? 'WaitForFinality'}`, async () => {
+      const update = { finalityConfig, inboundCustomBlockConfirmationsRateLimiter: limiter }
+      const [lane] = exercise(await generate(update)).choiceArgument.chainsToAdd
+      assert.deepEqual(lane!.inboundCustomBlockConfirmationsRateLimiter, { unpack: limiter ?? '' })
+    })
+  }
+})
+
+describe('applyChainUpdates commandId', () => {
+  it('is deterministic across generate calls with identical params', async () => {
+    const [first, second] = await Promise.all([generate(), generate()])
+    assert.equal(first.commands.commandId, second.commands.commandId)
+    assert.match(first.commands.commandId, /^cct-apply-chain-updates-[0-9a-f]{32}$/)
+  })
+
+  it('changes with the params', async () => {
+    const [add, remove] = await Promise.all([
+      generate(),
+      new ApplyChainUpdates().generate(chainWith().chain, {
+        sender: POOL_OWNER,
+        poolInstanceAddress: POOL_ADDRESS,
+        remoteChainSelectorsToRemove: [EVM_SELECTOR],
+      }),
+    ])
+    assert.notEqual(add.commands.commandId, remove.commands.commandId)
+  })
+
+  it('honours an explicit commandId override', async () => {
+    const tx = await new ApplyChainUpdates().generate(chainWith().chain, {
+      sender: POOL_OWNER,
+      poolInstanceAddress: POOL_ADDRESS,
+      remoteChainSelectorsToRemove: [EVM_SELECTOR],
+      commandId: 'ops-runbook-2026-10-26',
+    })
+    assert.equal(tx.commands.commandId, 'ops-runbook-2026-10-26')
+  })
+})
+
+describe('applyChainUpdates committed-but-unavailable outcome', () => {
+  it('throws CCIPTxOutcomeUnavailableError when the committed response lacks the exercise event', async () => {
+    const mocked = chainWith()
+    const { chain } = mocked
+    // Submission commits as update-1, but the re-fetched update carries no
+    // Transaction (the expected result events are missing).
+    mocked.submit({ tx: { payload: { updateId: 'update-1' } } })
+    mocked.updateById({})
+
+    await assert.rejects(
+      () =>
+        new ApplyChainUpdates().execute(chain, {
+          poolInstanceAddress: POOL_ADDRESS,
+          remoteChainSelectorsToRemove: [EVM_SELECTOR],
+          wallet: { party: POOL_OWNER },
+        }),
+      (err: unknown) => {
+        // The update committed; only the result details are missing — must
+        // not surface as a (retryable-looking) submission failure.
+        assert.ok(err instanceof CCIPTxOutcomeUnavailableError)
+        assert.equal(err.isTransient, false)
+        assert.equal(err.context['updateId'], 'update-1')
+        return true
+      },
+    )
+  })
+})

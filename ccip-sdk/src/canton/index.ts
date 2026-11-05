@@ -20,6 +20,7 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPNotImplementedError,
+  CCIPTxOutcomeUnavailableError,
 } from '../errors/index.ts'
 import {
   type ExtraArgs,
@@ -48,7 +49,7 @@ import {
   CCIPVersion,
   ExecutionState,
 } from '../types.ts'
-import { getDataBytes } from '../utils.ts'
+import { getDataBytes, normalizeHex } from '../utils.ts'
 import {
   type CantonAddress,
   type PartyId,
@@ -64,6 +65,7 @@ import {
   formatCantonDecimalAmountUnits,
   parseCantonDecimalAmountUnits,
 } from './amount.ts'
+import { hashedRawInstanceAddress } from './ccv-addresses.ts'
 import { type Message, EdsClientProvider } from './clients/eds/client.ts'
 import {
   type DisclosedContract,
@@ -75,6 +77,7 @@ import {
   type UpdateFormat,
   createLedgerApiClientFromProvider,
 } from './clients/ledger-api/client.ts'
+import { decodeDamlRecord, extractFieldValue } from './daml-parse.ts'
 import {
   CANTON_FEE_TOKEN_CLI_SYMBOLS,
   formatCantonLinkFeeToken,
@@ -85,6 +88,7 @@ import {
   getInterfaceCreatedEventFromTransaction,
 } from './events.ts'
 import {
+  type CantonActiveContract,
   type CantonExtraArgsV1,
   type CantonRpcProvider,
   type CantonTokenInfo,
@@ -99,7 +103,8 @@ export type {
   // Signature,
   SinglePartySignatures,
 } from './clients/ledger-api/client.ts'
-export type { CantonExtraArgsV1, UnsignedCantonTx } from './types.ts'
+export type { CantonActiveContract, CantonExtraArgsV1, UnsignedCantonTx } from './types.ts'
+export { decodeDamlRecord, extractFieldValue, extractRecordField } from './daml-parse.ts'
 export {
   INSTANCE_ADDRESS_LENGTH,
   InstanceAddress,
@@ -1671,16 +1676,15 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     return { receipt, log }
   }
 
-  // ─── Internal submission helper ─────────────────────────────────────────
-
   /**
    * Submit a command to the ledger via the provider.
    *
    * The provider takes care of signing and submitting: the browser dApp
    * wallet signs with the user's key, while the CLI provider submits
-   * JWT-authenticated via the participant.
+   * JWT-authenticated via the participant. Public so CCT operations can
+   * submit their own commands through the same path.
    */
-  private async submitCommands(
+  async submitCommands(
     commands: JsCommands,
     reason: string = 'submit command',
   ): Promise<JsSubmitAndWaitForTransactionResponse> {
@@ -1704,12 +1708,74 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       this.transactionUpdateFormat(),
     )
     if (!update || !('Transaction' in update)) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `Canton update ${tx.payload.updateId} is not a Transaction update`,
+      // Committed on-ledger; the response just lacks the expected result
+      // events. Non-transient: the command already committed, so retrying
+      // would resubmit it — inspect the ledger by updateId instead.
+      throw new CCIPTxOutcomeUnavailableError(
+        'CantonChain.submitCommands',
+        tx.payload.updateId,
+        'the committed Transaction update',
       )
     }
     return { transaction: update.Transaction.value }
+  }
+
+  /**
+   * Find the single active ACS contract whose derived RawInstanceAddress
+   * matches `instanceAddress`.
+   *
+   * Accepts either the `0x`-hex keccak InstanceAddress (`0x` optional) or the
+   * raw `instanceId@party` form; contracts are read from the ACS under the
+   * chain's active party (the provider's visibility), so only contracts the
+   * configured party can see are matched.
+   *
+   * @param templateId - Template ID(s) to scan (any match qualifies).
+   * @param instanceAddress - `0x`-hex hash or raw `instanceId@party` form.
+   * @returns The matching contract, or `null` when none is active.
+   * @throws {@link CCIPError} (CANTON_API_ERROR) when several contracts match.
+   */
+  async findActiveContractByInstanceAddress(
+    templateId: string | readonly string[],
+    instanceAddress: string,
+  ): Promise<CantonActiveContract | null> {
+    const target = instanceAddress.includes('@')
+      ? hashedRawInstanceAddress(instanceAddress)
+      : normalizeHex(instanceAddress)
+
+    const ids = Array.isArray(templateId) ? templateId : [templateId]
+    const contracts = await listActiveContractsByTemplateId(
+      this.logger,
+      this.ledgerApiClient,
+      this.activeParty,
+      ids.map((id) => CantonIdentifier.fromString(id)),
+    )
+    let match: CantonActiveContract | null = null
+    for (const contract of contracts) {
+      const created = contract.createdEvent
+      const fields = decodeDamlRecord(created.createArgument)
+      const instanceId = extractFieldValue(fields['instanceId'])
+      if (typeof instanceId !== 'string' || !instanceId) continue
+      // Go requires exactly one signatory; the instance address is derived from it.
+      const signatories = created.signatories
+      if (signatories.length !== 1) continue
+      const got = hashedRawInstanceAddress(`${instanceId}@${signatories[0]}`)
+      if (got !== target) continue
+      if (match) {
+        throw new CCIPError(
+          CCIPErrorCode.CANTON_API_ERROR,
+          `findActiveContractByInstanceAddress: multiple active contracts match ${instanceAddress}`,
+        )
+      }
+      match = {
+        contractId: created.contractId,
+        templateId: typeof created.templateId === 'string' ? created.templateId : ids[0]!,
+        createdEventBlob: created.createdEventBlob ?? '',
+        synchronizerId: contract.synchronizerId,
+        signatories,
+        createArgument: created.createArgument,
+      }
+    }
+    return match
   }
 
   // Contract Helpers

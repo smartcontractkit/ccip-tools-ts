@@ -1,7 +1,6 @@
 import { Buffer } from 'buffer'
 
 import { bcs } from '@mysten/sui/bcs'
-import type { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
 import { blake2b } from '@noble/hashes/blake2.js'
@@ -11,6 +10,7 @@ import { memoize } from 'micro-memoize'
 import { CCIPDataFormatUnsupportedError } from '../errors/index.ts'
 import type { CCIPMessage, CCIPVersion } from '../types.ts'
 import { toLeArray } from '../utils.ts'
+import type { SuiClientLike } from './client.ts'
 import { withLookupRetry } from './events.ts'
 
 const bcsBytes = (bytes: Uint8Array) => bcs.vector(bcs.u8()).serialize(bytes).toBytes()
@@ -63,10 +63,10 @@ export function deriveObjectID(parentAddress: string, keyBytes: Uint8Array): str
  * The StatePointer contains a reference to the parent object used for derivation.
  */
 export const getObjectRef = memoize(
-  async function getPackageIds_(address: string, client: SuiJsonRpcClient): Promise<string> {
+  async function getPackageIds_(address: string, client: SuiClientLike): Promise<string> {
     return withLookupRetry(() => getObjectRef_(address, client))
   },
-  { maxArgs: 1, expires: 300e3, async: true },
+  { maxArgs: 2, expires: 300e3, async: true },
 )
 
 /**
@@ -81,8 +81,11 @@ export const getObjectRef = memoize(
 export const getPackageDisassembly = memoize(
   async function getPackageDisassembly_(
     packageId: string,
-    client: SuiJsonRpcClient,
+    client: SuiClientLike,
   ): Promise<Record<string, string>> {
+    // The gRPC adapter (and any injected client) carries its own disassembly
+    // source — the JSON-RPC package-object read below has no gRPC equivalent.
+    if (client.getPackageDisassembly) return client.getPackageDisassembly(packageId)
     const obj = await withLookupRetry(() =>
       client.getObject({ id: normalizeSuiAddress(packageId), options: { showContent: true } }),
     )
@@ -94,10 +97,10 @@ export const getPackageDisassembly = memoize(
     }
     return content.disassembled as Record<string, string>
   },
-  { maxArgs: 1, async: true, expires: 3600e3 },
+  { maxArgs: 2, async: true, expires: 3600e3 },
 )
 
-async function getObjectRef_(address: string, client: SuiJsonRpcClient): Promise<string> {
+async function getObjectRef_(address: string, client: SuiClientLike): Promise<string> {
   // addresses may come unpadded (e.g. from Move module metadata); normalize
   const packageId = normalizeSuiAddress(address.split('::')[0]!)
   const suffix = address.split('::').slice(1).join('::')
@@ -145,11 +148,11 @@ async function getObjectRef_(address: string, client: SuiJsonRpcClient): Promise
  * @returns type string of each dynamic field, to its object id
  */
 export const getDynamicFieldIds = memoize(
-  async (parentId: string, client: SuiJsonRpcClient): Promise<Record<string, string>> => {
+  async (parentId: string, client: SuiClientLike): Promise<Record<string, string>> => {
     const fields = await withLookupRetry(() => client.getDynamicFields({ parentId }))
     return Object.fromEntries(fields.data.map((field) => [field.objectType, field.objectId]))
   },
-  { maxArgs: 1, async: true, expires: 300e3 },
+  { maxArgs: 2, async: true, expires: 300e3 },
 )
 
 /**
@@ -166,7 +169,7 @@ export const getDynamicFieldIds = memoize(
  */
 export async function getObjectFields(
   id: string,
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
 ): Promise<Record<string, unknown>> {
   const obj = await withLookupRetry(() => client.getObject({ id, options: { showContent: true } }))
   const content = obj.data?.content
@@ -188,7 +191,7 @@ export async function getObjectFields(
 export async function getTableEntryFields(
   table: string,
   key: bigint,
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
 ): Promise<Record<string, unknown> | undefined> {
   const entry = await client
     .getDynamicFieldObject({ parentId: table, name: { type: 'u64', value: key.toString() } })
@@ -224,7 +227,7 @@ export function parseSuiNumbers<T>(value: T): T {
  * The StatePointer contains a reference to the parent object used for derivation.
  */
 export const getLatestPackageId = memoize(
-  async function getLatestPackageId_(address: string, client: SuiJsonRpcClient): Promise<string> {
+  async function getLatestPackageId_(address: string, client: SuiClientLike): Promise<string> {
     const suffix = address.split('::')[1]
     try {
       const stateObjectId = await getObjectRef(address, client)
@@ -242,7 +245,7 @@ export const getLatestPackageId = memoize(
       return address
     }
   },
-  { maxArgs: 1, expires: 60e3, async: true },
+  { maxArgs: 2, expires: 60e3, async: true },
 )
 
 /**
@@ -254,7 +257,7 @@ export const getLatestPackageId = memoize(
  * @returns Receiver module name and package ID
  */
 export async function getReceiverModule(
-  provider: SuiJsonRpcClient,
+  provider: SuiClientLike,
   ccipPackageId: string,
   ccipObjectRef: string,
   receiverPackageId: string,
@@ -321,7 +324,7 @@ export async function getReceiverModule(
  * @returns Array of token configurations
  */
 export async function fetchTokenConfigs(
-  client: SuiJsonRpcClient,
+  client: SuiClientLike,
   ccipPackageId: string,
   ccipObjectRef: string,
   tokenAmounts: CCIPMessage<typeof CCIPVersion.V1_6>['tokenAmounts'],

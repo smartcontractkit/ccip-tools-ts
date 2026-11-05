@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-tools-ts",
-  "version": "1.14.0",
+  "version": "1.16.1",
   "description": "CLI and library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -26,34 +26,42 @@
     "prepare": "npm run build"
   },
   "devDependencies": {
-    "@types/node": "26.6.2",
+    "@chainlink/contracts-ccip": "2.0.0",
+    "@types/node": "26.6.5",
     "@typescript/native": "npm:typescript@7.0.2",
     "brace-expansion": "5.0.12",
     "c8": "^12.0.0",
-    "oxfmt": "^0.70.0",
-    "oxlint": "^1.85.0",
-    "oxlint-tsgolint": "7.0.2002",
+    "fill-range": "^7.1.1",
+    "oxfmt": "0.73.0",
+    "oxlint": "1.88.0",
+    "oxlint-tsgolint": "7.0.2004",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "yaml": "2.9.1"
   },
   "overrides": {
+    "braces": "file:scripts/vendor/braces-depth-guard",
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
     "image-size": "npm:@localnerve/image-size@^2.1.4",
     "postman-collection": {
       "@faker-js/faker": "file:../../scripts/vendor/faker-postman-stub"
     },
-    "axios": "^1.20.0",
     "tar": "^7.5.22",
-    "protobufjs": "^7.6.6",
-    "postcss": "^8.5.28",
+    "@ledgerhq/hw-app-canton": {
+      "protobufjs": "^8.8.1"
+    },
+    "postcss": "8.5.30",
     "uuid": "^11.1.1",
     "yaml@1": "^1.10.3",
-    "serialize-javascript": "^7.1.1",
-    "toml": "^5.0.0",
-    "lodash-es": "^4.18.1",
+    "serialize-javascript": "7.1.3",
+    "toml": "^5.0.1",
     "openapi-to-postmanv2": {
       "js-yaml": "^4.3.2"
-    }
+    },
+    "ws@8": "^8.21.0",
+    "tmp": "^0.2.7",
+    "jayson": "^5.0.0",
+    "tinypool": "^2.2.0",
+    "postcss-selector-parser": "7.1.6"
   },
   "allowScripts": {
     "@trufflesuite/bigint-buffer@1.1.10": true,
@@ -63,7 +71,6 @@
     "keccak@3.0.4": true,
     "node-hid@2.1.2": true,
     "postman-code-generators@2.1.1": true,
-    "unrs-resolver@1.12.2": true,
     "usb@2.9.0": true,
     "utf-8-validate@6.0.6": true,
     "@parcel/watcher@2.6.0": true

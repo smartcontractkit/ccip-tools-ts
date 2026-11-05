@@ -74,6 +74,7 @@ import {
   passesTypeAndVersion,
   util,
 } from '../utils.ts'
+import type { SuiClientLike } from './client.ts'
 import {
   getCcipStateAddress,
   getOffRampsForCcip,
@@ -85,6 +86,7 @@ import {
 } from './discovery.ts'
 import { type CommitEvent, streamSuiLogs, withLookupRetry } from './events.ts'
 import { generateUnsignedExecutePTB, signAndExecuteSuiTx } from './exec.ts'
+import { SuiGrpcChainClient } from './grpc.ts'
 import { getSuiLeafHasher } from './hasher.ts'
 import {
   type SuiLogStreamOpts,
@@ -123,6 +125,56 @@ const GLOBAL_CURSE_SUBJECT = '0x01000000000000000000000000000001'
 /** SUI's native coin type; the default fee token when `message.feeToken` is unset. */
 const SUI_NATIVE_COIN_TYPE = '0x2::sui::SUI'
 
+type SuiNetwork = 'mainnet' | 'testnet' | 'devnet'
+
+// Sui chain identifiers in their JSON-RPC form (the genesis checkpoint digest's
+// first 4 bytes); see https://docs.sui.io/guides/developer/getting-started/connect
+const SUI_NETWORKS: Record<string, { chainId: string; network: SuiNetwork }> = {
+  '35834a8a': { chainId: 'sui:1', network: 'mainnet' },
+  '4c78adac': { chainId: 'sui:2', network: 'testnet' },
+  b0c08dea: { chainId: 'sui:4', network: 'devnet' },
+}
+
+/**
+ * Probes an endpoint and identifies its Sui network.
+ * @returns undefined if the endpoint doesn't answer Sui RPCs
+ */
+async function detectSuiNetwork(
+  client: SuiClientLike,
+  url?: string,
+): Promise<{ chainId: string; network: SuiNetwork } | undefined> {
+  // Before anything the URL says is trusted, prove the endpoint actually
+  // serves Sui: callers hand `fromUrl` endpoints of several families at once
+  // (the CLI races every `--rpc` URL through every family's `fromUrl` to
+  // resolve a tx hash, and a URL wrongly "resolved" as Sui is dropped from
+  // the shared endpoint set, starving the family it really belongs to).
+  // The probe is a core, cheap call: JSON-RPC's `getChainIdentifier`
+  // (`sui_getCheckpoint(0)`) is NOT usable here — gateways such as BlockVision
+  // don't serve historical checkpoints (they 4xx/throttle it).
+  const tip = await client.getLatestCheckpointSequenceNumber().then(String, () => null)
+  if (tip === null || !/^\d+$/.test(tip)) return undefined
+
+  // Which Sui network: the chain identifier the endpoint derives from its own
+  // genesis checkpoint is authoritative; a network keyword in the URL is only
+  // consulted when the endpoint cannot answer that derivation, and only ever
+  // as a label for an endpoint already proven to speak Sui.
+  const urlChainId = Object.keys(SUI_NETWORKS).find((id) =>
+    url?.includes(SUI_NETWORKS[id]!.network),
+  )
+  const rawChainId = (await client.getChainIdentifier().catch(() => null)) ?? urlChainId
+  if (rawChainId == null)
+    throw new CCIPDataFormatUnsupportedError(
+      `Unable to fetch chain identifier${url ? ` from URL: ${redactEndpointUrl(url)}` : ''}`,
+    )
+  const known = SUI_NETWORKS[rawChainId]
+  if (!known)
+    throw new CCIPError(
+      CCIPErrorCode.CHAIN_FAMILY_UNSUPPORTED,
+      `Unsupported Sui chain identifier: ${rawChainId}`,
+    )
+  return known
+}
+
 /**
  * Sui chain implementation supporting Sui networks.
  */
@@ -134,7 +186,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   static readonly decimals = 9 // SUI has 9 decimals
 
   override readonly network: NetworkInfo<typeof ChainFamily.Sui>
-  readonly client: SuiJsonRpcClient
+  readonly client: SuiClientLike
 
   /**
    * Creates a new SuiChain instance.
@@ -142,7 +194,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
    * @param network - Network information for this chain.
    */
   constructor(
-    client: SuiJsonRpcClient,
+    client: SuiClientLike,
     network: NetworkInfo<typeof ChainFamily.Sui>,
     ctx?: ChainContext,
   ) {
@@ -224,13 +276,12 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
     // retries cleanly). Balance/coin queries and devInspect are left live.
     this.client.getTransactionBlock = memoize(this.client.getTransactionBlock.bind(this.client), {
       async: true,
-      maxArgs: 1,
+      maxArgs: 2,
       maxSize: 100,
       expires: 60e3, // finalized tx contents are immutable
-      transformKey: ([args]: Parameters<typeof this.client.getTransactionBlock>) => [
+      transformKey: ([args]: Parameters<SuiClientLike['getTransactionBlock']>) => [
         args.digest,
-        args.options?.showEffects,
-        args.options?.showInput,
+        JSON.stringify(args.options ?? null),
       ],
     })
     // Checkpoint/timestamp lookups for a page of event digests. Immutable once
@@ -244,7 +295,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
           async: true,
           maxSize: 100,
           expires: 60e3,
-          transformKey: ([args]: Parameters<typeof this.client.multiGetTransactionBlocks>) => [
+          transformKey: ([args]: Parameters<SuiClientLike['multiGetTransactionBlocks']>) => [
             args.digests.join(','),
             JSON.stringify(args.options ?? null),
           ],
@@ -256,7 +307,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         async: true,
         maxSize: 500,
         expires: 30e3,
-        transformKey: ([args]: Parameters<typeof this.client.getObject>) => [
+        transformKey: ([args]: Parameters<SuiClientLike['getObject']>) => [
           args.id,
           JSON.stringify(args.options ?? null),
         ],
@@ -280,7 +331,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       // that owns no pointer cost 5x5 requests and ~30s of backoff instead of 5
       // and ~4s — enough to look like a hang across a handful of candidates.
       this.client.getOwnedObjects = memoize(
-        async (args: Parameters<SuiJsonRpcClient['getOwnedObjects']>[0]) => {
+        async (args: Parameters<SuiClientLike['getOwnedObjects']>[0]) => {
           const pointerType =
             args.filter != null && 'StructType' in args.filter ? args.filter.StructType : undefined
           const pointerLookup = typeof pointerType === 'string' && pointerType.includes('Pointer')
@@ -314,7 +365,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
           async: true,
           maxSize: 200,
           expires: 30e3,
-          transformKey: ([args]: Parameters<typeof this.client.getOwnedObjects>) => [
+          transformKey: ([args]: Parameters<SuiClientLike['getOwnedObjects']>) => [
             args.owner,
             args.cursor,
             args.limit,
@@ -330,7 +381,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       // object's dynamic fields; a couple of quick retries usually land on a
       // synced one (a final empty keeps the pre-existing semantics).
       this.client.getDynamicFields = memoize(
-        async (args: Parameters<SuiJsonRpcClient['getDynamicFields']>[0]) => {
+        async (args: Parameters<SuiClientLike['getDynamicFields']>[0]) => {
           for (let attempt = 0; ; attempt++) {
             const res = await getDynamicFields(args)
             if (res.data.length !== 0 || attempt >= 4) return res
@@ -341,7 +392,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
           async: true,
           maxSize: 200,
           expires: 60e3,
-          transformKey: ([args]: Parameters<typeof this.client.getDynamicFields>) => [
+          transformKey: ([args]: Parameters<SuiClientLike['getDynamicFields']>) => [
             args.parentId,
             args.cursor,
             args.limit,
@@ -354,86 +405,66 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
         async: true,
         maxSize: 100, // coin metadata is immutable per coin type
         expires: 600e3,
-        transformKey: ([args]: Parameters<typeof this.client.getCoinMetadata>) => [args.coinType],
+        transformKey: ([args]: Parameters<SuiClientLike['getCoinMetadata']>) => [args.coinType],
       })
   }
 
   /**
    * Creates a SuiChain instance from an RPC URL.
-   * @param url - HTTP or WebSocket endpoint URL for the Sui network.
+   * The transport is auto-detected: gRPC-Web first (Sui's public fullnodes no
+   * longer serve JSON-RPC), then JSON-RPC for gateways that still serve it.
+   * @param url - HTTP(S) endpoint URL for the Sui network (gRPC-Web or JSON-RPC).
    * @returns A new SuiChain instance.
    * @throws {@link CCIPDataFormatUnsupportedError} if the endpoint doesn't answer Sui RPCs,
    * or if its chain identifier can't be determined
    * @throws {@link CCIPError} if chain identifier is not supported
    */
   static async fromUrl(url: string, ctx?: ChainContext): Promise<SuiChain> {
-    const fetchFn = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
-    const transport = new JsonRpcHTTPTransport({ url, fetch: fetchFn })
+    const fetch = ctx?.fetch ?? createRateLimitedFetch(fetchProfileForUrl(url), ctx)
+    // the client's network label (MVR name resolution) is only known after the
+    // probe, so the probe clients are rebuilt with it; construction is offline
+    const grpc = (network?: SuiNetwork) =>
+      SuiGrpcChainClient.from({ baseUrl: url, fetch, ...(network && { network }) })
+    const grpcNetwork = await detectSuiNetwork(grpc(), url)
+    if (grpcNetwork) return this.create(grpc(grpcNetwork.network), grpcNetwork.chainId, url, ctx)
 
-    // Create a temporary client to detect the network (network name unknown yet)
-    const tempClient = new SuiJsonRpcClient({ transport, network: url })
-
-    // Before anything the URL says is trusted, prove the endpoint actually
-    // serves Sui: callers hand `fromUrl` endpoints of several families at once
-    // (the CLI races every `--rpc` URL through every family's `fromUrl` to
-    // resolve a tx hash, and a URL wrongly "resolved" as Sui is dropped from
-    // the shared endpoint set, starving the family it really belongs to).
-    // The probe is a core, cheap call: `getChainIdentifier`'s
-    // `sui_getCheckpoint(0)` is NOT usable here — gateways such as BlockVision
-    // don't serve historical checkpoints (they 4xx/throttle it).
-    const tip: string | null = await tempClient
-      .getLatestCheckpointSequenceNumber()
-      .catch(() => null)
-    if (tip === null || !/^\d+$/.test(String(tip))) {
+    const transport = new JsonRpcHTTPTransport({ url, fetch })
+    const jsonRpc = (network: string) => new SuiJsonRpcClient({ transport, network })
+    const jsonRpcNetwork = await detectSuiNetwork(jsonRpc(url), url)
+    if (!jsonRpcNetwork)
       throw new CCIPDataFormatUnsupportedError(
         `Unable to reach a Sui RPC at: ${redactEndpointUrl(url)}`,
       )
-    }
+    return this.create(jsonRpc(jsonRpcNetwork.network), jsonRpcNetwork.chainId, url, ctx)
+  }
 
-    // Which Sui network: the chain identifier the endpoint derives from its own
-    // genesis checkpoint is authoritative; a network keyword in the URL is only
-    // consulted when the endpoint cannot answer that derivation (a keyed
-    // gateway that doesn't serve historical checkpoints), and only ever as a
-    // label for an endpoint already proven to speak Sui — never as the reason
-    // to treat a URL as Sui in the first place.
-    const urlNetwork = url.includes('mainnet')
-      ? '35834a8a'
-      : url.includes('testnet')
-        ? '4c78adac'
-        : url.includes('devnet')
-          ? 'b0c08dea'
-          : null
-    const rawChainId = (await tempClient.getChainIdentifier().catch(() => null)) ?? urlNetwork
-    if (rawChainId === null) {
+  /**
+   * Builds a chain from any {@link SuiClientLike}: the injection point for
+   * alternate transports (e.g. a client over a native-gRPC transport, see
+   * {@link SuiGrpcChainClient.from}).
+   * @param client - a Sui client speaking the SDK's JSON-RPC-shaped surface
+   * @param url - optional endpoint URL, for logging/diagnostics and the
+   *   network-keyword fallback when the endpoint cannot derive its own chain id
+   * @param ctx - chain context
+   * @throws {@link CCIPDataFormatUnsupportedError} if the endpoint doesn't answer Sui RPCs
+   * @throws {@link CCIPError} if chain identifier is not supported
+   */
+  static async fromClient(
+    client: SuiClientLike,
+    url?: string,
+    ctx?: ChainContext,
+  ): Promise<SuiChain> {
+    const detected = await detectSuiNetwork(client, url)
+    if (!detected)
       throw new CCIPDataFormatUnsupportedError(
-        `Unable to fetch chain identifier from URL: ${redactEndpointUrl(url)}`,
+        `Unable to reach a Sui RPC${url ? ` at: ${redactEndpointUrl(url)}` : ''}`,
       )
-    }
+    return this.create(client, detected.chainId, url, ctx)
+  }
 
-    // Map Sui chain identifiers to our network info format
-    // Reference: https://docs.sui.io/guides/developer/getting-started/connect
-    let chainId: string
-    let suiNetwork: string
-    if (rawChainId === '35834a8a') {
-      chainId = 'sui:1' // mainnet
-      suiNetwork = 'mainnet'
-    } else if (rawChainId === '4c78adac') {
-      chainId = 'sui:2' // testnet
-      suiNetwork = 'testnet'
-    } else if (rawChainId === 'b0c08dea') {
-      chainId = 'sui:4' // devnet
-      suiNetwork = 'devnet'
-    } else {
-      throw new CCIPError(
-        CCIPErrorCode.CHAIN_FAMILY_UNSUPPORTED,
-        `Unsupported Sui chain identifier: ${rawChainId}`,
-      )
-    }
-
-    const client = new SuiJsonRpcClient({ transport, network: suiNetwork })
+  private static create(client: SuiClientLike, chainId: string, url?: string, ctx?: ChainContext) {
     const network = networkInfo(chainId) as NetworkInfo<typeof ChainFamily.Sui>
-    const chain = new this(client, network, ctx)
-    return Object.assign(chain, { url })
+    return Object.assign(new this(client, network, ctx), { url })
   }
 
   /**
@@ -1166,9 +1197,9 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
       '(?:token_admin_registry|state_object|fee_quoter|onramp_state_helper|offramp_state_helper|' +
       'nonce_manager|rmn_remote|receiver_registry|eth_abi|publisher_wrapper)'
     const ccipImport = moduleSource.match(
-      new RegExp(`use\\s+([0-9a-fA-F]{1,64})::${CCIP_MODULES}\\s*(?:as\\s+\\w+)?;`),
+      new RegExp(`use\\s+(?:0x)?([0-9a-fA-F]{1,64})::${CCIP_MODULES}\\s*(?:as\\s+\\w+)?;`),
     )
-    const ccipPackage = ccipImport?.[1] ? `0x${ccipImport[1]}` : undefined
+    const ccipPackage = ccipImport?.[1] ? normalizeSuiAddress(`0x${ccipImport[1]}`) : undefined
 
     // the state pointer field (`<module>_object_id`) inside the package-owned pointer object
     const pointerFieldMatch = moduleSource.match(/\b(\w+_object_id)\s*:/)
@@ -2229,6 +2260,11 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
   private async getTokenPoolConfig_(tokenPool: string): Promise<TokenPoolConfig> {
     const { poolStateObjectId, tokenType, poolModule, latestPoolPackage, ccipPackage } =
       await this.getTokenPoolStateRef_(tokenPool)
+    if (!ccipPackage) {
+      throw new CCIPDataFormatUnsupportedError(
+        `Cannot resolve the CCIP router for token pool ${tokenPool}`,
+      )
+    }
 
     // Local token: the pool state's `get_token` view returns its CoinMetadata id
     const tokenTx = new Transaction()
@@ -2269,8 +2305,7 @@ export class SuiChain extends Chain<typeof ChainFamily.Sui> {
 
     return {
       token,
-      // the disassembly's `token_admin_registry` import names the ccip package
-      router: ccipPackage ? `${ccipPackage}::state_object` : tokenType,
+      router: `${ccipPackage}::state_object`,
       ...(typeAndVersion && { typeAndVersion }),
     }
   }

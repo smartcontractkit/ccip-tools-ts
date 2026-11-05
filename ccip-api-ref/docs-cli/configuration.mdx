@@ -281,14 +281,15 @@ Set `CANTON_CLIENT_ID` and `CANTON_CLIENT_SECRET` env vars for the `clientCreden
 
 **CLI-only fields** — used by the CLI to build its Canton provider (connectivity + JWT-authenticated requests); the SDK never sees them:
 
-| Field     | Required | Description                                                                   |
-| --------- | -------- | ----------------------------------------------------------------------------- |
-| `apiType` | Yes      | Provider type; only `json` (or empty) is supported                            |
-| `apiUrl`  | Yes      | Canton Ledger JSON API URL                                                    |
-| `chainId` | Yes      | CCIP Canton chain ID (CAIP-2, e.g. `canton:TestNet`)                          |
-| `party`   | Yes      | User ledger party for actAs and transaction visibility                        |
-| `jwt`     | No\*     | JSON Web Token for Canton Ledger API authentication                           |
-| `auth`    | No\*     | OIDC auth config (alternative to `jwt` — see [below](#canton-authentication)) |
+| Field        | Required | Description                                                                   |
+| ------------ | -------- | ----------------------------------------------------------------------------- |
+| `apiType`    | Yes      | Provider type; only `json` (or empty) is supported                            |
+| `apiUrl`     | Yes      | Canton Ledger JSON API URL                                                    |
+| `chainId`    | Yes      | CCIP Canton chain ID (CAIP-2, e.g. `canton:TestNet`)                          |
+| `party`      | Yes      | User ledger party for actAs and transaction visibility                        |
+| `jwt`        | No\*     | JSON Web Token for Canton Ledger API authentication                           |
+| `auth`       | No\*     | OIDC auth config (alternative to `jwt` — see [below](#canton-authentication)) |
+| `httpVersion` | No      | HTTP protocol for Ledger API requests: `"2"` (default) or `"1"` for HTTP/1.1-only endpoints |
 
 **SDK fields** — forwarded to the SDK's `CantonConfig` (the `provider` field itself is not user-configurable; the CLI constructs it from the fields above):
 

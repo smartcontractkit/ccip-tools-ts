@@ -47,6 +47,31 @@ export interface UnsignedCantonTx {
 }
 
 /**
+ * An active contract read from the ACS via
+ * {@link CantonChain.findActiveContractByInstanceAddress}.
+ *
+ * Carries the fields needed both to resolve a contract by `instanceId` and to
+ * embed it as a disclosed contract in a later submission (`createdEventBlob` +
+ * `synchronizerId`). `createArgument` is the raw JSON Ledger API
+ * `createArgument` value — decode with the shared `canton/daml-parse.ts`
+ * helpers or the typed bindings decoders.
+ */
+export interface CantonActiveContract {
+  /** Daml contract ID (`#...`). */
+  contractId: string
+  /** Full template ID string (`#<pkg>:<Module>:<Entity>` or `<pkg>:<Module>:<Entity>`). */
+  templateId: string
+  /** Opaque blob for disclosed-contract submission (from `createdEventBlob`). */
+  createdEventBlob: string
+  /** Synchronizer the contract was read from. */
+  synchronizerId: string
+  /** Contract signatories (from the created event); used for InstanceAddress derivation. */
+  signatories: string[]
+  /** Raw Daml `createArgument` value (decode lazily with the parse helpers). */
+  createArgument: unknown
+}
+
+/**
  * Canton-specific send parameters passed via `message.extraArgs` when calling
  * {@link CantonChain.generateUnsignedSendMessage} or {@link CantonChain.sendMessage}.
  *

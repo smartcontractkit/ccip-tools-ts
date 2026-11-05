@@ -8,7 +8,10 @@ import type { CleanAddressable } from './messages.ts'
  */
 export type UnsignedEVMTx = {
   family: typeof ChainFamily.EVM
-  transactions: Pick<TransactionRequest, 'from' | 'to' | 'data' | 'gasLimit' | 'value'>[]
+  transactions: Pick<
+    TransactionRequest,
+    'from' | 'to' | 'data' | 'gasLimit' | 'value' | 'chainId'
+  >[]
 }
 
 /**

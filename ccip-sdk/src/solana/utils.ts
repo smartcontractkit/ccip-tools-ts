@@ -1,4 +1,4 @@
-import { type IdlTypes, eventDiscriminator } from '@coral-xyz/anchor'
+import { eventDiscriminator } from '@coral-xyz/anchor'
 import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -36,7 +36,7 @@ import {
 } from '../errors/index.ts'
 import type { WithLogger } from '../types.ts'
 import { getDataBytes, jsonStringify, sleep } from '../utils.ts'
-import type { IDL as BASE_TOKEN_POOL_IDL } from './idl/1.6.0/BASE_TOKEN_POOL.ts'
+import type { TokenPoolChainConfig } from './token-pool.ts'
 import { type UnsignedSolanaTx, type Wallet, canSignV1Transactions } from './types.ts'
 import {
   MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES,
@@ -56,6 +56,58 @@ export type ResolvedATA = {
   tokenProgram: PublicKey
   /** The raw mint account info */
   mintInfo: AccountInfo<Buffer>
+}
+
+/**
+ * Fetches and validates a token mint account.
+ *
+ * @param connection - Solana connection instance.
+ * @param mint - Token mint address.
+ * @returns The validated mint account info.
+ * @throws CCIPTokenMintNotFoundError If the mint account does not exist.
+ * @throws CCIPTokenMintInvalidError If the mint is not owned by an SPL Token program.
+ *
+ * @example
+ * ```ts
+ * const mintInfo = await resolveTokenMint(connection, mint)
+ * ```
+ */
+export async function resolveTokenMint(
+  connection: Connection,
+  mint: PublicKey,
+): Promise<AccountInfo<Buffer>> {
+  const mintInfo = await connection.getAccountInfo(mint)
+  if (!mintInfo) throw new CCIPTokenMintNotFoundError(mint.toBase58())
+
+  if (!mintInfo.owner.equals(TOKEN_PROGRAM_ID) && !mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+    throw new CCIPTokenMintInvalidError(mint.toBase58(), mintInfo.owner.toBase58(), [
+      TOKEN_PROGRAM_ID.toBase58(),
+      TOKEN_2022_PROGRAM_ID.toBase58(),
+    ])
+  }
+
+  return mintInfo
+}
+
+/**
+ * Resolves and validates the SPL Token program that owns a mint.
+ *
+ * @param connection - Solana connection instance.
+ * @param mint - Token mint address.
+ * @returns The SPL Token or Token-2022 program address that owns the mint.
+ * @throws CCIPTokenMintNotFoundError If the mint account does not exist.
+ * @throws CCIPTokenMintInvalidError If the mint is not owned by an SPL Token program.
+ *
+ * @example
+ * ```ts
+ * const tokenProgram = await resolveTokenProgram(connection, mint)
+ * ```
+ */
+export async function resolveTokenProgram(
+  connection: Connection,
+  mint: PublicKey,
+): Promise<PublicKey> {
+  return (await resolveTokenMint(connection, mint)).owner
 }
 
 /**
@@ -79,22 +131,7 @@ export async function resolveATA(
   mint: PublicKey,
   owner: PublicKey,
 ): Promise<ResolvedATA> {
-  const mintInfo = await connection.getAccountInfo(mint)
-  if (!mintInfo) {
-    throw new CCIPTokenMintNotFoundError(mint.toBase58())
-  }
-
-  // Validate the mint is owned by a valid token program
-  const isValidTokenProgram =
-    mintInfo.owner.equals(TOKEN_PROGRAM_ID) || mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID)
-
-  if (!isValidTokenProgram) {
-    throw new CCIPTokenMintInvalidError(mint.toBase58(), mintInfo.owner.toBase58(), [
-      TOKEN_PROGRAM_ID.toBase58(),
-      TOKEN_2022_PROGRAM_ID.toBase58(),
-    ])
-  }
-
+  const mintInfo = await resolveTokenMint(connection, mint)
   // Allow PDAs as owners (for program vaults, etc.)
   const ata = getAssociatedTokenAddressSync(mint, owner, true, mintInfo.owner)
   return {
@@ -156,6 +193,48 @@ export function camelToSnakeCase(str: string): string {
     .toLowerCase()
     .replace(/^_/, '')
 }
+
+/**
+ * Derives the (CCIP 1.6) offramp PDA holding a buffered execution report.
+ * @param offramp - Offramp program ID.
+ * @param bufferId - ID the report was buffered under.
+ * @param caller - Account that buffered the report.
+ * @returns Address of the execution report buffer.
+ */
+export function getExecutionReportBufferPda(
+  offramp: PublicKey,
+  bufferId: Buffer,
+  caller: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('execution_report_buffer'), bufferId, caller.toBuffer()],
+    offramp,
+  )[0]
+}
+
+/**
+ * Derives the CCIP 2.0 offramp PDA holding buffered `execute_v2` inputs.
+ * @param offramp - Offramp program ID.
+ * @param bufferId - ID the inputs were buffered under.
+ * @param caller - Account that buffered the inputs, and will sign `execute_v2`.
+ * @returns Address of the execution inputs buffer.
+ */
+export function getExecutionInputsBufferPda(
+  offramp: PublicKey,
+  bufferId: Buffer,
+  caller: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('execution_inputs_buffer'), bufferId, caller.toBuffer()],
+    offramp,
+  )[0]
+}
+
+/**
+ * Placeholder fee payer for read-only simulations. Not the System Program (`1111…1111`): a program
+ * id can't be the (writable) fee payer.
+ */
+export const SIMULATION_PAYER = new PublicKey('11111111111111111111111111111112')
 
 type ParsedLog = Pick<SolanaLog, 'topics' | 'index' | 'address' | 'data' | 'level' | 'type'>
 type OrderedParsedLog = ParsedLog & { order: number }
@@ -623,7 +702,7 @@ async function simulateRawV1(connection: Connection, wire: Uint8Array) {
  */
 export function simulationProvider(
   ctx: { connection: Connection } & WithLogger,
-  feePayer: PublicKey = new PublicKey('11111111111111111111111111111112'),
+  feePayer: PublicKey = SIMULATION_PAYER,
 ) {
   return {
     connection: ctx.connection,
@@ -651,6 +730,13 @@ function getInstructionError(err: unknown): { index: number; error: unknown } | 
   return { index: detail[0] - instructionOffset, error: detail[1] as unknown }
 }
 
+/** Returns the program-defined (`Custom`) error code of a failed simulation, if any. */
+export function customInstructionErrorCode(err: unknown): number | undefined {
+  const failed = getInstructionError(err)?.error
+  if (typeof failed !== 'object' || failed === null || !('Custom' in failed)) return
+  return typeof failed.Custom === 'number' ? failed.Custom : undefined
+}
+
 /** Returns whether a simulation error was caused by Solana compute-budget exhaustion. */
 function isComputeBudgetError(err: unknown): boolean {
   const failed = getInstructionError(err)?.error
@@ -670,13 +756,34 @@ export type SolanaSplitMode = 'partial' | 'resource' | 'atomic'
 export type SolanaSentSlice = { signature: string; start: number; end: number }
 
 /**
+ * Whether an error (or the one that interrupted a partial submission) means the instructions
+ * don't fit a transaction, or their data an encoder's buffer: the cue to buffer them instead.
+ * @param err - Error thrown while resolving, simulating or sending the instructions.
+ * @returns True if the error is about size.
+ */
+export function isTransactionTooLargeError(err: unknown): boolean {
+  const cause =
+    err instanceof CCIPPartialTransactionSubmissionError && err.cause instanceof Error
+      ? err.cause
+      : err
+  return (
+    cause instanceof CCIPTransactionTooLargeError ||
+    (cause instanceof Error &&
+      ['encoding overruns Uint8Array', 'too large'].some((e) => cause.message.includes(e)))
+  )
+}
+
+/**
  * Returns the end of the next slice to try after simulating `instructions[start:end]` failed
  * with `err`, or undefined if `split` doesn't allow splitting on it (or splitting can't help).
  * An instruction error cuts the slice right before the failed instruction, since the ones before
- * it succeeded; other splittable errors (e.g. size) drop the last instruction.
+ * it succeeded; other splittable errors (e.g. size) drop the last instruction. A compute-budget
+ * instruction (e.g. a heap frame request) configures its transaction for the instruction after it,
+ * so a cut never separates the two.
  */
 function nextSliceEnd(
   err: unknown,
+  instructions: readonly TransactionInstruction[],
   start: number,
   end: number,
   split: SolanaSplitMode,
@@ -689,9 +796,14 @@ function nextSliceEnd(
   )
     return
   const failed = getInstructionError(err)?.index
-  if (failed == null || failed < 0 || failed >= end - start) return end - 1
+  let next
+  if (failed == null || failed < 0 || failed >= end - start) next = end - 1
   // the first instruction fails on its own: a shorter slice would fail the same way
-  if (failed > 0) return start + failed
+  else if (failed > 0) next = start + failed
+  else return
+  while (next > start && instructions[next - 1]!.programId.equals(ComputeBudgetProgram.programId))
+    next--
+  if (next > start) return next
 }
 
 /**
@@ -760,7 +872,7 @@ export async function simulateAndSendTxs(
             .loadedAccountsDataSize
           break
         } catch (err) {
-          const next = nextSliceEnd(err, start, end, split)
+          const next = nextSliceEnd(err, instructions, start, end, split)
           if (next == null) throw err
           end = next
         }
@@ -825,7 +937,11 @@ export async function simulateAndSendTxs(
         )
       }
       pendingSignature = signature
-      await connection.confirmTransaction({ signature, ...blockhash }, 'confirmed')
+      const confirmation = await connection.confirmTransaction(
+        { signature, ...blockhash },
+        'confirmed',
+      )
+      if (confirmation.value.err) throw confirmation.value.err
       pendingSignature = undefined
       slices.push({ signature, start, end })
       if (includesMain) hash = signature
@@ -846,7 +962,7 @@ export async function simulateAndSendTxs(
  * @returns RateLimiterState with capacity, rate, and current tokens, or null if disabled.
  */
 export function convertRateLimiter(
-  input: IdlTypes<typeof BASE_TOKEN_POOL_IDL>['BaseChain']['inboundRateLimit'],
+  input: TokenPoolChainConfig['inboundRateLimit'],
 ): RateLimiterState {
   if (!input.cfg.enabled) return null
   const tokens = BigInt(input.tokens.toString())

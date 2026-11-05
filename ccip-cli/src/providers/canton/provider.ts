@@ -62,6 +62,8 @@ export class JsonRpcProvider implements CantonRpcProvider {
   private readonly baseUrl: string
   private readonly jwt: string | (() => Promise<string>)
   private readonly fetchFn: typeof fetch | undefined
+  /** HTTP protocol version for the axios transport (canton config `httpVersion`). Default `2`. */
+  private readonly httpVersion: '1' | '2'
   /** Optional external signer (e.g. Ledger). When set, submissions go through the interactive submission API. */
   private readonly signer: TransactionSigner | undefined
   private readonly listeners = new Map<string, EventListener<unknown>[]>()
@@ -71,6 +73,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
     baseUrl: string,
     jwt: string | (() => Promise<string>),
     fetchFn: typeof fetch | undefined,
+    httpVersion: '1' | '2' | undefined,
     party: PartyId,
     signer?: TransactionSigner,
   ) {
@@ -79,6 +82,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
     this.baseUrl = baseUrl.replace(/\/$/, '')
     this.jwt = jwt
     this.fetchFn = fetchFn
+    this.httpVersion = httpVersion ?? '2'
     this.party = party
     this.signer = signer
   }
@@ -88,6 +92,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
     url: string,
     jwt: string | (() => Promise<string>),
     fetchFn?: typeof fetch,
+    httpVersion?: '1' | '2',
     party?: string,
     signer?: TransactionSigner,
   ) {
@@ -103,6 +108,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
         url: `${baseUrl}/v2/authenticated-user`,
         jwt,
         fetchFn,
+        httpVersion,
       })) as { user?: { primaryParty?: string } }
       if (data.user?.primaryParty == undefined || data.user.primaryParty === '') {
         throw new CCIPError(
@@ -113,7 +119,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
       partyId = parsePartyId(data.user.primaryParty)
     }
 
-    return new JsonRpcProvider(chainId, baseUrl, jwt, fetchFn, partyId, signer)
+    return new JsonRpcProvider(chainId, baseUrl, jwt, fetchFn, httpVersion, partyId, signer)
   }
 
   async request<M extends keyof RpcTypes>(
@@ -208,6 +214,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
       jwt: this.jwt,
       body: params.body,
       fetchFn: this.fetchFn,
+      httpVersion: this.httpVersion,
     })) as LedgerApiResult
   }
 
@@ -244,6 +251,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
         synchronizerId: params.synchronizerId,
       },
       fetchFn: this.fetchFn,
+      httpVersion: this.httpVersion,
     })) as { updateId?: string; completionOffset?: number }
     if (response.updateId == undefined) {
       throw new CCIPError(
@@ -308,6 +316,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
       jwt: this.jwt,
       body: prepareRequest,
       fetchFn: this.fetchFn,
+      httpVersion: this.httpVersion,
     })) as Partial<JsPrepareSubmissionResponse>
     if (!prepareResponse.preparedTransaction || !prepareResponse.preparedTransactionHash) {
       throw new CCIPError(
@@ -341,6 +350,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
       jwt: this.jwt,
       body: executeRequest,
       fetchFn: this.fetchFn,
+      httpVersion: this.httpVersion,
     })) as { transaction?: { updateId?: string; offset?: number } }
     if (transaction?.updateId == undefined) {
       throw new CCIPError(
@@ -361,14 +371,19 @@ export class JsonRpcProvider implements CantonRpcProvider {
   }
 }
 
-// The Canton JSON Ledger API requires HTTP/2. Default to axios's native HTTP/2
-// transport; an explicitly provided `fetch` overrides it.
+// Canton endpoints differ in HTTP protocol: the hosted validator front-ends
+// require HTTP/2 (HTTP/1.1 is rejected with 464 at their load balancer), while
+// Canton's JSON Ledger API is documented as HTTP/1.1 + JSON and user-hosted
+// participants commonly serve HTTP/1.1 only. The protocol is selected
+// explicitly via the canton config's `httpVersion` (default `2`); an
+// explicitly provided `fetch` overrides both.
 const http2 = axios.create({ httpVersion: 2 })
+const http1 = axios.create({ httpVersion: 1 })
 
-/** fetch-compatible adapter routing requests through axios's HTTP/2 transport. */
-async function http2Fetch(request: Request): Promise<Response> {
+/** fetch-compatible adapter routing requests through axios's native HTTP transport. */
+async function axiosFetch(version: '1' | '2', request: Request): Promise<Response> {
   try {
-    const response = await http2.request({
+    const response = await (version === '1' ? http1 : http2).request({
       url: request.url,
       method: request.method,
       headers: Object.fromEntries(request.headers),
@@ -404,6 +419,8 @@ interface LedgerJsonRequestOptions {
   jwt?: string | (() => Promise<string>)
   body?: unknown
   fetchFn?: typeof fetch
+  /** HTTP protocol version for the axios transport; ignored when `fetchFn` is set. Default `2`. */
+  httpVersion?: '1' | '2'
 }
 
 /** Perform a JSON request against the Canton Ledger API, returning the parsed response body. */
@@ -413,6 +430,7 @@ async function ledgerJsonRequest({
   jwt,
   body,
   fetchFn,
+  httpVersion,
 }: LedgerJsonRequestOptions): Promise<unknown> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   const token = typeof jwt === 'function' ? await jwt() : jwt
@@ -428,7 +446,7 @@ async function ledgerJsonRequest({
 
   let response: Response
   try {
-    response = await (fetchFn ?? http2Fetch)(request)
+    response = fetchFn ? await fetchFn(request) : await axiosFetch(httpVersion ?? '2', request)
   } catch (error) {
     throw new CCIPError(
       CCIPErrorCode.CANTON_API_ERROR,

@@ -32,6 +32,8 @@ export type CantonCliConfig = {
   jwt?: string
   /** OIDC auth config (`static` / `clientCredentials` / `authorizationCode`), resolved upfront by the CLI. */
   auth?: CantonAuthConfig
+  /** HTTP protocol version for Ledger API requests: `'2'` (default) or `'1'` for HTTP/1.1-only endpoints. */
+  httpVersion?: '1' | '2'
 
   // --- SDK passthrough (CantonConfig minus provider) ---
   /** CCIP operator party; overrides the network's default CCIP owner party. */
@@ -110,6 +112,14 @@ export function loadCantonConfig(
     if (typeof parsed['chainId'] !== 'string' || !parsed['chainId'].length) {
       throw new Error('Canton config: "chainId" must be a non-empty string if provided')
     }
+  }
+
+  if (
+    parsed['httpVersion'] != null &&
+    parsed['httpVersion'] !== '1' &&
+    parsed['httpVersion'] !== '2'
+  ) {
+    throw new Error('Canton config: "httpVersion" must be "1" or "2" if provided')
   }
 
   logger?.debug('Loaded Canton config from', configPath)

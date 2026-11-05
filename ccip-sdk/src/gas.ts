@@ -17,7 +17,12 @@ import { networkInfo } from './networks.ts'
 import { buildMessageForDest } from './requests.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
 import type { CCIPMessage, MessageInput, OffchainTokenData } from './types.ts'
-import { getDataBytes, getSourceDecimalsFromExtraData, scaleDecimals } from './utils.ts'
+import {
+  getDataBytes,
+  getSourceDecimalsFromExtraData,
+  resolveTokenDecimals,
+  scaleDecimals,
+} from './utils.ts'
 
 /**
  * A subset of {@link MessageInput} for estimating receive execution gas.
@@ -186,11 +191,14 @@ export async function getDestTokenAmount({
   source,
   onRamp,
   dest,
+  offRamp,
   tokenAmount,
 }: {
   source?: Chain
   onRamp?: string
   dest: Chain
+  /** dest OffRamp — resolves the dest pool from the dest registry when the source can't */
+  offRamp?: string
   tokenAmount: NonNullable<EstimateMessageInput['tokenAmounts']>[number]
 }): Promise<{ token: string; amount: bigint }> {
   let sourceTokenAddress, sourcePoolAddress, destTokenAddress
@@ -207,15 +215,26 @@ export async function getDestTokenAmount({
       }))
   }
 
-  const { decimals: destDecimals } = await dest.getTokenInfo(destTokenAddress)
+  // dest decimals: the token's own (optional) view, else the dest pool's declared decimals
+  // (the pool resolved from the destination TokenAdminRegistry via the offRamp, exactly as
+  // checkExecute resolves it — the registered pool is the one that will actually convert),
+  // else the family default — see resolveTokenDecimals
+  const destDecimals = await resolveTokenDecimals(dest, destTokenAddress, async () => {
+    if (!offRamp) return undefined
+    const registry = await dest.getTokenAdminRegistryFor(offRamp)
+    return (await dest.getRegistryTokenConfig(registry, destTokenAddress)).tokenPool
+  })
+  // source decimals: the extraData declaration (the source pool's destPoolData) first; else
+  // the same internal chain as the dest side — the source token's own (optional) view, else
+  // its pool's declared decimals, else the family default — see resolveTokenDecimals
   const sourceDecimals =
     getSourceDecimalsFromExtraData(tokenAmount.extraData) ??
     (source
-      ? (
-          await source.getTokenInfo(
-            sourceTokenAddress ?? (await source.getTokenForTokenPool(sourcePoolAddress)),
-          )
-        ).decimals
+      ? await resolveTokenDecimals(
+          source,
+          sourceTokenAddress ?? (await source.getTokenForTokenPool(sourcePoolAddress)),
+          sourcePoolAddress,
+        )
       : destDecimals)
 
   const destAmount = scaleDecimals(tokenAmount.amount, sourceDecimals, destDecimals)
@@ -294,7 +313,13 @@ export async function estimateReceiveExecution({
 
   const resolvedTokenAmounts = await Promise.all(
     (message.tokenAmounts ?? []).map(async (tokenAmount) => {
-      const destTokenAmount = await getDestTokenAmount({ source, dest, onRamp, tokenAmount })
+      const destTokenAmount = await getDestTokenAmount({
+        source,
+        dest,
+        onRamp,
+        offRamp,
+        tokenAmount,
+      })
       let forCheck: NonNullable<EstimateMessageInput['tokenAmounts']>[number] = destTokenAmount
       let destForEstimate = destTokenAmount
       if ('sourcePoolAddress' in tokenAmount) {
@@ -430,7 +455,7 @@ export async function getRequiredCCVs({
 
   const destTokenAmounts = await Promise.all(
     (message.tokenAmounts ?? []).map(async (tokenAmount) =>
-      getDestTokenAmount({ source, dest, onRamp, tokenAmount }),
+      getDestTokenAmount({ source, dest, onRamp, offRamp, tokenAmount }),
     ),
   )
 

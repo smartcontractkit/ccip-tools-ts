@@ -418,6 +418,7 @@ export type AnyMessage = {
   extraArgs: ExtraArgs
   /** Arbitrary data payload. */
   data?: BytesLike
+  /**
   /** Optional token transfers. */
   tokenAmounts?: readonly { token: string; amount: bigint }[]
   /** Optional fee token address (native if omitted). */

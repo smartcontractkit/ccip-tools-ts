@@ -216,6 +216,7 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
             rawCantonConfig.apiUrl,
             jwt,
             undefined,
+            rawCantonConfig.httpVersion,
             rawCantonConfig.party,
             wallet.signer,
           )

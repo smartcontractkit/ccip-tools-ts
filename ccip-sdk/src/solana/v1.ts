@@ -4,6 +4,7 @@ import {
   type MessageV1Args,
   type PublicKey,
   type TransactionInstruction,
+  ComputeBudgetProgram,
   MessageV1,
   PACKET_DATA_SIZE,
   SIGNATURE_LENGTH_IN_BYTES,
@@ -20,6 +21,9 @@ const CONFIG_MASK_PRIORITY_FEE_BITS = 0b00011
 const CONFIG_MASK_COMPUTE_UNIT_LIMIT_BIT = 0b00100
 const CONFIG_MASK_LOADED_ACCOUNTS_DATA_SIZE_LIMIT_BIT = 0b01000
 const CONFIG_MASK_HEAP_SIZE_BIT = 0b10000
+
+// ComputeBudget instruction tag of `RequestHeapFrame { bytes: u32 }`
+const REQUEST_HEAP_FRAME_TAG = 1
 
 // SIMD-0385 transaction constraints; exceeding them fails sanitization
 const V1_MAX_ACCOUNTS = 64
@@ -170,7 +174,8 @@ export function serializeV1Transaction(
  * (same dedupe/ordering/header semantics, same u8 account indexes) and only the
  * envelope differs. The compute-unit and loaded-accounts data-size limits are inlined
  * into the message's transactionConfig instead of ComputeBudget instructions; both are
- * required, as v1 budgets 0 for an unset limit instead of a default (SIMD-0385).
+ * required, as v1 budgets 0 for an unset limit instead of a default (SIMD-0385). A
+ * `requestHeapFrame` instruction among `instructions` moves into the transactionConfig too.
  * @throws if the compiled accounts exceed the 64 static keys the v1 format allows
  */
 export function compileV1Message({
@@ -186,6 +191,13 @@ export function compileV1Message({
   computeUnitLimit: number
   loadedAccountsDataSizeLimit: number
 }): SerializableMessageV1 {
+  let heapSize: number | null = null
+  instructions = instructions.filter(({ programId, data }) => {
+    if (!programId.equals(ComputeBudgetProgram.programId) || data[0] !== REQUEST_HEAP_FRAME_TAG)
+      return true
+    heapSize = data.readUInt32LE(1)
+    return false
+  })
   let messageV0
   try {
     messageV0 = new TransactionMessage({
@@ -214,7 +226,7 @@ export function compileV1Message({
     compiledInstructions: messageV0.compiledInstructions as MessageCompiledInstruction[],
     transactionConfig: {
       computeUnitLimit,
-      heapSize: null,
+      heapSize,
       loadedAccountsDataSizeLimit,
       priorityFee: null,
     },

@@ -25,6 +25,7 @@ import {
   isBytesLike,
   isError,
   isHexString,
+  keccak256,
   randomBytes,
   solidityPackedKeccak256,
   toBeHex,
@@ -66,6 +67,7 @@ import {
   CCIPRateLimitExceededError,
   CCIPSourceChainUnsupportedError,
   CCIPSourcePoolRevertError,
+  CCIPTokenDecimalsUnavailableError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotInRegistryError,
   CCIPTokenPoolChainConfigNotFoundError,
@@ -90,7 +92,7 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
-import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
+import { type TokenVerifier, CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import { buildMessageForDest, decodeMessage } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -105,6 +107,7 @@ import {
   type ExecutionState,
   type Lane,
   type LeanNumbers,
+  type OffchainTokenData,
   type WithLogger,
   CCIPVersion,
 } from '../types.ts'
@@ -117,6 +120,7 @@ import {
   getDataBytes,
   linkAbortSignals,
   parseTypeAndVersion,
+  resolveTokenDecimals,
 } from '../utils.ts'
 import type Token_ABI from './abi/BurnMintERC677Token.ts'
 import type CCTPVerifier_2_0_ABI from './abi/CCTPVerifier_2_0.ts'
@@ -160,7 +164,11 @@ import { getV12LeafHasher, getV16LeafHasher } from './hasher.ts'
 import { type EVMEndBlockTag, getEvmLogs } from './logs.ts'
 import { type MessageV1TokenTransfer, encodeMessageV1 } from './messageCodec.ts'
 import type { CCIPMessage_V1_6_EVM, CleanAddressable } from './messages.ts'
-import { encodeEVMOffchainTokenData } from './offchain.ts'
+import {
+  encodeEVMOffchainTokenData,
+  encodeEVMTokenCcvData,
+  getEVMTokenVerifiers,
+} from './offchain.ts'
 import {
   type PoolInterfaceVersion,
   describeRevert,
@@ -239,7 +247,7 @@ function encodeAddressToEvm(address: BytesLike): string {
 }
 
 /** typeguard for ethers Signer interface (used for `wallet`s)  */
-function isSigner(wallet: unknown): wallet is Signer {
+export function isSigner(wallet: unknown): wallet is Signer {
   return (
     typeof wallet === 'object' &&
     wallet !== null &&
@@ -248,21 +256,44 @@ function isSigner(wallet: unknown): wallet is Signer {
   )
 }
 
+/** Whether a tx that failed with `error` may still have reached the network. */
+function mayBeBroadcast(error: unknown): boolean {
+  return (
+    isError(error, 'TIMEOUT') ||
+    isError(error, 'NETWORK_ERROR') ||
+    isError(error, 'SERVER_ERROR') ||
+    /already known/i.test(String((error as Error | undefined)?.message))
+  )
+}
+
 /**
  * Submit transaction using best available method.
  * Try sendTransaction() first (works with browser wallets),
- * fallback to signTransaction() + broadcastTransaction() if unsupported.
+ * fallback to signTransaction() + broadcastTransaction() if unsupported or inconclusive.
  */
-async function submitTransaction(
+export async function submitTransaction(
   wallet: Signer,
   tx: TransactionRequest,
   provider: JsonRpcApiProvider,
 ): Promise<TransactionResponse> {
   try {
     return await wallet.sendTransaction(tx)
-  } catch {
-    const signed = await wallet.signTransaction(tx)
-    return provider.broadcastTransaction(signed)
+  } catch (err) {
+    if (isError(err, 'ACTION_REJECTED')) throw err // don't prompt the user twice
+    let signed
+    try {
+      signed = await wallet.signTransaction(tx)
+    } catch (signErr) {
+      throw mayBeBroadcast(err) ? err : signErr
+    }
+    // same tx and nonce: at worst a duplicate of the first send, which the node dedups or rejects
+    try {
+      return await provider.broadcastTransaction(signed)
+    } catch (broadcastErr) {
+      const sent = await provider.getTransaction(keccak256(signed)).catch(() => null)
+      if (sent) return sent
+      throw broadcastErr
+    }
   }
 }
 
@@ -333,9 +364,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   static readonly decimals = 18
 
   provider: JsonRpcApiProvider
-  private noncesPromises: Record<string, Promise<unknown>>
+  private nonceStates: Record<
+    string,
+    {
+      /** Latest read of the pending tx count, merged into {@link nonces}. */
+      sync?: Promise<void>
+      syncedAt: number
+      /** Never broadcast: reused before new nonces. */
+      released: Set<number>
+      /** May have been broadcast, with the time they were reported failed. */
+      suspects: Map<number, number>
+    }
+  >
   /**
-   * Cache of current nonces per wallet address.
+   * How long {@link nextNonce} trusts {@link nonces} before re-reading the pending tx count, so
+   * transactions sent in quick succession cost no RPC. `0` re-reads on every call.
+   */
+  nonceCacheTtlMs = 10_000
+  /**
+   * Next nonce to hand out per wallet address.
    * Used internally by {@link sendMessage} and {@link execute} to manage transaction ordering.
    * Can be inspected for debugging or manually adjusted if needed.
    */
@@ -349,7 +396,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   constructor(provider: JsonRpcApiProvider, network: NetworkInfo, ctx?: ChainContext) {
     super(network, ctx)
 
-    this.noncesPromises = {}
+    this.nonceStates = {}
     this.nonces = {}
 
     this.provider = provider
@@ -497,20 +544,94 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return (await this.provider.listAccounts()).map(({ address }) => address)
   }
 
+  private nonceState(address: string) {
+    return (this.nonceStates[address] ??= { syncedAt: 0, released: new Set(), suspects: new Map() })
+  }
+
   /**
-   * Get the next nonce for a wallet address and increment the internal counter.
-   * Fetches from the network on first call, then uses cached value.
+   * Reserve the next nonce for a wallet address.
+   * Reads the pending transaction count at most once per {@link nonceCacheTtlMs}, never moving
+   * the counter back, so neither SDK nor external pending transactions are replaced.
+   * Nonces released by {@link rollbackNonce} are reused first.
    * @param address - Wallet address to get nonce for
-   * @returns The next available nonce
+   * @returns The reserved nonce
    */
   async nextNonce(address: string): Promise<number> {
-    await (this.noncesPromises[address] ??= this.provider
-      .getTransactionCount(address)
-      .then((nonce) => {
-        this.nonces[address] = nonce
-        return nonce
-      }))
+    const state = this.nonceState(address)
+    if (!state.sync || Date.now() - state.syncedAt >= this.nonceCacheTtlMs) {
+      state.syncedAt = Date.now()
+      const sync: Promise<void> = (state.sync = this.provider
+        .getTransactionCount(address, 'pending')
+        .then(
+          (pending) => this.syncNonce(address, pending),
+          (err) => {
+            if (state.sync === sync) state.sync = undefined
+            throw err
+          },
+        ))
+    }
+    await state.sync
+    // synchronous from here on, so concurrent callers can't interleave
+    if (state.released.size) {
+      const n = Math.min(...state.released)
+      state.released.delete(n)
+      return n
+    }
     return this.nonces[address]!++
+  }
+
+  /** Merges a pending tx count read from the network into the cache. */
+  private syncNonce(address: string, pending: number): void {
+    const { released, suspects } = this.nonceState(address)
+    this.nonces[address] = Math.max(this.nonces[address] ?? 0, pending)
+    for (const n of released) if (n < pending) released.delete(n) // filled outside the SDK
+    for (const [n, since] of suspects) {
+      if (n < pending) {
+        suspects.delete(n) // the network has it
+      } else if (n === pending && Date.now() - since >= this.nonceCacheTtlMs) {
+        // still the network's next nonce: never broadcast, or dropped before being mined
+        suspects.delete(n)
+        this.rollbackNonce(address, n)
+      }
+    }
+  }
+
+  /**
+   * Report that the transaction using a nonce from {@link nextNonce} failed, so the nonce can be
+   * reused to fill the gap it would otherwise leave. Later nonces are never re-issued.
+   * - `error` proves the tx never reached the network (or no `error`): `nonce` is released now.
+   * - `error` is inconclusive (e.g. a timeout while broadcasting or waiting to be mined): `nonce`
+   *   is released only once the network shows it as its next nonce after {@link nonceCacheTtlMs}.
+   * - `nonce` was taken outside the SDK, or the tx was mined or replaced: the cache re-reads the
+   *   pending count on next use.
+   * @param address - Wallet address the nonce was reserved for
+   * @param nonce - The nonce returned by {@link nextNonce}; defaults to the latest one
+   * @param error - Why the transaction failed
+   */
+  rollbackNonce(address: string, nonce = (this.nonces[address] ?? 0) - 1, error?: unknown): void {
+    const next = this.nonces[address]
+    if (next == null || nonce < 0 || nonce >= next) return
+    const state = this.nonceState(address)
+    if (
+      isError(error, 'NONCE_EXPIRED') ||
+      isError(error, 'REPLACEMENT_UNDERPRICED') ||
+      (error as { receipt?: unknown } | undefined)?.receipt
+    ) {
+      state.syncedAt = 0
+      return
+    }
+    if (mayBeBroadcast(error)) {
+      state.suspects.set(nonce, Date.now())
+      return
+    }
+    if (nonce !== next - 1) {
+      state.released.add(nonce)
+      return
+    }
+    // latest reservation: step back, collapsing any released nonces now at the top
+    let top = nonce
+    while (state.released.delete(top - 1)) top--
+    this.nonces[address] = top
   }
 
   /**
@@ -1256,8 +1377,23 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       this.provider,
     ) as unknown as TypedContract<typeof Token_ABI>
     const symbol = await contract.symbol()
-    const decimals = await contract.decimals()
-    const name = await contract.name()
+    // `decimals()` is OPTIONAL in ERC-20: a CALL_EXCEPTION revert means the token doesn't
+    // implement it, and a BAD_DATA result means it answered something unusable as the
+    // expected return — both are recognized unavailable cases and surface as the typed
+    // error. Anything else (TIMEOUT, NETWORK_ERROR, ... transport) propagates as-is, so
+    // retry/transient handling still sees it. `name()` stays best-effort for the same
+    // optional-view reason.
+    let decimals: bigint
+    try {
+      decimals = await contract.decimals()
+    } catch (err) {
+      if (!isError(err, 'CALL_EXCEPTION') && !isError(err, 'BAD_DATA')) throw err
+      throw new CCIPTokenDecimalsUnavailableError(token, {
+        cause: err,
+        context: { network: this.network.name },
+      })
+    }
+    const name = await contract.name().catch(() => '')
     return { symbol, decimals: Number(decimals), name }
   }
 
@@ -1808,12 +1944,17 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           this.logger.debug('approve =>', response.hash)
           return response
         } catch (err) {
-          this.nonces[sender]!--
+          this.rollbackNonce(sender, tx.nonce!, err)
           throw err
         }
       }),
     )
-    if (responses.length) await responses[responses.length - 1]!.wait(1, 60_000) // wait last tx nonce to be mined
+    const lastApprove = responses[responses.length - 1]
+    if (lastApprove)
+      await lastApprove.wait(1, 60_000).catch((err: unknown) => {
+        this.rollbackNonce(sender, lastApprove.nonce, err)
+        throw err
+      }) // wait last tx nonce to be mined
 
     sendTx.nonce = await this.nextNonce(sender)
     let response
@@ -1823,11 +1964,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       sendTx.from = undefined // some signers don't like receiving pre-populated `from`
       response = await submitTransaction(wallet, sendTx, this.provider)
     } catch (err) {
-      this.nonces[sender]!--
+      this.rollbackNonce(sender, sendTx.nonce!, err)
       throw err
     }
     this.logger.debug('ccipSend =>', response.hash)
-    const tx = (await response.wait(1, 60_000))!
+    const tx = (await response.wait(1, 60_000).catch((err: unknown) => {
+      this.rollbackNonce(sender, response.nonce, err)
+      throw err
+    }))!
     return (await this.getMessagesInTx(await this.getTransaction(tx)))[0]!
   }
 
@@ -2027,15 +2171,25 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
 
     const unsignedTx: TransactionRequest = unsignedTxs.transactions[0]!
-    unsignedTx.nonce = await this.nextNonce(await wallet.getAddress())
-    const populatedTx = await wallet.populateTransaction(unsignedTx)
-    populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
-
-    const response = await submitTransaction(wallet, populatedTx, this.provider)
+    const payer = await wallet.getAddress()
+    unsignedTx.nonce = await this.nextNonce(payer)
+    let populatedTx, response
+    try {
+      populatedTx = await wallet.populateTransaction(unsignedTx)
+      populatedTx.from = undefined // some signers don't like receiving pre-populated `from`
+      response = await submitTransaction(wallet, populatedTx, this.provider)
+    } catch (err) {
+      this.rollbackNonce(payer, unsignedTx.nonce, err)
+      throw err
+    }
     this.logger.debug('manuallyExecute =>', response.hash)
 
     let receipt = await response.wait(0)
-    if (!receipt) receipt = await response.wait(1, 240_000)
+    if (!receipt)
+      receipt = await response.wait(1, 240_000).catch((err: unknown) => {
+        this.rollbackNonce(payer, response.nonce, err)
+        throw err
+      })
     if (!receipt?.hash) throw new CCIPExecTxNotConfirmedError(response.hash)
     if (!receipt.status) throw new CCIPExecTxRevertedError(response.hash)
     const tx = await this.getTransaction(receipt)
@@ -2115,13 +2269,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    *   - `finality` — requested finality ('finalized', 'safe', or block depth number).
    *   - `tokenArgs` — hex-encoded bytes passed to the pool contract.
    * @returns Token pool config containing token, router, typeAndVersion, and optionally
-   *          finalityDepth, finalitySafe, and tokenTransferFeeConfig.
+   *          finalityDepth, finalitySafe, tokenTransferFeeConfig, and `decimals` (v1.5.1+).
    *          LockReleaseV2 TPs also return its `lockBox` address
    *
    * @remarks
    * For pools with version \>= 2.0, also returns `finalityDepth` and `finalitySafe` for
    * Faster-Than-Finality (FTF) and FCR support. Pre-2.0 pools omit these fields.
    * When `feeOpts` is provided and the pool is v2.0+, also fetches token transfer fee config.
+   * v1.5.1+ pools also return `decimals` — the decimals the pool declares for its token
+   * (`getTokenDecimals()`); v1.5.0 pools predate it and fall back to the token's own
+   * (optional) `decimals()` view, so they stay readable without it.
    */
   async getTokenPoolConfig(
     tokenPool: string,
@@ -2133,6 +2290,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       router,
       allowedFinality,
       tokenTransferFeeConfig,
+      decimals: Promise<number | undefined> | undefined,
       previousPool: string | undefined,
       lockBox: string | undefined
     if (version < CCIPVersion.V2_0) {
@@ -2143,6 +2301,16 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof TokenPool_ABI>
       token = contract.getToken()
       router = contract.getRouter()
+      // v1.5.1+ pools declare their token's decimals; v1.5.0 predates getTokenDecimals and
+      // reverts — swallowed so those pools stay readable without it. Anything else
+      // (transport) propagates, exactly like getAllowedFinalityConfig below
+      decimals = contract
+        .getTokenDecimals()
+        .then(Number)
+        .catch((err) => {
+          if (isError(err, 'CALL_EXCEPTION')) return undefined
+          throw err
+        })
       if (type.endsWith('AndProxy')) {
         const proxy = new Contract(
           tokenPool,
@@ -2172,6 +2340,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
       token = contract.getToken()
       router = contract.getDynamicConfig().then(([router]) => router)
+      // the decimals the pool declares for its token — the authoritative source when the
+      // token doesn't implement the optional ERC-20 `decimals()` view (the pool converts
+      // with exactly these)
+      decimals = contract.getTokenDecimals().then(Number)
       if (type.includes('LockRelease')) {
         const lockBox_ = await resultToObject(contract.getLockBox().catch(() => null))
         if (lockBox_ && !lockBox_.match(/^(0x)?0*$/)) lockBox = lockBox_
@@ -2221,23 +2393,34 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       router,
       allowedFinality,
       tokenTransferFeeConfig,
+      decimals,
       previousTypeAndVersion,
-    ]).then(([token, router, allowedFinality, tokenTransferFeeConfig, previousTypeAndVersion]) => {
-      return {
-        token: token as CleanAddressable<typeof token>,
-        router: router as CleanAddressable<typeof router>,
-        typeAndVersion,
-        ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
-        ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
-        ...(previousPool != null && {
-          previousPool,
-          ...(previousTypeAndVersion != null && {
-            previousTypeAndVersion: previousTypeAndVersion[2],
+    ]).then(
+      ([
+        token,
+        router,
+        allowedFinality,
+        tokenTransferFeeConfig,
+        decimals,
+        previousTypeAndVersion,
+      ]) => {
+        return {
+          token: token as CleanAddressable<typeof token>,
+          router: router as CleanAddressable<typeof router>,
+          typeAndVersion,
+          ...(allowedFinality != null && decodeFinalityAllowed(allowedFinality)),
+          ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
+          ...(decimals != null && { decimals }),
+          ...(previousPool != null && {
+            previousPool,
+            ...(previousTypeAndVersion != null && {
+              previousTypeAndVersion: previousTypeAndVersion[2],
+            }),
           }),
-        }),
-        ...(!!lockBox && { lockBox }),
-      }
-    })
+          ...(!!lockBox && { lockBox }),
+        }
+      },
+    )
   }
 
   /**
@@ -2587,6 +2770,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     return super.getVerifications(opts)
   }
 
+  /** {@inheritDoc Chain.getTokenVerifiers} */
+  protected override getTokenVerifiers(
+    ccv: string,
+    sourceChainSelector: bigint,
+  ): Promise<TokenVerifier[]> {
+    return getEVMTokenVerifiers(this, ccv, sourceChainSelector)
+  }
+
+  /** {@inheritDoc Chain.encodeTokenCcvData} */
+  protected override encodeTokenCcvData(
+    versionTag: string,
+    data: NonNullable<OffchainTokenData>,
+  ): string {
+    return encodeEVMTokenCcvData(versionTag, data)
+  }
+
   /** {@inheritDoc Chain.getExecutionReceipts} */
   override async *getExecutionReceipts(
     opts: Parameters<Chain['getExecutionReceipts']>[0],
@@ -2818,7 +3017,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ? ta.extraData
           : undefined
       if (sourcePoolData === undefined) {
-        const { decimals } = await this.getTokenInfo(token)
+        // the dest token's own (optional) view, else the pool's declared decimals, else the
+        // family default — see resolveTokenDecimals
+        const decimals = await resolveTokenDecimals(this, token, tokenPool!)
         sourcePoolData = defaultAbiCoder.encode(['uint256'], [decimals])
       }
 
@@ -3202,7 +3403,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...message,
           destTokenAmounts: await Promise.all(
             message.tokenAmounts.map((tokenAmount) =>
-              getDestTokenAmount({ dest: this, tokenAmount }),
+              getDestTokenAmount({ dest: this, offRamp, tokenAmount }),
             ),
           ),
         },
@@ -3216,7 +3417,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ...opts.message,
           destTokenAmounts: await Promise.all(
             (opts.message.tokenAmounts ?? []).map((tokenAmount) =>
-              getDestTokenAmount({ dest: this, tokenAmount }),
+              getDestTokenAmount({ dest: this, offRamp: opts.offRamp, tokenAmount }),
             ),
           ),
         },

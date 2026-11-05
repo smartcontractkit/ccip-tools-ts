@@ -50,6 +50,9 @@ export const FUJI_RPCS = rpcEndpoints('RPC_FUJI')
 export const APTOS_TESTNET_RPCS = rpcEndpoints('RPC_APTOS_TESTNET')
 export const SOLANA_DEVNET_RPCS = rpcEndpoints('RPC_SOLANA_DEVNET')
 export const TON_TESTNET_RPCS = rpcEndpoints('RPC_TON_TESTNET')
+
+/** Skip reason for the Aptos suites until CCIP is redeployed on aptos-testnet. */
+export const APTOS_SKIP = 'aptos-testnet CCIP not redeployed since the ~2026-10-08 testnet restart'
 // base -> polygon lane for the EVM->EVM show pretty-format test. Polygon's public
 // endpoints vary wildly in eth_getLogs width — 1rpc caps at 50 blocks and then serves a
 // Cloudflare challenge under the resulting request burst — so this one is

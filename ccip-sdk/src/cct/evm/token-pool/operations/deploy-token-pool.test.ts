@@ -1,0 +1,493 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
+import { Interface, ZeroAddress, getCreateAddress, makeError } from 'ethers'
+
+import { CCIPExecTxRevertedError, CCIPWalletInvalidError } from '../../../../errors/index.ts'
+import type { EVMChain } from '../../../../evm/index.ts'
+import { ChainFamily, networkInfo } from '../../../../networks.ts'
+import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'
+import SILOED_LOCK_RELEASE_V2_0_0_ABI from '../../artifacts/abi/V2_0_0/siloed-lock-release-token-pool.ts'
+import BURN_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-from-mint-token-pool.ts'
+import BURN_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-mint-token-pool.ts'
+import BURN_MINT_WITH_LOCK_RELEASE_FLAG_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-mint-with-lock-release-flag-token-pool.ts'
+import BURN_TO_ADDRESS_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-to-address-mint-token-pool.ts'
+import BURN_WITH_FROM_MINT_V2_0_0 from '../../artifacts/bytecode/V2_0_0/burn-with-from-mint-token-pool.ts'
+import LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/lock-release-token-pool.ts'
+import SILOED_LOCK_RELEASE_V2_0_0 from '../../artifacts/bytecode/V2_0_0/siloed-lock-release-token-pool.ts'
+import { type DeployTokenPoolParams, DeployTokenPool } from './deploy-token-pool.ts'
+
+const SENDER = '0x' + '11'.repeat(20)
+const OTHER = '0x' + '99'.repeat(20)
+const TOKEN = '0x' + '22'.repeat(20)
+const RMN_PROXY = '0x' + '33'.repeat(20)
+const ROUTER = '0x' + '44'.repeat(20)
+const HOOKS = '0x' + '55'.repeat(20)
+const LOCKBOX = '0x' + '66'.repeat(20)
+const BURN_ADDRESS = '0x' + '77'.repeat(20)
+const DEPLOYED = getCreateAddress({ from: SENDER, nonce: 0 })
+const HASH = '0x' + 'ab'.repeat(32)
+
+const COMMON = { token: TOKEN, localTokenDecimals: 18, rmnProxy: RMN_PROXY, router: ROUTER }
+
+// Word encodings (32-byte, hex) reused across the golden vectors below.
+const W_TOKEN = '0000000000000000000000002222222222222222222222222222222222222222'
+const W_DECIMALS = '0000000000000000000000000000000000000000000000000000000000000012'
+const W_RMN = '0000000000000000000000003333333333333333333333333333333333333333'
+const W_ROUTER = '0000000000000000000000004444444444444444444444444444444444444444'
+const W_HOOKS = '0000000000000000000000005555555555555555555555555555555555555555'
+const W_LOCKBOX = '0000000000000000000000006666666666666666666666666666666666666666'
+const W_BURN_ADDRESS = '0000000000000000000000007777777777777777777777777777777777777777'
+
+// Golden vectors: pinned 2.0.0 constructor-arg encodings for the fixed inputs above. Independent
+// of the SDK encoder — they guard each pool's init-code against drift. The burn-* variants share
+// the `BurnMint` constructor (token, decimals, advancedPoolHooks, rmnProxy, router); LockRelease
+// adds `lockbox`, BurnToAddress adds `burnAddress`. `SiloedLockReleaseTokenPool` takes the burn-*
+// constructor unchanged (no `lockbox`).
+const BURN_MINT_ARGS = W_TOKEN + W_DECIMALS + W_HOOKS + W_RMN + W_ROUTER
+const LOCK_RELEASE_ARGS = W_TOKEN + W_DECIMALS + W_HOOKS + W_RMN + W_ROUTER + W_LOCKBOX
+const BURN_TO_ADDRESS_ARGS = BURN_MINT_ARGS + W_BURN_ADDRESS
+
+const CASES: {
+  label: string
+  params: DeployTokenPoolParams
+  bytecode: string
+  ctorArgs: string
+  /** Compiled contract name, for verification, where it differs from the `typeAndVersion` type. */
+  compiledName?: string
+}[] = [
+  {
+    label: 'BurnMintTokenPool',
+    params: { ...COMMON, type: 'BurnMintTokenPool', advancedPoolHooks: HOOKS },
+    bytecode: BURN_MINT_V2_0_0,
+    ctorArgs: BURN_MINT_ARGS,
+  },
+  {
+    label: 'BurnFromMintTokenPool',
+    params: { ...COMMON, type: 'BurnFromMintTokenPool', advancedPoolHooks: HOOKS },
+    bytecode: BURN_FROM_MINT_V2_0_0,
+    ctorArgs: BURN_MINT_ARGS,
+  },
+  {
+    label: 'BurnWithFromMintTokenPool',
+    params: { ...COMMON, type: 'BurnWithFromMintTokenPool', advancedPoolHooks: HOOKS },
+    bytecode: BURN_WITH_FROM_MINT_V2_0_0,
+    ctorArgs: BURN_MINT_ARGS,
+  },
+  {
+    label: 'BurnToAddressTokenPool',
+    params: {
+      ...COMMON,
+      type: 'BurnToAddressTokenPool',
+      advancedPoolHooks: HOOKS,
+      burnAddress: BURN_ADDRESS,
+    },
+    bytecode: BURN_TO_ADDRESS_MINT_V2_0_0,
+    ctorArgs: BURN_TO_ADDRESS_ARGS,
+    compiledName: 'BurnToAddressMintTokenPool',
+  },
+  {
+    label: 'BurnMintWithLockReleaseFlagTokenPool',
+    params: { ...COMMON, type: 'BurnMintWithLockReleaseFlagTokenPool', advancedPoolHooks: HOOKS },
+    bytecode: BURN_MINT_WITH_LOCK_RELEASE_FLAG_V2_0_0,
+    ctorArgs: BURN_MINT_ARGS,
+  },
+  {
+    label: 'LockReleaseTokenPool',
+    params: {
+      ...COMMON,
+      type: 'LockReleaseTokenPool',
+      advancedPoolHooks: HOOKS,
+      lockbox: LOCKBOX,
+    },
+    bytecode: LOCK_RELEASE_V2_0_0,
+    ctorArgs: LOCK_RELEASE_ARGS,
+  },
+  {
+    label: 'SiloedLockReleaseTokenPool',
+    params: { ...COMMON, type: 'SiloedLockReleaseTokenPool', advancedPoolHooks: HOOKS },
+    bytecode: SILOED_LOCK_RELEASE_V2_0_0,
+    ctorArgs: BURN_MINT_ARGS,
+  },
+]
+
+/** Base Sepolia; the chain the stub manager is on. Every built tx must be pinned to it. */
+const CHAIN_ID = Number(networkInfo('ethereum-testnet-sepolia-base-1').chainId)
+
+/** Minimal EVMChain stub — deployTokenPool's build path ignores it; execute uses only these. */
+function stubChain(): EVMChain {
+  return {
+    provider: {} as never,
+    logger: { debug() {}, info() {}, warn() {}, error() {} },
+    network: { chainId: CHAIN_ID },
+    nextNonce: async () => 0,
+    rollbackNonce: () => {},
+  } as unknown as EVMChain
+}
+
+/** Fake ethers Signer whose deployment receipt carries `contractAddress`. */
+function fakeSigner(opts: { contractAddress?: string | null; waitError?: Error }) {
+  return {
+    signTransaction: () => Promise.resolve('0x'),
+    getAddress: () => Promise.resolve(SENDER),
+    populateTransaction: (tx: unknown) => Promise.resolve({ ...(tx as object) }),
+    sendTransaction: () =>
+      Promise.resolve({
+        hash: HASH,
+        wait: () =>
+          opts.waitError
+            ? Promise.reject(opts.waitError)
+            : Promise.resolve({
+                status: 1,
+                contractAddress:
+                  opts.contractAddress === undefined ? DEPLOYED : opts.contractAddress,
+              }),
+      }),
+  }
+}
+
+describe('DeployTokenPool (cct/evm token-pool operation)', () => {
+  describe('generate (golden vectors per deployable type)', () => {
+    for (const { label, params, bytecode, ctorArgs } of CASES) {
+      it(`builds ${label} as init-code with no \`to\``, async () => {
+        const unsigned = await new DeployTokenPool().generate(stubChain(), {
+          ...params,
+          sender: SENDER,
+        })
+
+        assert.equal(unsigned.family, ChainFamily.EVM)
+        assert.equal(unsigned.transactions.length, 1)
+        const tx = unsigned.transactions[0]!
+        assert.equal(tx.to, undefined, 'deployment tx has no `to`')
+        assert.equal(tx.from, SENDER)
+        assert.equal(tx.chainId, CHAIN_ID, 'pinned to the manager chain')
+        assert.ok(tx.data!.startsWith(bytecode), 'data starts with creation bytecode')
+        assert.equal(tx.data, bytecode + ctorArgs)
+      })
+    }
+
+    it('defaults advancedPoolHooks to the zero address when omitted', async () => {
+      const unsigned = await new DeployTokenPool().generate(stubChain(), {
+        ...COMMON,
+        type: 'BurnMintTokenPool',
+      })
+      const zeroHooks = W_TOKEN + W_DECIMALS + '0'.repeat(64) + W_RMN + W_ROUTER
+      assert.equal(unsigned.transactions[0]!.data, BURN_MINT_V2_0_0 + zeroHooks)
+    })
+
+    it('defaults advancedPoolHooks to the zero address for a SiloedLockReleaseTokenPool', async () => {
+      const unsigned = await new DeployTokenPool().generate(stubChain(), {
+        ...COMMON,
+        type: 'SiloedLockReleaseTokenPool',
+      })
+      const zeroHooks = W_TOKEN + W_DECIMALS + '0'.repeat(64) + W_RMN + W_ROUTER
+      assert.equal(unsigned.transactions[0]!.data, SILOED_LOCK_RELEASE_V2_0_0 + zeroHooks)
+    })
+
+    it('matches ethers encodeDeploy against the vendored Siloed v2.0.0 ABI (no lockbox arg)', async () => {
+      const iface = new Interface(SILOED_LOCK_RELEASE_V2_0_0_ABI)
+      assert.equal(iface.deploy.inputs.length, 5)
+      const unsigned = await new DeployTokenPool().generate(stubChain(), {
+        ...COMMON,
+        type: 'SiloedLockReleaseTokenPool',
+        advancedPoolHooks: HOOKS,
+      })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        SILOED_LOCK_RELEASE_V2_0_0 +
+          iface.encodeDeploy([TOKEN, 18, HOOKS, RMN_PROXY, ROUTER]).slice(2),
+      )
+    })
+
+    it('appends burnAddress as the sixth constructor arg, per an independent BurnToAddress signature', async () => {
+      // Built from the Solidity signature, not the SDK's vendored ABI, so a wrong arg order fails.
+      const iface = new Interface([
+        'constructor(address token, uint8 localTokenDecimals, address advancedPoolHooks, address rmnProxy, address router, address burnAddress)',
+      ])
+      const unsigned = await new DeployTokenPool().generate(stubChain(), {
+        ...COMMON,
+        type: 'BurnToAddressTokenPool',
+        burnAddress: BURN_ADDRESS,
+      })
+      assert.equal(
+        unsigned.transactions[0]!.data,
+        BURN_TO_ADDRESS_MINT_V2_0_0 +
+          iface.encodeDeploy([TOKEN, 18, ZeroAddress, RMN_PROXY, ROUTER, BURN_ADDRESS]).slice(2),
+      )
+    })
+
+    it('omits `from` when no sender is given', async () => {
+      const unsigned = await new DeployTokenPool().generate(stubChain(), {
+        ...COMMON,
+        type: 'BurnMintTokenPool',
+        advancedPoolHooks: HOOKS,
+      })
+      assert.equal(unsigned.transactions[0]!.from, undefined)
+    })
+  })
+
+  describe('validation', () => {
+    const base: DeployTokenPoolParams = {
+      ...COMMON,
+      type: 'BurnMintTokenPool',
+      advancedPoolHooks: HOOKS,
+    }
+
+    it('rejects an invalid token address', async () => {
+      await assert.rejects(
+        () => new DeployTokenPool().generate(stubChain(), { ...base, token: 'nope' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'token',
+      )
+    })
+
+    it('rejects an invalid router address', async () => {
+      await assert.rejects(
+        () => new DeployTokenPool().generate(stubChain(), { ...base, router: 'nope' }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'router',
+      )
+    })
+
+    for (const param of ['token', 'rmnProxy', 'router'] as const) {
+      it(`rejects the zero address for ${param}`, async () => {
+        await assert.rejects(
+          () => new DeployTokenPool().generate(stubChain(), { ...base, [param]: ZeroAddress }),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError &&
+            err.context.operation === 'deployTokenPool' &&
+            err.context.param === param,
+        )
+      })
+    }
+
+    it('rejects decimals outside 0–255', async () => {
+      await assert.rejects(
+        () => new DeployTokenPool().generate(stubChain(), { ...base, localTokenDecimals: 256 }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'localTokenDecimals',
+      )
+    })
+
+    it('rejects an invalid advancedPoolHooks address', async () => {
+      await assert.rejects(
+        () => new DeployTokenPool().generate(stubChain(), { ...base, advancedPoolHooks: 'nope' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'advancedPoolHooks',
+      )
+    })
+
+    it('rejects an invalid sender', async () => {
+      await assert.rejects(
+        () => new DeployTokenPool().generate(stubChain(), { ...base, sender: 'nope' }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'sender',
+      )
+    })
+
+    it('rejects a non-deployable pool type', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(stubChain(), {
+            ...COMMON,
+            type: 'NotATokenPool',
+          } as unknown as DeployTokenPoolParams),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'type',
+      )
+    })
+
+    it('rejects the zero address for a LockRelease lockbox', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(stubChain(), {
+            ...COMMON,
+            type: 'LockReleaseTokenPool',
+            advancedPoolHooks: HOOKS,
+            lockbox: ZeroAddress,
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
+      )
+    })
+
+    it('rejects an invalid lockbox address', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(stubChain(), {
+            ...COMMON,
+            type: 'LockReleaseTokenPool',
+            advancedPoolHooks: HOOKS,
+            lockbox: 'nope',
+          }),
+        (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === 'lockbox',
+      )
+    })
+
+    // The contract accepts a zero burnAddress, but OpenZeppelin ERC20s revert ERC20InvalidReceiver on
+    // a transfer to it, so every lockOrBurn would revert and the immutable address can't be fixed.
+    it('rejects the zero address for a BurnToAddress burnAddress, which would brick lockOrBurn', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(stubChain(), {
+            ...COMMON,
+            type: 'BurnToAddressTokenPool',
+            burnAddress: ZeroAddress,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'burnAddress',
+      )
+    })
+
+    it('rejects an invalid or missing burnAddress for an untyped caller', async () => {
+      for (const burnAddress of ['nope', undefined]) {
+        await assert.rejects(
+          () =>
+            new DeployTokenPool().generate(stubChain(), {
+              ...COMMON,
+              type: 'BurnToAddressTokenPool',
+              burnAddress,
+            } as unknown as DeployTokenPoolParams),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError && err.context.param === 'burnAddress',
+          String(burnAddress),
+        )
+      }
+    })
+
+    it('runs the shared validation for a SiloedLockReleaseTokenPool', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(stubChain(), {
+            ...COMMON,
+            type: 'SiloedLockReleaseTokenPool',
+            token: ZeroAddress,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'token',
+      )
+    })
+
+    // `lockbox` on a burn pool or a `SiloedLockReleaseTokenPool` is a compile-time error (the
+    // DeployTokenPoolParams union). `npm run typecheck` enforces it: each `@ts-expect-error`
+    // fails the build if the union ever starts accepting `lockbox` for that type.
+    it('rejects `lockbox` at compile time on burn pools and SiloedLockReleaseTokenPool', () => {
+      const _burn: DeployTokenPoolParams = {
+        ...COMMON,
+        type: 'BurnMintTokenPool',
+        advancedPoolHooks: HOOKS,
+        // @ts-expect-error -- burn pools take no lockbox
+        lockbox: LOCKBOX,
+      }
+      const _siloed: DeployTokenPoolParams = {
+        ...COMMON,
+        type: 'SiloedLockReleaseTokenPool',
+        advancedPoolHooks: HOOKS,
+        // @ts-expect-error -- Siloed lockboxes are bound per lane after deploy
+        lockbox: LOCKBOX,
+      }
+    })
+
+    it('requires `burnAddress` at compile time on BurnToAddressTokenPool and rejects it elsewhere', () => {
+      // @ts-expect-error -- BurnToAddressTokenPool requires burnAddress
+      const _missing: DeployTokenPoolParams = { ...COMMON, type: 'BurnToAddressTokenPool' }
+      const _burnMint: DeployTokenPoolParams = {
+        ...COMMON,
+        type: 'BurnMintTokenPool',
+        // @ts-expect-error -- only BurnToAddressTokenPool takes a burnAddress
+        burnAddress: BURN_ADDRESS,
+      }
+    })
+  })
+
+  describe('execute', () => {
+    const params: DeployTokenPoolParams = {
+      ...COMMON,
+      type: 'BurnMintTokenPool',
+      advancedPoolHooks: HOOKS,
+    }
+
+    it('deploys and returns the tx hash and deployed address', async () => {
+      const result = await new DeployTokenPool().execute(stubChain(), {
+        ...params,
+        wallet: fakeSigner({ contractAddress: DEPLOYED }),
+      })
+      assert.deepEqual(result, {
+        hash: HASH,
+        contractAddress: DEPLOYED,
+        verification: {
+          contract: 'BurnMintTokenPool',
+          encodedConstructorArgs: '0x' + BURN_MINT_ARGS,
+        },
+      })
+    })
+
+    for (const { label, params: caseParams, ctorArgs, compiledName } of CASES) {
+      it(`carries the verification handle for ${label}`, async () => {
+        const result = await new DeployTokenPool().execute(stubChain(), {
+          ...caseParams,
+          wallet: fakeSigner({ contractAddress: DEPLOYED }),
+        })
+        assert.equal(result.verification.contract, compiledName ?? caseParams.type)
+        assert.equal(result.verification.encodedConstructorArgs, '0x' + ctorArgs)
+      })
+    }
+
+    it('accepts a sender matching the signing wallet', async () => {
+      const result = await new DeployTokenPool().execute(stubChain(), {
+        ...params,
+        sender: SENDER,
+        wallet: fakeSigner({ contractAddress: DEPLOYED }),
+      })
+      assert.equal(result.hash, HASH)
+    })
+
+    it('rejects a sender that differs from the signing wallet', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().execute(stubChain(), {
+            ...params,
+            sender: OTHER,
+            wallet: fakeSigner({ contractAddress: DEPLOYED }),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'sender',
+      )
+    })
+
+    it('throws CCTTxFailedError when the receipt carries no contract address', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().execute(stubChain(), {
+            ...params,
+            wallet: fakeSigner({ contractAddress: null }),
+          }),
+        (err: unknown) =>
+          err instanceof CCTTxFailedError &&
+          err.context.operation === 'deployTokenPool' &&
+          !err.isTransient,
+      )
+    })
+
+    it('throws CCIPExecTxRevertedError when the deployment reverts on-chain', async () => {
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().execute(stubChain(), {
+            ...params,
+            wallet: fakeSigner({ waitError: makeError('execution reverted', 'CALL_EXCEPTION') }),
+          }),
+        (err: unknown) =>
+          err instanceof CCIPExecTxRevertedError && err.context.operation === 'deployTokenPool',
+      )
+    })
+
+    it('rejects a non-signer wallet', async () => {
+      await assert.rejects(
+        () => new DeployTokenPool().execute(stubChain(), { ...params, wallet: {} }),
+        (err: unknown) => err instanceof CCIPWalletInvalidError,
+      )
+    })
+  })
+})

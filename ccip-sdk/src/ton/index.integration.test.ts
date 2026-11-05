@@ -1,49 +1,177 @@
 import assert from 'node:assert/strict'
-import { before, describe, it } from 'node:test'
+import { after, before, describe, it } from 'node:test'
 
 import { Address } from '@ton/core'
 
 import '../index.ts'
+import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
+import { CCIPError } from '../errors/index.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import type { CCIPMessage, CCIPVersion } from '../types.ts'
+import { isTransientHttpStatus } from '../http-status.ts'
+import { type ChainLog, type Lane, CCIPVersion } from '../types.ts'
+import { sleep } from '../utils.ts'
 import { crc32 } from './utils.ts'
 import { TONChain } from './index.ts'
 
 await useResource(['ton-testnet'])
+
+/**
+ * Live-testnet coverage of the TON index-level APIs that the unit tests mock or
+ * never reach: router/OffRamp bindings, CCIPMessageSent / CommitReportAccepted /
+ * ExecutionStateChanged decoding against real BOCs, getTransaction, getMessagesInTx,
+ * getBlockTimestamp, getTokenInfo and getBalance. The getLogs scan SHAPES (index vs
+ * walk, wire call counts) are logs.integration.test.ts's job; this suite only needs
+ * one recent log of each kind, so every scan uses a short window and a fixture
+ * selected at RUNTIME — the pinned addresses and Jan-2026 sends of the old suite
+ * aged out of the live deployment.
+ *
+ * A scan that finds nothing, or an endpoint that stops answering, FAILS with the
+ * last reason after the retry budget — it never silently skips.
+ *
+ * Run against any TON v2 endpoint; defaults to the public index (paced, so slow):
+ *   node --test src/ton/index.integration.test.ts
+ *   SKIP_INTEGRATION_TESTS=1 npm test   # CI hermetic runs
+ */
+const TON_TESTNET_RPC = rpcEndpoint('RPC_TON_TESTNET')
+const skip = !!process.env.SKIP_INTEGRATION_TESTS
+const VERBOSE = !!process.env.VERBOSE
+const LOGGER = VERBOSE ? console : { ...console, debug: () => {} }
+
+// The ton-testnet OnRamp that both ccip-o11y pollers target (same address as
+// logs.integration.test.ts); verified active 2026-10-23.
+const ONRAMP = 'EQDioi9PI32Wo1oBwkUp0pj1AhwvAHiKiZCfgrr0iDqu3lTA'
+const USDT_TESTNET = 'kQD0GKBM8ZbryVk2aESmzfU6b9b_8era_IkvBSELujFZPsyy'
+const TON_FAUCET = 'EQAuz15H1ZHrZ_psVrAra7HealMIVeFq0wguqlmFno1f3EJj'
+
+const SEPOLIA_CHAIN_SELECTOR = 16015286601757825753n
+const TON_TESTNET_CHAIN_SELECTOR = 1399300952838017768n
 
 // CRC32 hex values for TON external message topics
 const CCIP_MESSAGE_SENT_TOPIC = crc32('CCIPMessageSent') // 0xa45d293c
 const COMMIT_REPORT_ACCEPTED_TOPIC = crc32('CommitReportAccepted') // 0x27d3bce8
 const EXECUTION_STATE_CHANGED_TOPIC = crc32('ExecutionStateChanged') // 0x4c94c360
 
-// SKIP: TON testnet endpoint (testnet.toncenter.com) is currently unreachable/unusable.
-// These integration tests require live TON testnet connectivity and will be re-enabled
-// once the infrastructure is restored.
-describe.skip('TON index integration tests', () => {
-  let tonChain: TONChain
+const HOUR_S = 3600
+const DAY_S = 86_400
+/** Wall-clock a single fixture scan spends retrying before it fails. */
+const RETRY_SPACING_MS = [5_000, 15_000, 30_000]
 
-  /**
-   * These tests require real TON testnet contract addresses.
-   * Replace these placeholders with real addresses:
-   */
-  const ADDRESSES_TO_ASSERT = {
-    tonOffRamp: 'EQBoGLxL52YDV1OwcaDLcNHyGVOxtcHQDxFb0WqVUQeyRHBd',
-    tonRouter: 'EQDWS-oJCjyrf-6c1wF5eGP7b2qNWn7wUqS3dlNgb_YzKNHG',
-    tonOnRamp: 'EQC-GtbjW4hz_gXOiBOxT0_Jj-EYkI_zjQ-H8VyYHH9fbSd6',
-    evmOnramp: '0xa36871bde0f98b84066405462e4a9709fb71c905',
+/** Transport degradation (throttling, 5xx, network blips, a mid-stream index
+ * self-contradiction) — retried. Anything else is a bug and fails at once. */
+function isTransient(err: unknown): boolean {
+  if (err instanceof CCIPError) return err.isTransient
+  // AxiosError from @ton/ton's HttpApi: the response status is the verdict.
+  const status = Number((err as { response?: { status?: unknown } } | null)?.response?.status)
+  if (status > 0) return isTransientHttpStatus(status)
+  return /\b(429|rate.?limit|timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|fetch failed|socket)/i.test(
+    String((err as Error | null)?.message),
+  )
+}
+
+/**
+ * Runs `scan` until it yields a fixture, retrying transient errors and empty results
+ * with growing spacing. A scan that keeps finding nothing — or keeps failing — fails
+ * the test with the last reason: a live suite must never pass by skipping.
+ */
+async function firstMatch<T>(what: string, scan: () => Promise<T | undefined>): Promise<T> {
+  let last: unknown
+  for (let attempt = 0; attempt <= RETRY_SPACING_MS.length; attempt++) {
+    try {
+      const found = await scan()
+      if (found !== undefined) return found
+      last = new Error(`none found (${what})`)
+    } catch (err) {
+      if (!isTransient(err)) throw err
+      last = err
+    }
+    if (attempt < RETRY_SPACING_MS.length) await sleep(RETRY_SPACING_MS[attempt]!)
   }
+  assert.fail(
+    `${what}: gave up after ${RETRY_SPACING_MS.length + 1} attempts; last: ${
+      last instanceof Error ? last.message : JSON.stringify(last)
+    }`,
+  )
+}
 
-  // TON testnet endpoint (v2 API for TonClient)
-  const TON_TESTNET_RPC = 'https://testnet.toncenter.com/api/v2'
+describe('TON index integration tests (live testnet)', { skip }, () => {
+  let chain: TONChain
+  /** Recent-message fixture: the first TON -> sepolia send of the last two days. */
+  let message$: Promise<{ log: ChainLog; message: CCIPMessage_V1_6_EVM }> | undefined
+  let router$: Promise<string> | undefined
+  let offRamp$: Promise<string> | undefined
+  let commit$:
+    | Promise<{
+        log: ChainLog
+        report: NonNullable<ReturnType<typeof TONChain.decodeCommits>>[number]
+      }>
+    | undefined
+  let receipt$:
+    | Promise<{ log: ChainLog; receipt: NonNullable<ReturnType<typeof TONChain.decodeReceipt>> }>
+    | undefined
 
-  // Chain selectors
-  const SEPOLIA_CHAIN_SELECTOR = 16015286601757825753n
-  const TON_TESTNET_CHAIN_SELECTOR = 1399300952838017768n
+  const recentStart = (ageS: number) => Math.floor(Date.now() / 1e3) - ageS
+
+  const messageFixture = () =>
+    (message$ ??= firstMatch('a TON -> sepolia CCIPMessageSent in the last 2 days', async () => {
+      for await (const log of chain.getLogs({
+        address: ONRAMP,
+        topics: ['CCIPMessageSent'],
+        startTime: recentStart(2 * DAY_S),
+      })) {
+        const message = TONChain.decodeMessage(log) as CCIPMessage_V1_6_EVM | undefined
+        if (message?.destChainSelector === SEPOLIA_CHAIN_SELECTOR) return { log, message }
+      }
+      return undefined
+    }))
+
+  const routerFixture = () =>
+    (router$ ??= firstMatch('the OnRamp router', () =>
+      chain.getRouterForOnRamp(ONRAMP, SEPOLIA_CHAIN_SELECTOR),
+    ))
+
+  const offRampFixture = () =>
+    (offRamp$ ??= firstMatch('an OffRamp allowlisted for sepolia on the router', async () => {
+      const offRamps = await chain.getOffRampsForRouter(
+        await routerFixture(),
+        SEPOLIA_CHAIN_SELECTOR,
+      )
+      return offRamps[0]
+    }))
+
+  const commitFixture = () =>
+    (commit$ ??= firstMatch('a sepolia CommitReportAccepted in the last 12h', async () => {
+      for await (const log of chain.getLogs({
+        address: await offRampFixture(),
+        topics: ['CommitReportAccepted'],
+        startTime: recentStart(12 * HOUR_S),
+      })) {
+        const report = TONChain.decodeCommits(log)?.find(
+          (r) => r.sourceChainSelector === SEPOLIA_CHAIN_SELECTOR,
+        )
+        if (report) return { log, report }
+      }
+      return undefined
+    }))
+
+  const receiptFixture = () =>
+    (receipt$ ??= firstMatch('a sepolia ExecutionStateChanged in the last 12h', async () => {
+      for await (const log of chain.getLogs({
+        address: await offRampFixture(),
+        topics: ['ExecutionStateChanged'],
+        startTime: recentStart(12 * HOUR_S),
+      })) {
+        const receipt = TONChain.decodeReceipt(log)
+        if (receipt?.sourceChainSelector === SEPOLIA_CHAIN_SELECTOR) return { log, receipt }
+      }
+      return undefined
+    }))
 
   before(async () => {
-    tonChain = await TONChain.fromUrl(TON_TESTNET_RPC)
+    chain = await TONChain.fromUrl(TON_TESTNET_RPC, { logger: LOGGER })
   })
+  after(() => chain.destroy())
+
   describe('RPC connectivity', () => {
     it('should create TONChain from URL', async () => {
       const chain = await TONChain.fromUrl(TON_TESTNET_RPC)
@@ -54,271 +182,129 @@ describe.skip('TON index integration tests', () => {
   })
 
   describe('OnRamp bindings', () => {
-    it('TONChain.getRouterForOnRamp should return router address from OnRamp', async () => {
-      const router = await tonChain.getRouterForOnRamp(
-        ADDRESSES_TO_ASSERT.tonOnRamp,
-        SEPOLIA_CHAIN_SELECTOR,
-      )
+    it('TONChain.getRouterForOnRamp should return a Router address', async () => {
+      const router = await routerFixture()
       assert.ok(router, 'Should return router address')
-
-      // Verify it matches the expected router
-      assert.equal(
-        Address.parse(router).toRawString(),
-        Address.parse(ADDRESSES_TO_ASSERT.tonRouter).toRawString(),
-        'Should match expected router address',
-      )
+      // The value is a TON address the chain can read a typeAndVersion from.
+      const [type, version] = await chain.typeAndVersion(router)
+      assert.equal(type, 'Router', 'Should be a Router contract')
+      assert.match(version, /^\d+\.\d+\.\d+/, 'Version should be semver format')
     })
   })
 
   describe('OffRamp bindings', () => {
-    it('TONChain.getRouterForOffRamp should get router address from OffRamp sourceChainConfig', async () => {
-      const router = await tonChain.getRouterForOffRamp(
-        ADDRESSES_TO_ASSERT.tonOffRamp,
-        SEPOLIA_CHAIN_SELECTOR,
-      )
+    it('TONChain.getRouterForOffRamp should get the router from the OffRamp config', async () => {
+      const router = await chain.getRouterForOffRamp(await offRampFixture(), SEPOLIA_CHAIN_SELECTOR)
       assert.ok(router, 'Should return router address')
-
-      // Verify it matches the expected router
-      assert.equal(
-        Address.parse(router).toRawString(),
-        Address.parse(ADDRESSES_TO_ASSERT.tonRouter).toRawString(),
-        'Should match expected router address',
-      )
+      assert.doesNotThrow(() => Address.parse(router), 'Should be a parseable TON address')
     })
 
-    it('TONChain.getOnRampsForOffRamp should return source chain onRamp address', async () => {
-      const [onRamp] = await tonChain.getOnRampsForOffRamp(
-        ADDRESSES_TO_ASSERT.tonOffRamp,
+    it('TONChain.getOnRampsForOffRamp should return source chain onRamp addresses', async () => {
+      const onRamps = await chain.getOnRampsForOffRamp(
+        await offRampFixture(),
         SEPOLIA_CHAIN_SELECTOR,
       )
-      assert.ok(onRamp, 'Should return onRamp address')
-
-      // The onRamp is on the source chain, so it should be an EVM address
-      assert.match(onRamp, /^0x[a-fA-F0-9]{40}$/, 'Should be a valid EVM address format')
-
-      // Verify it matches the expected EVM OnRamp
-      assert.equal(
-        onRamp.toLowerCase(),
-        ADDRESSES_TO_ASSERT.evmOnramp.toLowerCase(),
-        'Should match expected EVM OnRamp address',
-      )
+      assert.ok(onRamps.length > 0, 'Should return at least one onRamp')
+      // The onRamps are on the source chain, so they are EVM addresses.
+      for (const onRamp of onRamps) assert.match(onRamp, /^0x[a-fA-F0-9]{40}$/)
     })
   })
 
   describe('Router bindings', () => {
-    it('TONChain.getOffRampsForRouter should return offRamps for source chain', async () => {
-      const offRamps = await tonChain.getOffRampsForRouter(
-        ADDRESSES_TO_ASSERT.tonRouter,
-        SEPOLIA_CHAIN_SELECTOR,
-      )
+    it('TONChain.getOffRampsForRouter should return offRamps for the source chain', async () => {
+      const router = await routerFixture()
+      const offRamps = await chain.getOffRampsForRouter(router, SEPOLIA_CHAIN_SELECTOR)
 
       assert.ok(Array.isArray(offRamps), 'Should return an array')
       assert.ok(offRamps.length > 0, 'Should find at least one OffRamp')
-
-      // Verify the known offRamp is in the list
-      const expectedOffRamp = Address.parse(ADDRESSES_TO_ASSERT.tonOffRamp).toRawString()
       assert.ok(
-        offRamps.includes(expectedOffRamp),
-        `Should include the known OffRamp address: got=[${offRamps.join(', ')}] expected=${expectedOffRamp}`,
+        offRamps.includes(await offRampFixture()),
+        `Should include the offRamp the scans use: got=[${offRamps.join(', ')}]`,
       )
     })
-    it('TONChain.getOnRampForRouter should return onRamp for destination chain', async () => {
-      const onRamp = await tonChain.getOnRampForRouter(
-        ADDRESSES_TO_ASSERT.tonRouter,
-        SEPOLIA_CHAIN_SELECTOR,
-      )
-      assert.ok(onRamp, 'Should return onRamp address')
 
-      // Verify it matches the expected onRamp
+    it('TONChain.getOnRampForRouter should return the onRamp for the destination chain', async () => {
+      const onRamp = await chain.getOnRampForRouter(await routerFixture(), SEPOLIA_CHAIN_SELECTOR)
       assert.equal(
         Address.parse(onRamp).toRawString(),
-        Address.parse(ADDRESSES_TO_ASSERT.tonOnRamp).toRawString(),
-        'Should match expected onRamp address',
+        Address.parse(ONRAMP).toRawString(),
+        'Should match the lane onRamp',
       )
     })
   })
 
   describe('getLogs', () => {
-    it('should find logs for OnRamp address with valid structure', async () => {
-      const logs: any[] = []
+    it('should return well-formed logs for the OnRamp', async () => {
+      const { log } = await messageFixture()
 
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        page: 10,
+      assert.ok(log.address, 'log should have address')
+      assert.equal(typeof log.data, 'string', 'log data should be a base64 BOC string')
+      assert.ok((log.data as string).length > 0, 'log data should not be empty')
+      assert.ok(log.blockNumber > 0, 'log should have positive blockNumber')
+      assert.ok(log.transactionHash.includes(':'), 'transactionHash should be composite format')
+      assert.equal(log.transactionHash.split(':').length, 4, 'composite hash has 4 parts')
+      assert.equal(typeof log.index, 'number', 'log should have numeric index')
+      assert.ok(Array.isArray(log.topics), 'log should have topics array')
+      assert.equal(log.topics[0], CCIP_MESSAGE_SENT_TOPIC, 'topics[0] should be CCIPMessageSent')
+    })
+
+    it('should respect the endBlock filter', async () => {
+      const { log } = await messageFixture()
+      const endBlock = log.blockNumber
+
+      const logs: ChainLog[] = []
+      for await (const found of chain.getLogs({
+        address: ONRAMP,
+        topics: ['CCIPMessageSent'],
+        startTime: recentStart(2 * DAY_S),
+        endBlock,
       })) {
-        logs.push(log)
+        logs.push(found)
         if (logs.length >= 3) break
       }
 
-      assert.ok(logs.length > 0, 'Should find at least one log')
-
-      // Verify log structure
-      const log = logs[0]
-      assert.ok(log.address, 'log should have address')
-      assert.ok(log.data, 'log should have data')
-      assert.ok(typeof log.data === 'string', 'log data should be base64 string')
-      assert.ok(log.blockNumber > 0, 'log should have positive blockNumber')
-      assert.ok(log.transactionHash, 'log should have transactionHash')
-      assert.ok(log.transactionHash.includes(':'), 'transactionHash should be composite format')
-      assert.ok(typeof log.index === 'number', 'log should have numeric index')
-      assert.ok(Array.isArray(log.topics), 'log should have topics array')
-
-      // Topics contain CRC32 hex value for CCIP messages
-      if (log.topics.length > 0) {
-        assert.equal(
-          log.topics[0],
-          CCIP_MESSAGE_SENT_TOPIC,
-          'topics[0] should be CCIPMessageSent CRC32',
-        )
-      }
-
-      // Verify ascending order if we have multiple logs
-      if (logs.length > 1) {
-        for (let i = 1; i < logs.length; i++) {
-          assert.ok(
-            logs[i - 1].blockNumber <= logs[i].blockNumber,
-            'Logs should be in ascending order by blockNumber',
-          )
-        }
-      }
-    })
-
-    it('should find logs for OffRamp address', async () => {
-      const logs: any[] = []
-
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOffRamp,
-        startBlock: 0,
-        page: 10,
-      })) {
-        logs.push(log)
-        if (logs.length >= 1) break
-      }
-
-      assert.ok(logs.length > 0, 'Should find at least one log for OffRamp')
-    })
-
-    it('should paginate through multiple transactions', async () => {
-      const logs: any[] = []
-      const seenTxHashes = new Set<string>()
-
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        page: 5,
-      })) {
-        logs.push(log)
-        seenTxHashes.add(log.transactionHash)
-        // Stop early once we've seen multiple txs
-        if (seenTxHashes.size >= 3) break
-      }
-
-      assert.ok(seenTxHashes.size > 1, 'Should retrieve logs from multiple transactions')
-    })
-
-    it('should respect endBlock filter', async () => {
-      // First, get a couple of logs to determine a valid block range
-      const recentLogs: any[] = []
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        page: 5,
-      })) {
-        recentLogs.push(log)
-        if (recentLogs.length >= 3) break
-      }
-
-      assert.ok(recentLogs.length >= 2, 'Need at least 2 logs to test filtering')
-
-      // Use the highest block from fetched logs.
-      const highBlock = Math.max(...recentLogs.map((log) => log.blockNumber))
-
-      // Test endBlock: should only get logs <= endBlock.
-      const logsWithEndBlock: any[] = []
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        endBlock: highBlock,
-        page: 10,
-      })) {
-        logsWithEndBlock.push(log)
-        if (logsWithEndBlock.length >= 3) break
-      }
-
-      assert.ok(logsWithEndBlock.length > 0, 'Should find logs with endBlock filter')
-
-      for (const log of logsWithEndBlock) {
+      assert.ok(logs.length > 0, 'Should find logs with endBlock filter')
+      for (const found of logs) {
         assert.ok(
-          log.blockNumber <= highBlock,
-          `log.blockNumber ${log.blockNumber} should be <= endBlock ${highBlock}`,
+          found.blockNumber <= endBlock,
+          `log.blockNumber ${found.blockNumber} should be <= endBlock ${endBlock}`,
         )
       }
     })
   })
 
   describe('decodeMessage', () => {
-    let message: CCIPMessage<typeof CCIPVersion.V1_6> | undefined
-    let ccipTxHash: string | undefined
-    let messageLog: any
+    let message: CCIPMessage_V1_6_EVM
+    let messageLog: ChainLog
 
     before(async () => {
-      // Fetch a real CCIPMessageSent log from OnRamp
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        page: 10,
-      })) {
-        const decoded = TONChain.decodeMessage(log)
-        if (decoded) {
-          message = decoded
-          ccipTxHash = log.transactionHash
-          messageLog = log
-          break
-        }
-      }
+      ;({ message, log: messageLog } = await messageFixture())
     })
 
-    it('should have CCIPMessageSent CRC32 as topics[0]', () => {
-      assert.ok(messageLog, 'Should have found a message log')
-      assert.ok(messageLog.topics.length > 0, 'topics should not be empty')
-      assert.equal(
-        messageLog.topics[0],
-        CCIP_MESSAGE_SENT_TOPIC,
-        'topics[0] should be CCIPMessageSent CRC32',
-      )
-    })
-
-    it('should decode CCIPMessageSent from transaction log', () => {
+    it('should decode CCIPMessageSent from the transaction log', () => {
       assert.ok(message, 'Should successfully decode message')
-      assert.ok(ccipTxHash, 'Should have found a valid transaction')
+      assert.ok(messageLog.transactionHash, 'Should have found a valid transaction')
     })
 
     it('should decode messageId as 32-byte hex', () => {
-      assert.ok(message)
       assert.ok(message.messageId.startsWith('0x'), 'messageId should be hex prefixed')
-      assert.equal(message.messageId.length, 66, 'messageId should be 32 bytes (66 chars with 0x)')
-      assert.match(message.messageId, /^0x[a-f0-9]{64}$/, 'messageId should be valid hex')
+      assert.match(message.messageId, /^0x[a-f0-9]{64}$/, 'messageId should be 32 bytes')
     })
 
     it('should decode sourceChainSelector as TON testnet', () => {
-      assert.ok(message)
       assert.equal(message.sourceChainSelector, TON_TESTNET_CHAIN_SELECTOR)
     })
 
     it('should decode destChainSelector as Sepolia', () => {
-      assert.ok(message)
       assert.equal(message.destChainSelector, SEPOLIA_CHAIN_SELECTOR)
     })
 
     it('should decode sequenceNumber as positive bigint', () => {
-      assert.ok(message)
       assert.equal(typeof message.sequenceNumber, 'bigint')
       assert.ok(message.sequenceNumber > 0n, 'sequenceNumber should be positive')
     })
 
     it('should decode nonce as bigint (typically 0 for out-of-order)', () => {
-      assert.ok(message)
       assert.equal(typeof message.nonce, 'bigint')
       // nonce is 0 when allowOutOfOrderExecution is true
       if (message.allowOutOfOrderExecution) {
@@ -326,23 +312,16 @@ describe.skip('TON index integration tests', () => {
       }
     })
 
-    it('should decode sender as TON user-friendly address', () => {
-      assert.ok(message)
-      // TON user-friendly addresses start with EQ (mainnet) or kQ/0Q (testnet bounceable/non-bounceable)
-      assert.match(
-        message.sender,
-        /^(EQ|UQ|kQ|0Q)[A-Za-z0-9_-]{46}$/,
-        'sender should be TON user-friendly address',
-      )
-      // Verify it's a valid address by parsing
+    it('should decode sender as a TON address', () => {
+      // The body carries the sender in canonical raw form ("workchain:hash").
+      assert.ok(message.sender.length > 0, 'sender should be set')
       assert.doesNotThrow(
-        () => Address.parse(message!.sender),
+        () => Address.parse(message.sender),
         'sender should be parseable TON address',
       )
     })
 
     it('should decode receiver as checksummed EVM address', () => {
-      assert.ok(message)
       assert.ok(message.receiver.startsWith('0x'), 'receiver should be hex prefixed')
       // Receiver should be a checksummed 20-byte EVM address (42 chars with 0x prefix)
       assert.equal(message.receiver.length, 42, 'receiver should be 20 bytes (42 chars with 0x)')
@@ -350,15 +329,12 @@ describe.skip('TON index integration tests', () => {
     })
 
     it('should decode data as hex bytes', () => {
-      assert.ok(message)
       assert.ok(message.data.startsWith('0x'), 'data should be hex prefixed')
       assert.match(message.data, /^0x([a-f0-9]{2})*$/, 'data should be valid hex bytes')
     })
 
     it('should decode tokenAmounts as array', () => {
-      assert.ok(message)
       assert.ok(Array.isArray(message.tokenAmounts), 'tokenAmounts should be array')
-      // Each token amount should have required fields if present
       for (const ta of message.tokenAmounts) {
         assert.ok('sourcePoolAddress' in ta, 'tokenAmount should have sourcePoolAddress')
         assert.ok('destTokenAddress' in ta, 'tokenAmount should have destTokenAddress')
@@ -366,62 +342,61 @@ describe.skip('TON index integration tests', () => {
     })
 
     it('should decode feeToken as TON address', () => {
-      assert.ok(message)
       assert.ok(message.feeToken, 'feeToken should be present')
       assert.doesNotThrow(
-        () => Address.parse(message!.feeToken),
+        () => Address.parse(message.feeToken),
         'feeToken should be parseable TON address',
       )
     })
 
     it('should decode feeTokenAmount as positive bigint', () => {
-      assert.ok(message)
       assert.equal(typeof message.feeTokenAmount, 'bigint')
       assert.ok(message.feeTokenAmount > 0n, 'feeTokenAmount should be positive')
     })
 
     it('should decode feeValueJuels as positive bigint', () => {
-      assert.ok(message)
       assert.equal(typeof message.feeValueJuels, 'bigint')
       assert.ok(message.feeValueJuels > 0n, 'feeValueJuels should be positive')
     })
 
-    it('should decode extraArgs with EVMExtraArgsV2 tag', () => {
-      assert.ok(message)
-      assert.ok(
-        message.extraArgs.startsWith('0x181dcf10'),
-        'extraArgs should have EVMExtraArgsV2 tag (0x181dcf10)',
+    it('should decode extraArgs as a BOC carrying EVMExtraArgsV2', () => {
+      // The wire format is a serialized cell graph (BOC), not a bare tag+fields.
+      assert.match(message.extraArgs, /^0x([a-f0-9]{2})+$/, 'extraArgs should be hex bytes')
+      const decoded = TONChain.decodeExtraArgs(message.extraArgs)
+      assert.ok(decoded, 'extraArgs should decode')
+      assert.equal(decoded._tag, 'EVMExtraArgsV2', 'dest is an EVM chain')
+      assert.equal(
+        decoded.gasLimit,
+        (message as { gasLimit?: bigint }).gasLimit,
+        'extraArgs gasLimit should match the decoded message',
       )
-      // EVMExtraArgsV2 tag (4 bytes) + gasLimit (32 bytes) + allowOutOfOrderExecution (1 byte) = 37 bytes = 74 hex chars + 2 for 0x
-      assert.equal(message.extraArgs.length, 76, 'extraArgs should be 37 bytes for EVMExtraArgsV2')
     })
 
     it('should decode gasLimit as positive bigint', () => {
-      assert.ok(message)
       assert.ok('gasLimit' in message, 'message should have gasLimit property')
-      assert.equal(typeof (message as CCIPMessage_V1_6_EVM).gasLimit, 'bigint')
-      assert.ok((message as CCIPMessage_V1_6_EVM).gasLimit > 0n, 'gasLimit should be positive')
-      assert.ok(
-        (message as CCIPMessage_V1_6_EVM).gasLimit >= 100_000n,
-        'gasLimit should be at least 100k for cross-chain calls',
-      )
+      const { gasLimit } = message as { gasLimit: bigint }
+      assert.equal(typeof gasLimit, 'bigint')
+      assert.ok(gasLimit > 0n, 'gasLimit should be positive')
     })
 
     it('should decode allowOutOfOrderExecution as boolean', () => {
-      assert.ok(message)
       assert.equal(typeof message.allowOutOfOrderExecution, 'boolean')
     })
 
     it('should return undefined for invalid inputs', () => {
-      assert.equal(TONChain.decodeMessage({ data: '' }), undefined, 'empty string')
-      assert.equal(TONChain.decodeMessage({ data: undefined as any }), undefined, 'undefined')
+      assert.equal(TONChain.decodeMessage({ data: '' } as ChainLog), undefined, 'empty string')
       assert.equal(
-        TONChain.decodeMessage({ data: 'not-valid-base64!!!' }),
+        TONChain.decodeMessage({ data: undefined as unknown as string } as ChainLog),
+        undefined,
+        'undefined',
+      )
+      assert.equal(
+        TONChain.decodeMessage({ data: 'not-valid-base64!!!' } as ChainLog),
         undefined,
         'invalid base64',
       )
       assert.equal(
-        TONChain.decodeMessage({ data: 'SGVsbG8gV29ybGQ=' }),
+        TONChain.decodeMessage({ data: 'SGVsbG8gV29ybGQ=' } as ChainLog),
         undefined,
         'valid base64 but not BOC',
       )
@@ -429,189 +404,142 @@ describe.skip('TON index integration tests', () => {
   })
 
   describe('decodeCommits', () => {
-    let commitLog: any
-    let commitReport: ReturnType<typeof TONChain.decodeCommits>
+    let commitLog: ChainLog
+    let commitReport: NonNullable<ReturnType<typeof TONChain.decodeCommits>>
 
     before(async () => {
-      // Fetch a real CommitReportAccepted log from OffRamp
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOffRamp,
-        startBlock: 0,
-        topics: ['CommitReportAccepted'],
-        page: 20,
-      })) {
-        const decoded = TONChain.decodeCommits(log)
-        if (decoded && decoded.length > 0) {
-          commitLog = log
-          commitReport = decoded
-          break
-        }
-      }
+      ;({ log: commitLog } = await commitFixture())
+      commitReport = TONChain.decodeCommits(commitLog) ?? []
     })
 
     it('should return undefined for invalid inputs', () => {
-      assert.equal(TONChain.decodeCommits({ data: '' } as any), undefined, 'empty data')
-      assert.equal(TONChain.decodeCommits({ data: undefined } as any), undefined, 'undefined data')
+      assert.equal(TONChain.decodeCommits({ data: '' } as ChainLog), undefined, 'empty data')
       assert.equal(
-        TONChain.decodeCommits({ data: 'not-valid-base64!!!' } as any),
+        TONChain.decodeCommits({ data: undefined } as unknown as ChainLog),
+        undefined,
+        'undefined data',
+      )
+      assert.equal(
+        TONChain.decodeCommits({ data: 'not-valid-base64!!!' } as ChainLog),
         undefined,
         'invalid base64',
       )
     })
 
     it('should return undefined for non-commit BOC data', async () => {
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        page: 1,
-      })) {
-        assert.equal(
-          TONChain.decodeCommits(log),
-          undefined,
-          'CCIPMessageSent should not decode as commit',
-        )
-        break
-      }
-    })
-    it('should have CommitReportAccepted CRC32 as topics[0]', () => {
-      assert.ok(commitLog, 'Should have found a commit log')
-      assert.ok(commitLog.topics.length > 0, 'topics should not be empty')
+      const { log } = await messageFixture()
       assert.equal(
-        commitLog.topics[0],
-        COMMIT_REPORT_ACCEPTED_TOPIC,
-        'topics[0] should be CommitReportAccepted CRC32',
+        TONChain.decodeCommits(log),
+        undefined,
+        'CCIPMessageSent should not decode as commit',
       )
     })
 
-    it('should decode commit report with correct lane info', () => {
-      assert.ok(commitReport && commitReport.length > 0, 'Should decode commit report')
-      const commit = commitReport[0]!
+    it('should have CommitReportAccepted CRC32 as topics[0]', () => {
+      assert.ok(commitLog.topics.length > 0, 'topics should not be empty')
+      assert.equal(commitLog.topics[0], COMMIT_REPORT_ACCEPTED_TOPIC)
+    })
 
-      // Lane identification
-      assert.equal(commit.sourceChainSelector, SEPOLIA_CHAIN_SELECTOR)
-      assert.equal(commit.onRampAddress.toLowerCase(), ADDRESSES_TO_ASSERT.evmOnramp.toLowerCase())
+    it('should decode commit reports with correct lane info', () => {
+      assert.ok(commitReport.length > 0, 'Should decode commit report')
+      const report = commitReport[0]!
+      assert.equal(report.sourceChainSelector, SEPOLIA_CHAIN_SELECTOR)
+      assert.match(
+        report.onRampAddress,
+        /^0x[a-fA-F0-9]{40}$/,
+        'onRampAddress should be an EVM address',
+      )
     })
 
     it('should decode valid sequence number range', () => {
-      assert.ok(commitReport && commitReport.length > 0)
-      const commit = commitReport[0]!
-
-      assert.ok(commit.minSeqNr > 0n, 'minSeqNr should be positive')
-      assert.ok(commit.maxSeqNr >= commit.minSeqNr, 'maxSeqNr >= minSeqNr')
+      const report = commitReport[0]!
+      assert.ok(report.minSeqNr > 0n, 'minSeqNr should be positive')
+      assert.ok(report.maxSeqNr >= report.minSeqNr, 'maxSeqNr >= minSeqNr')
     })
 
     it('should decode valid merkleRoot', () => {
-      assert.ok(commitReport && commitReport.length > 0)
-      const commit = commitReport[0]!
-
-      assert.match(commit.merkleRoot, /^0x[a-f0-9]{64}$/, 'merkleRoot should be 32-byte hex')
+      const report = commitReport[0]!
+      assert.match(report.merkleRoot, /^0x[a-f0-9]{64}$/, 'merkleRoot should be 32-byte hex')
     })
 
     it('should filter commits by lane', () => {
-      assert.ok(commitLog)
-      assert.ok(commitReport && commitReport.length > 0, 'Should have decoded commit report')
-
-      // Get the actual onRamp address from the decoded report (checksummed format)
-      const actualOnRamp = commitReport[0]!.onRampAddress
-
-      // Matching lane returns commits (use the actual checksummed onRamp address)
-      const match = TONChain.decodeCommits(commitLog, {
+      const lane: Lane = {
         sourceChainSelector: SEPOLIA_CHAIN_SELECTOR,
-        onRamp: actualOnRamp,
-      } as any)
+        destChainSelector: TON_TESTNET_CHAIN_SELECTOR,
+        onRamp: commitReport[0]!.onRampAddress,
+        version: CCIPVersion.V1_6,
+      }
+
+      // Matching lane returns commits
+      const match = TONChain.decodeCommits(commitLog, lane)
       assert.ok(match && match.length > 0, 'Should return commits for matching lane')
 
       // Wrong selector returns undefined
       const wrongSelector = TONChain.decodeCommits(commitLog, {
+        ...lane,
         sourceChainSelector: 123n,
-        onRamp: actualOnRamp,
-      } as any)
+      })
       assert.equal(wrongSelector, undefined, 'Wrong sourceChainSelector should return undefined')
 
       // Wrong onRamp returns undefined
       const wrongOnRamp = TONChain.decodeCommits(commitLog, {
-        sourceChainSelector: SEPOLIA_CHAIN_SELECTOR,
+        ...lane,
         onRamp: '0x0000000000000000000000000000000000000000',
-      } as any)
+      })
       assert.equal(wrongOnRamp, undefined, 'Wrong onRamp should return undefined')
     })
   })
 
   describe('decodeReceipt', () => {
-    let receiptLog: any
-    let receipt: ReturnType<typeof TONChain.decodeReceipt>
+    let receiptLog: ChainLog
+    let receipt: NonNullable<ReturnType<typeof TONChain.decodeReceipt>>
 
     before(async () => {
-      // Fetch a real ExecutionStateChanged log from OffRamp
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOffRamp,
-        startBlock: 0,
-        topics: ['ExecutionStateChanged'],
-        page: 20,
-      })) {
-        const decoded = TONChain.decodeReceipt(log)
-        if (decoded) {
-          receiptLog = log
-          receipt = decoded
-          break
-        }
-      }
+      ;({ log: receiptLog, receipt } = await receiptFixture())
     })
 
     it('should return undefined for invalid inputs', () => {
-      assert.equal(TONChain.decodeReceipt({ data: '' } as any), undefined, 'empty data')
-      assert.equal(TONChain.decodeReceipt({ data: undefined } as any), undefined, 'undefined data')
+      assert.equal(TONChain.decodeReceipt({ data: '' } as ChainLog), undefined, 'empty data')
       assert.equal(
-        TONChain.decodeReceipt({ data: 'not-valid-base64!!!' } as any),
+        TONChain.decodeReceipt({ data: undefined } as unknown as ChainLog),
+        undefined,
+        'undefined data',
+      )
+      assert.equal(
+        TONChain.decodeReceipt({ data: 'not-valid-base64!!!' } as ChainLog),
         undefined,
         'invalid base64',
       )
     })
 
     it('should return undefined for non-receipt BOC data', async () => {
-      // Fetch CCIPMessageSent logs from OnRamp - these should NOT decode as receipts
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        page: 1,
-      })) {
-        assert.equal(
-          TONChain.decodeReceipt(log),
-          undefined,
-          'CCIPMessageSent should not decode as receipt',
-        )
-        break
-      }
-    })
-
-    it('should have ExecutionStateChanged CRC32 as topics[0]', () => {
-      assert.ok(receiptLog, 'Should have found a receipt log')
-      assert.ok(receiptLog.topics.length > 0, 'topics should not be empty')
+      const { log } = await messageFixture()
       assert.equal(
-        receiptLog.topics[0],
-        EXECUTION_STATE_CHANGED_TOPIC,
-        'topics[0] should be ExecutionStateChanged CRC32',
+        TONChain.decodeReceipt(log),
+        undefined,
+        'CCIPMessageSent should not decode as receipt',
       )
     })
 
+    it('should have ExecutionStateChanged CRC32 as topics[0]', () => {
+      assert.ok(receiptLog.topics.length > 0, 'topics should not be empty')
+      assert.equal(receiptLog.topics[0], EXECUTION_STATE_CHANGED_TOPIC)
+    })
+
     it('should decode receipt with valid sourceChainSelector', () => {
-      assert.ok(receipt, 'Should decode receipt')
       assert.equal(receipt.sourceChainSelector, SEPOLIA_CHAIN_SELECTOR)
     })
 
     it('should decode valid sequenceNumber', () => {
-      assert.ok(receipt)
       assert.equal(typeof receipt.sequenceNumber, 'bigint')
       assert.ok(receipt.sequenceNumber > 0n, 'sequenceNumber should be positive')
     })
 
     it('should decode valid messageId', () => {
-      assert.ok(receipt)
       assert.match(receipt.messageId, /^0x[a-f0-9]{64}$/, 'messageId should be 32-byte hex')
     })
 
     it('should decode valid state', () => {
-      assert.ok(receipt)
       assert.ok(
         [0, 1, 2, 3].includes(receipt.state),
         'state should be Untouched(0), InProgress(1), Success(2), or Failure(3)',
@@ -621,7 +549,7 @@ describe.skip('TON index integration tests', () => {
 
   describe('typeAndVersion', () => {
     it('should return valid typeAndVersion for OffRamp', async () => {
-      const result = await tonChain.typeAndVersion(ADDRESSES_TO_ASSERT.tonOffRamp)
+      const result = await chain.typeAndVersion(await offRampFixture())
 
       assert.ok(result.length >= 3, 'Should return at least [type, version, typeAndVersion]')
       assert.equal(result[0], 'OffRamp', 'Type should be OffRamp')
@@ -630,14 +558,14 @@ describe.skip('TON index integration tests', () => {
     })
 
     it('should return valid typeAndVersion for OnRamp', async () => {
-      const result = await tonChain.typeAndVersion(ADDRESSES_TO_ASSERT.tonOnRamp)
+      const result = await chain.typeAndVersion(ONRAMP)
 
       assert.equal(result[0], 'OnRamp', 'Type should be OnRamp')
       assert.match(result[1], /^\d+\.\d+\.\d+/, 'Version should be semver format')
     })
 
     it('should return valid typeAndVersion for Router', async () => {
-      const result = await tonChain.typeAndVersion(ADDRESSES_TO_ASSERT.tonRouter)
+      const result = await chain.typeAndVersion(await routerFixture())
 
       assert.equal(result[0], 'Router', 'Type should be Router')
       assert.match(result[1], /^\d+\.\d+\.\d+/, 'Version should be semver format')
@@ -645,53 +573,17 @@ describe.skip('TON index integration tests', () => {
   })
 
   describe('getTokenInfo', () => {
-    // Test cases covering all TEP-64 metadata formats using mainnet tokens
-    const tokenTestCases = [
-      {
-        name: 'Onchain Metadata Token (BabyDoge)',
-        tokenAddress: 'EQCWDj49HFInSwSk49eAo476E1YBywLoFuSZ6OO3x7jmP2jn',
-        tokenType: 'onchain',
-        expectedSymbol: 'BabyDoge',
-        expectedDecimals: 9,
-      },
-      {
-        name: 'Semichain Metadata Token (USDT)',
-        tokenAddress: 'EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs',
-        tokenType: 'semichain',
-        expectedSymbol: 'USD₮',
-        expectedDecimals: 6,
-      },
-      {
-        name: 'Offchain Metadata Token (SCALE)',
-        tokenAddress: 'EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE',
-        tokenType: 'offchain',
-        expectedSymbol: 'SCALE',
-        expectedDecimals: 9,
-      },
-    ]
+    it('should parse testnet USDT jetton metadata', async () => {
+      // TEP-64 metadata served by the token's data cell, read through get_jetton_data.
+      const result = await chain.getTokenInfo(USDT_TESTNET)
 
-    let mainnetChain: TONChain
-
-    before(async () => {
-      mainnetChain = await TONChain.fromUrl('https://toncenter.com/api/v2')
+      assert.equal(result.symbol, 'USDT', 'symbol mismatch')
+      assert.equal(result.decimals, 6, 'decimals mismatch')
     })
 
-    for (const tc of tokenTestCases) {
-      it(`should parse ${tc.name}`, async () => {
-        const result = await mainnetChain.getTokenInfo(tc.tokenAddress)
-
-        assert.equal(result.symbol, tc.expectedSymbol, `Symbol mismatch for ${tc.tokenType} token`)
-        assert.equal(
-          result.decimals,
-          tc.expectedDecimals,
-          `Decimals mismatch for ${tc.tokenType} token`,
-        )
-      })
-    }
-
     it('should return defaults for non-Jetton contract', async () => {
-      // Use a valid address that doesn't have get_jetton_data (e.g., Router)
-      const result = await tonChain.getTokenInfo(ADDRESSES_TO_ASSERT.tonRouter)
+      // The Router has no get_jetton_data
+      const result = await chain.getTokenInfo(await routerFixture())
 
       assert.equal(result.symbol, '', 'Should return default symbol')
       assert.equal(result.decimals, 9, 'Should return default decimals')
@@ -699,7 +591,7 @@ describe.skip('TON index integration tests', () => {
 
     it('should throw for invalid address format', async () => {
       await assert.rejects(
-        () => tonChain.getTokenInfo('invalid-address'),
+        () => chain.getTokenInfo('invalid-address'),
         /Unknown address type|Invalid address/i,
         'Should throw for invalid address',
       )
@@ -710,71 +602,19 @@ describe.skip('TON index integration tests', () => {
     let knownTxHash: string
 
     before(async () => {
-      // Get a known transaction hash from logs
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        page: 1,
-      })) {
-        knownTxHash = log.transactionHash
-        break
-      }
+      ;({
+        log: { transactionHash: knownTxHash },
+      } = await messageFixture())
     })
 
     it('should fetch transaction by composite hash', async () => {
-      assert.ok(knownTxHash, 'Should have a known transaction hash from logs')
-
-      const tx = await tonChain.getTransaction(knownTxHash)
+      const tx = await chain.getTransaction(knownTxHash)
 
       assert.equal(tx.hash, knownTxHash)
       assert.ok(tx.blockNumber > 0, 'blockNumber should be positive')
       assert.ok(tx.timestamp > 0, 'timestamp should be positive')
       assert.ok(Array.isArray(tx.logs), 'logs should be an array')
-    })
-
-    it('should fetch transaction by raw 64-char hex hash via TonCenter', async () => {
-      assert.ok(knownTxHash, 'Should have a known transaction hash from logs')
-
-      // Extract the raw hash (last part of composite format)
-      const parts = knownTxHash.split(':')
-      assert.equal(parts.length, 4, 'Should have 4 parts in composite hash')
-      const rawHash = parts[3]!
-
-      // Lookup by raw hash should resolve via TonCenter V3 API
-      const tx = await tonChain.getTransaction(rawHash)
-
-      // Should resolve to the same transaction
-      assert.equal(
-        tx.hash.toLowerCase(),
-        knownTxHash.toLowerCase(),
-        'Should resolve to same composite hash',
-      )
-      assert.ok(tx.blockNumber > 0, 'blockNumber should be positive')
-    })
-
-    it('should fetch transaction by 0x-prefixed raw hash', async () => {
-      assert.ok(knownTxHash)
-
-      const parts = knownTxHash.split(':')
-      const rawHash = `0x${parts[3]}`
-
-      const tx = await tonChain.getTransaction(rawHash)
-
-      assert.equal(
-        tx.hash.toLowerCase(),
-        knownTxHash.toLowerCase(),
-        'Should resolve to same composite hash',
-      )
-    })
-
-    it('should return logs with valid structure', async () => {
-      assert.ok(knownTxHash)
-
-      const tx = await tonChain.getTransaction(knownTxHash)
-
-      // OnRamp transactions should have external-out messages (CCIPMessageSent events)
-      if (tx.logs.length > 0) {
-        const log = tx.logs[0]!
+      for (const log of tx.logs) {
         assert.ok(log.address, 'log should have address')
         assert.ok(log.data, 'log should have data')
         assert.equal(log.transactionHash, knownTxHash, 'log transactionHash should match')
@@ -782,19 +622,34 @@ describe.skip('TON index integration tests', () => {
       }
     })
 
-    it('should throw for non-existent transaction', async () => {
-      const fakeHash = `0:${'a'.repeat(64)}:999999999999:${'b'.repeat(64)}`
+    it('should fetch transaction by raw 64-char hex hash via TonCenter', async () => {
+      const parts = knownTxHash.split(':')
+      assert.equal(parts.length, 4, 'Should have 4 parts in composite hash')
+      const rawHash = parts[3]!
 
-      await assert.rejects(
-        tonChain.getTransaction(fakeHash),
-        /not found|Request failed|500/i,
-        'Should throw for non-existent transaction',
+      // The raw hash resolves through the TonCenter V3 index, which lags the v2
+      // tip — a miss right after the send is transient, not a wrong hash.
+      const tx = await firstMatch('the transaction by raw hash', () =>
+        chain.getTransaction(rawHash),
       )
+
+      assert.equal(tx.hash, knownTxHash, 'Should resolve to same composite hash')
+      assert.ok(tx.blockNumber > 0, 'blockNumber should be positive')
+    })
+
+    it('should fetch transaction by 0x-prefixed raw hash', async () => {
+      const rawHash = `0x${knownTxHash.split(':')[3]!}`
+
+      const tx = await firstMatch('the transaction by 0x-prefixed raw hash', () =>
+        chain.getTransaction(rawHash),
+      )
+
+      assert.equal(tx.hash, knownTxHash, 'Should resolve to same composite hash')
     })
 
     it('should throw for invalid hash format', async () => {
       await assert.rejects(
-        tonChain.getTransaction('invalid-format'),
+        chain.getTransaction('invalid-format'),
         /Invalid TON transaction hash format/,
         'Should throw for invalid format',
       )
@@ -803,58 +658,23 @@ describe.skip('TON index integration tests', () => {
 
   describe('getBlockTimestamp', () => {
     it('should return timestamp for finalized block', async () => {
-      const timestamp = await tonChain.getBlockTimestamp('finalized')
+      const timestamp = await chain.getBlockTimestamp('finalized')
       assert.ok(timestamp > 0, 'timestamp should be positive')
     })
 
     it('should return cached timestamp after getLogs', async () => {
-      // First, get a log to populate the cache
-      let logLt: number | undefined
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        page: 1,
-      })) {
-        logLt = log.blockNumber
-        break
-      }
+      const { log } = await messageFixture()
 
-      assert.ok(logLt, 'Should have found a log')
-
-      // Now getBlockTimestamp should work for that lt
-      const timestamp = await tonChain.getBlockTimestamp(logLt)
+      // The scan cached the masterchain timestamp of each emitted block.
+      const timestamp = await chain.getBlockTimestamp(log.blockNumber)
       assert.ok(timestamp > 0, 'timestamp should be positive')
-    })
-
-    it('should throw for uncached lt', async () => {
-      const fakeLt = 999999999999999
-
-      await assert.rejects(
-        () => tonChain.getBlockTimestamp(fakeLt),
-        /not in cache/i,
-        'Should throw for uncached lt',
-      )
     })
   })
 
   describe('getMessagesInTx', () => {
-    it('should parse CCIP request from OnRamp transaction', async () => {
-      // Get a known transaction with CCIPMessageSent
-      let txHash: string | undefined
-      for await (const log of tonChain.getLogs({
-        address: ADDRESSES_TO_ASSERT.tonOnRamp,
-        startBlock: 0,
-        page: 1,
-      })) {
-        if (TONChain.decodeMessage(log)) {
-          txHash = log.transactionHash
-          break
-        }
-      }
-
-      assert.ok(txHash, 'Should find a transaction with CCIP message')
-
-      const requests = await tonChain.getMessagesInTx(txHash)
+    it('should parse CCIP request from the OnRamp transaction', async () => {
+      const { log, message } = await messageFixture()
+      const requests = await chain.getMessagesInTx(log.transactionHash)
 
       assert.ok(requests.length > 0, 'Should find at least one CCIP request')
 
@@ -864,15 +684,17 @@ describe.skip('TON index integration tests', () => {
       assert.ok(request.lane, 'request should have lane')
       assert.equal(request.lane.sourceChainSelector, TON_TESTNET_CHAIN_SELECTOR)
       assert.equal(request.lane.destChainSelector, SEPOLIA_CHAIN_SELECTOR)
+      assert.equal(
+        request.message.messageId,
+        message.messageId,
+        'Should resolve the same message as the log scan',
+      )
     })
   })
 
   describe('getBalance', () => {
-    const USDT_TESTNET = 'kQD0GKBM8ZbryVk2aESmzfU6b9b_8era_IkvBSELujFZPsyy'
-    const TON_FAUCET = 'EQAuz15H1ZHrZ_psVrAra7HealMIVeFq0wguqlmFno1f3EJj'
-
     it('should return native GRAM balance', async () => {
-      const balance = await tonChain.getBalance({
+      const balance = await chain.getBalance({
         holder: TON_FAUCET,
       })
 
@@ -881,7 +703,7 @@ describe.skip('TON index integration tests', () => {
     })
 
     it('should return USDT jetton balance', async () => {
-      const balance = await tonChain.getBalance({
+      const balance = await chain.getBalance({
         holder: TON_FAUCET,
         token: USDT_TESTNET,
       })

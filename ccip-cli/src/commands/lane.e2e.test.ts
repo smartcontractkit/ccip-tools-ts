@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import { useResourceForDescribe } from '../../../scripts/useResource.ts'
 import {
+  APTOS_SKIP,
   APTOS_TESTNET_RPCS,
   BASE_SEPOLIA_RPCS,
   BSC_TESTNET_RPCS,
@@ -162,7 +163,10 @@ describe('e2e command lane EVM v2.0', () => {
   )
 })
 
-describe('e2e command lane EVM <-> Aptos (v1.6)', () => {
+// TODO: restore once CCIP is redeployed on aptos-testnet. The testnet restarted ~2026-10-08
+// and the old package 0xc748…ee45 has no modules; as of 2026-10-23 the CCIP API and DB
+// list no aptos-testnet ramp created, or message sent, after the restart.
+describe('e2e command lane EVM <-> Aptos (v1.6)', { skip: APTOS_SKIP }, () => {
   useResourceForDescribe(['bsc-testnet', 'aptos-testnet', 'sepolia'])
   const LANE_RPCS = [...BSC_TESTNET_RPCS, ...APTOS_TESTNET_RPCS, ...SEPOLIA_RPCS]
   // EVM -> Aptos rides the same bsc-testnet lane as the show fixture; the

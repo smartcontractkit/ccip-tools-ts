@@ -9,8 +9,15 @@ import {
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
 } from '../extra-args.ts'
+import { originKey } from '../fetch.ts'
 import { NetworkType } from '../networks.ts'
-import { crc32, extractMagicTag, lookupTxByRawHash, tryParseCell } from './utils.ts'
+import {
+  crc32,
+  extractMagicTag,
+  lookupTxByRawHash,
+  tonRateLimitProfile,
+  tryParseCell,
+} from './utils.ts'
 
 describe('TON utils unit tests', () => {
   describe('tryParseCell', () => {
@@ -211,5 +218,23 @@ describe('crc32', () => {
   it('should calculate CRC32 checksum', () => {
     const event = 'ExecutionStateChanged'
     assert.equal(crc32(event), '0x4c94c360')
+  })
+})
+
+describe('tonRateLimitProfile', () => {
+  it('scopes the TON transport by origin and keeps the toncenter pacing seed', () => {
+    const p = tonRateLimitProfile('https://testnet.toncenter.com/api/v2/jsonRPC')
+    assert.equal(p.keyBy, 'origin', 'v2 JSON-RPC and the v3 index share one per-IP budget')
+    assert.deepEqual(p.seed, { limit: 1, windowMs: 1500 })
+    assert.equal(p.maxRetries, 6)
+    // Overrides win (the v3 fail-fast profile builds on the same helper).
+    const v3 = tonRateLimitProfile('https://testnet.toncenter.com/api/v3', { maxRetries: 2 })
+    assert.equal(v3.keyBy, 'origin')
+    assert.equal(v3.maxRetries, 2)
+    // keyBy 'origin' maps v2 and v3 URLs to one limiter key, so they share one pacer.
+    assert.equal(
+      originKey('https://testnet.toncenter.com/api/v2/jsonRPC'),
+      originKey('https://testnet.toncenter.com/api/v3/masterchainInfo'),
+    )
   })
 })

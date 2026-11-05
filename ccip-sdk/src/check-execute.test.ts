@@ -8,8 +8,12 @@ import {
   CCIPInsufficientBalanceError,
   CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
+  CCIPTokenDecimalsUnavailableError,
 } from './errors/index.ts'
 import { ChainFamily, NetworkType } from './networks.ts'
+// registers the EVM family in supportedChains, so the family-default decimals fallback
+// (ChainStatic.decimals) resolves in the tests below
+import './evm/index.ts'
 
 const abi = AbiCoder.defaultAbiCoder()
 const SOURCE_SELECTOR = 16015286601757825753n // sepolia
@@ -24,12 +28,15 @@ function makeChain(opts: {
   family?: ChainFamily
   decimals?: Record<string, number>
   poolTypeAndVersion?: string
+  poolDecimals?: number
   balance?: bigint
   inboundRateLimiterState?: { tokens: bigint; capacity: bigint; rate: bigint }
 }) {
   const decimals = opts.decimals ?? { [TOKEN]: 9 }
   const getTokenInfo = mock.fn((token: string) =>
-    Promise.resolve({ decimals: decimals[token] ?? 9, symbol: 'CCIP-BnM', name: 'CCIP-BnM' }),
+    decimals[token] === undefined
+      ? Promise.reject(new CCIPTokenDecimalsUnavailableError(token))
+      : Promise.resolve({ decimals: decimals[token] ?? 9, symbol: 'CCIP-BnM', name: 'CCIP-BnM' }),
   )
   const getTokenAdminRegistryFor = mock.fn(() =>
     Promise.resolve(getAddress(hexlify(randomBytes(20)))),
@@ -50,6 +57,7 @@ function makeChain(opts: {
       Promise.resolve({
         typeAndVersion: opts.poolTypeAndVersion ?? 'BurnMintTokenPool 1.6.1',
         lockBox: undefined,
+        ...(opts.poolDecimals != null && { decimals: opts.poolDecimals }),
       }),
     ),
     getTokenPoolRemote: mock.fn(() =>
@@ -256,5 +264,27 @@ void describe('Chain.checkExecute — amount denomination', () => {
         return true
       },
     )
+  })
+
+  void it('a dest token without decimals() converts via the pool-declared decimals', async () => {
+    // the dest token implements no decimals() — the pool's declared decimals (9) are the
+    // authoritative fallback, so the 18-decimals source amount still converts to dest units
+    const { chain } = makeChain({
+      decimals: {},
+      poolDecimals: 9,
+      inboundRateLimiterState: FULL_BUCKET,
+    })
+    assert.equal(await check(chain, [{ amount: 10n ** 15n, extraData: dec(18n) }]), true)
+  })
+
+  void it('a dest token without decimals() falls back to the family default when the pool cannot declare either', async () => {
+    // neither the dest token nor its pool (v1.5.0) can declare — the family's static default
+    // (18 on EVM) is the last resort: 1e15 at 18 source decimals stays 1e15 dest units
+    const { chain } = makeChain({
+      family: ChainFamily.EVM,
+      decimals: {},
+      inboundRateLimiterState: { tokens: 10n ** 16n, capacity: 10n ** 18n, rate: 1n },
+    })
+    assert.equal(await check(chain, [{ amount: 10n ** 15n, extraData: dec(18n) }]), true)
   })
 })

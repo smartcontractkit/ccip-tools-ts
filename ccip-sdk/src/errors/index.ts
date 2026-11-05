@@ -19,6 +19,7 @@ export {
   CCIPPartialTransactionSubmissionError,
   CCIPTransactionNotFoundError,
   CCIPTransactionTooLargeError,
+  CCIPTxOutcomeUnavailableError,
 } from './specialized.ts'
 
 // Specialized errors - Logs
@@ -87,6 +88,7 @@ export {
   CCIPLegacyTokenPoolsUnsupportedError,
   CCIPRateLimitExceededError,
   CCIPTokenDecimalsInsufficientError,
+  CCIPTokenDecimalsUnavailableError,
   CCIPTokenNotConfiguredError,
   CCIPTokenNotFoundError,
   CCIPTokenNotInRegistryError,
@@ -97,7 +99,11 @@ export {
 export { CCIPContractNotRouterError, CCIPContractTypeInvalidError } from './specialized.ts'
 
 // Specialized errors - Wallet & Signer
-export { CCIPWalletInvalidError, CCIPWalletNotSignerError } from './specialized.ts'
+export {
+  CCIPWalletChainMismatchError,
+  CCIPWalletInvalidError,
+  CCIPWalletNotSignerError,
+} from './specialized.ts'
 
 // Specialized errors - Execution
 export {
@@ -117,17 +123,21 @@ export {
 
 // Specialized errors - Solana-specific
 export {
+  type SolanaV2LaneUnavailableReason,
   CCIPBlockTimeNotFoundError,
   CCIPCctpDecodeError,
   CCIPExecutionReportChainMismatchError,
   CCIPExecutionStateInvalidError,
   CCIPExtraArgsLengthInvalidError,
   CCIPLogDataMissingError,
+  CCIPSolanaAccountResolutionError,
+  CCIPSolanaExecutionBufferIncompleteError,
   CCIPSolanaFeeResultInvalidError,
   CCIPSolanaLookupTableNotFoundError,
   CCIPSolanaOffRampEventsNotFoundError,
   CCIPSolanaRefAddressesNotFoundError,
   CCIPSolanaRouterConfigNotFoundError,
+  CCIPSolanaV2LaneUnavailableError,
   CCIPSplTokenInvalidError,
   CCIPTokenAccountNotFoundError,
   CCIPTokenAmountInvalidError,

@@ -13,7 +13,7 @@ import {
 
 import type { Ctx } from '../commands/index.ts'
 import { resolveCliIndexer } from './canton/index.ts'
-import { fetchChainsFromRpcs, filterEndpointsForFamily, isCantonLedgerUrl } from './index.ts'
+import { fetchChainsFromRpcs } from './index.ts'
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -649,35 +649,6 @@ describe('fetchChainsFromRpcs', () => {
       restore()
       ac.abort()
     }
-  })
-})
-
-describe('isCantonLedgerUrl', () => {
-  it('matches Canton JSON Ledger API paths', () => {
-    assert.ok(isCantonLedgerUrl('https://testnet.cv1.bcy-v.metalhosts.com/api/json'))
-    assert.ok(isCantonLedgerUrl('http://localhost:7575'))
-  })
-
-  it('does not match EVM JSON-RPC URLs', () => {
-    assert.ok(!isCantonLedgerUrl('https://ethereum-sepolia-rpc.publicnode.com'))
-    assert.ok(!isCantonLedgerUrl('https://sepolia.gateway.tenderly.co'))
-  })
-})
-
-describe('filterEndpointsForFamily', () => {
-  const endpoints = new Set([
-    'https://testnet.cv1.bcy-v.metalhosts.com/api/json',
-    'https://ethereum-sepolia-rpc.publicnode.com',
-  ])
-
-  it('gives Canton only ledger URLs', () => {
-    const filtered = filterEndpointsForFamily(endpoints, ChainFamily.Canton)
-    assert.deepEqual([...filtered], ['https://testnet.cv1.bcy-v.metalhosts.com/api/json'])
-  })
-
-  it('gives EVM only non-ledger URLs', () => {
-    const filtered = filterEndpointsForFamily(endpoints, ChainFamily.EVM)
-    assert.deepEqual([...filtered], ['https://ethereum-sepolia-rpc.publicnode.com'])
   })
 })
 

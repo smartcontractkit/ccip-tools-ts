@@ -108,6 +108,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_NOT_REGISTERED: 'Token is not registered in the TokenAdminRegistry.',
   TOKEN_REMOTE_NOT_CONFIGURED: 'Remote network is not registered in TokenPool.',
   TOKEN_DECIMALS_INSUFFICIENT: 'Destination token has insufficient decimals.',
+  TOKEN_DECIMALS_UNAVAILABLE:
+    'The token does not implement the optional ERC-20 `decimals()` view. Preflights resolve its decimals from its pool (`TokenPoolConfig.decimals`) or the chain family default; when neither can declare them, fix the declaration on-chain: a `decimals()` view on the token, or a pool v1.5.1+ declaring them via `getTokenDecimals()`. A transport failure surfaces as itself, never as this error.',
   RATE_LIMIT_EXCEEDED:
     'Rate limit amount not enough for token transfer. Check capacity and retry when refilled.',
   TOKEN_INVALID_SPL: 'Invalid SPL token or Token-2022.',
@@ -117,7 +119,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   TOKEN_MINT_INVALID:
     'The address is not a valid SPL token mint. Ensure the address is owned by TOKEN_PROGRAM_ID or TOKEN_2022_PROGRAM_ID.',
   TOKEN_AMOUNT_INVALID: 'Token amount must have a valid address and positive amount.',
-  TOKEN_POOL_STATE_NOT_FOUND: 'TokenPool state PDA not found.',
+  TOKEN_POOL_STATE_NOT_FOUND:
+    'Confirm the pool is initialized for this mint on this cluster; for a custom pool, verify poolProgramAddress is the program that owns it.',
   TOKEN_POOL_INFO_NOT_FOUND:
     'Check that the token pool is deployed and configured for this lane. Verify supported tokens: https://docs.chain.link/ccip/directory',
   TOKEN_ACCOUNT_NOT_FOUND:
@@ -127,6 +130,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
 
   WALLET_NOT_SIGNER: 'Provide a wallet with signing capability (Signer interface).',
   WALLET_INVALID: 'Provide a valid Wallet instance.',
+  WALLET_CHAIN_MISMATCH:
+    'Connect the wallet to the same chain as the Chain instance, or build with generateUnsigned* and sign on the intended chain.',
 
   EXEC_TX_NOT_CONFIRMED: 'Transaction was not confirmed. Check status and retry.',
   EXEC_TX_REVERTED: 'Transaction reverted. Check the receiver contract.',
@@ -175,6 +180,12 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
   SOLANA_FEE_RESULT_INVALID: 'Invalid fee result from router. Check the router configuration.',
   SOLANA_SIMULATION_NO_RETURN_DATA:
     'Simulation returned no data. The on-chain program may have reverted silently.',
+  SOLANA_ACCOUNT_RESOLUTION_FAILED:
+    'Account resolution did not complete. Check that the program is a CCIP 2.0 router/offramp and that the instruction data is valid for it.',
+  SOLANA_V2_LANE_UNAVAILABLE:
+    'GenericExtraArgsV3 (finality, ccvs, executor, tokenReceiver, ...) can only be sent over a CCIP 2.0 lane. Use legacy extraArgs (gasLimit, allowOutOfOrderExecution) to send over the 1.6 lane, or have the lane configured for 2.0, with its sender allowlist disabled.',
+  SOLANA_EXECUTION_BUFFER_INCOMPLETE:
+    'Sign and send the instructions from generateUnsignedExecuteBuffer (one buffering instruction per transaction) to fill the execution inputs buffer, then generate the execution again.',
   SOLANA_REF_ADDRESSES_NOT_FOUND: 'Reference addresses account not found. Wait and retry.',
   SOLANA_OFFRAMP_EVENTS_NOT_FOUND: 'OffRamp events not found. Wait and retry.',
   SOLANA_SOURCE_CHAIN_UNSUPPORTED: 'This source chain is not supported for Solana destinations.',
@@ -191,7 +202,7 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Invalid Aptos event topic. Ensure the topic matches a known CCIP event type.',
 
   LOG_RANGE_TOO_LARGE:
-    'The RPC endpoint limits getLogs block range. The SDK auto-paginates by halving the range; if this persists, the range cannot be subdivided further.',
+    'The RPC endpoint rejected the getLogs block range, and the SDK could not find a smaller range it accepts. Use an RPC endpoint or plan that allows wider getLogs ranges.',
   HTTP_ERROR: 'HTTP request failed. 429 indicates rate limiting.',
   RPC_NOT_FOUND: 'No RPC endpoint found. Configure an RPC URL.',
   TIMEOUT:
@@ -224,6 +235,23 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Canton Ledger API returned an error. Verify the party ID is correct, the contract is active, and the Canton node is reachable.',
   CANTON_AUTH_ERROR:
     'Canton authentication failed. Verify the JWT is valid and not expired, or check the OIDC auth_url, client_id, and client_secret (client credentials) or redirect URI (authorization code).',
+
+  // Cross-Chain Token
+  CCT_PARAMS_INVALID:
+    'Verify the operation parameters. See error.context for the field name and reason.',
+  CCT_TOKEN_ACCOUNT_MINT_MISMATCH: 'Use a token account whose mint matches the requested mint.',
+  CCT_TX_FAILED:
+    'The CCT transaction failed. Ensure the caller holds the required role for this operation.',
+  CCT_TX_NOT_CONFIRMED:
+    'The transaction was submitted but not confirmed in time. Check the tx hash in error.context before resubmitting; it may still be mined.',
+  TX_OUTCOME_UNAVAILABLE:
+    'The transaction committed on-ledger, but result details were unavailable in the response. Use the update ID in error.context to inspect the transaction (e.g. getUpdateById) instead of resubmitting.',
+  CCT_CONTRACT_VERSION_UNSUPPORTED:
+    'This contract version is not supported by the CCT SDK. Check the contract address and its typeAndVersion.',
+  CCT_OPERATION_UNSUPPORTED:
+    'This operation is not available at the contract version in error.context. Verify the contract version supports it.',
+  CCT_DATA_DECODE_FAILED:
+    'Ensure the account belongs to a compatible CCT program and uses the expected data layout.',
 }
 
 /** Returns default recovery hint for error code, or undefined if none. */

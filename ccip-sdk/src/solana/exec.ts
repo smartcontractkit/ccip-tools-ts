@@ -23,7 +23,7 @@ import { newProgram } from './coder.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { encodeSolanaOffchainTokenData } from './offchain.ts'
 import type { CCIPMessage_V1_6_Solana, UnsignedSolanaTx } from './types.ts'
-import { simulateTransaction, simulationProvider } from './utils.ts'
+import { getExecutionReportBufferPda, simulateTransaction, simulationProvider } from './utils.ts'
 
 type ExecAlt = {
   initialIxs: TransactionInstruction[]
@@ -146,7 +146,16 @@ export async function generateUnsignedExecuteReport(
   }
 }
 
-async function buildLookupTableIxs(
+/**
+ * Builds the instructions creating and extending (then deactivating) an ad-hoc lookup table with
+ * `addresses`, for a transaction too large without it.
+ * @param ctx - Context with the Solana connection and logger.
+ * @param authority - Lookup table authority and payer.
+ * @param addresses - Addresses to put in the lookup table.
+ * @returns The creation and extension instructions, the lookup table, and its deactivation
+ * @throws {@link CCIPSolanaLookupTableNotFoundError} if there are more than 256 addresses
+ */
+export async function buildLookupTableIxs(
   { connection, logger = console }: { connection: Connection } & WithLogger,
   authority: PublicKey,
   addresses: PublicKey[],
@@ -223,10 +232,7 @@ async function bufferedTransactionData(
     clearLeftoverAccounts,
   }: { clearLeftoverAccounts?: boolean } & WithLogger = {},
 ): Promise<TransactionInstruction[]> {
-  const [bufferAddress] = PublicKey.findProgramAddressSync(
-    [Buffer.from('execution_report_buffer'), bufferId, payer.toBuffer()],
-    offramp.programId,
-  )
+  const bufferAddress = getExecutionReportBufferPda(offramp.programId, bufferId, payer)
 
   const [configPDA] = PublicKey.findProgramAddressSync([Buffer.from('config')], offramp.programId)
 

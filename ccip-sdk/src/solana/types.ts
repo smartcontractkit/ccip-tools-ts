@@ -27,6 +27,24 @@ export type UnsignedSolanaTx = {
   lookupTables?: AddressLookupTableAccount[]
 }
 
+/**
+ * Solana-specific options for `SolanaChain`'s `getFee`, `generateUnsignedSendMessage` and
+ * `sendMessage`, on top of the common `SendMessageOpts`.
+ */
+export type SolanaSendMessageOpts = {
+  /**
+   * Also send over CCIP 2.0 lanes with their sender allowlist enabled, which are otherwise
+   * treated as not supporting 2.0, so quotes and sends never depend on the sender. When enabled,
+   * every sender goes over 2.0 on those lanes, and the router rejects senders off the allowlist on
+   * send. Pass the same value to `getFee` and the send, for both to pick the same entrypoint.
+   * Meant for testing allowlisted lanes.
+   *
+   * Default: `false`
+   * @internal
+   */
+  sendV2OnAllowlistedLanes?: boolean
+}
+
 /** Minimal Solana wallet interface (anchor.Wallet=) */
 export type Wallet = {
   readonly publicKey: PublicKey

@@ -6,13 +6,14 @@ import type { PartyId } from './addressCodec.ts'
 import type { JsActiveContract, LedgerApiClient } from './clients/ledger-api/client.ts'
 import type { CantonIdentifier } from './types.ts'
 
-// helper function to list all currently active contracts for the given templateId, that the partyId can see.
+// helper function to list all currently active contracts for the given templateId(s), that the partyId can see.
 export async function listActiveContractsByTemplateId(
   logger: Logger,
   ledgerApiClient: LedgerApiClient,
   partyId: PartyId,
-  templateId: CantonIdentifier,
+  templateId: CantonIdentifier | readonly CantonIdentifier[],
 ): Promise<JsActiveContract[]> {
+  const templateIds = Array.isArray(templateId) ? templateId : [templateId]
   const { offset } = await ledgerApiClient.getLedgerEnd()
   if (!offset) {
     throw new CCIPError(CCIPErrorCode.CANTON_API_ERROR, `failed to get ledger end`)
@@ -23,18 +24,16 @@ export async function listActiveContractsByTemplateId(
     eventFormat: {
       filtersByParty: {
         [partyId.toString()]: {
-          cumulative: [
-            {
-              identifierFilter: {
-                TemplateFilter: {
-                  value: {
-                    templateId: templateId.toString(),
-                    includeCreatedEventBlob: true,
-                  },
+          cumulative: templateIds.map((id) => ({
+            identifierFilter: {
+              TemplateFilter: {
+                value: {
+                  templateId: id.toString(),
+                  includeCreatedEventBlob: true,
                 },
               },
             },
-          ],
+          })),
         },
       },
       verbose: true,

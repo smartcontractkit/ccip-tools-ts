@@ -1,0 +1,266 @@
+import {
+  type PublicKey,
+  type TransactionInstruction,
+  AddressLookupTableProgram,
+} from '@solana/web3.js'
+
+import { ChainFamily } from '../../../../networks.ts'
+import type { SolanaChain } from '../../../../solana/index.ts'
+import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
+import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { TransactionResult } from '../../../operation.ts'
+import {
+  type SolanaExecuteParams,
+  type SolanaGenerateParams,
+  SolanaOperation,
+} from '../../operation.ts'
+import { deriveCcipLookupTableAddresses } from '../../programs/alt.ts'
+import type { PoolProgramRef } from '../../programs/token-pool.ts'
+import { submit } from '../../submit.ts'
+import {
+  parseOptionalPublicKey,
+  parsePublicKey,
+  resolveExistingPoolConfig,
+  validateAuthorityMatchesWallet,
+} from '../../validate.ts'
+
+const MAX_ALT_ADDRESSES = 256
+const EXTEND_CHUNK_SIZE = 30
+
+type AppendAdditionalAddressesParams = {
+  additionalAddresses: string[]
+  tokenAddress?: never
+  poolProgramAddress?: never
+}
+
+type AppendCanonicalAddressesParams = {
+  tokenAddress: string
+  additionalAddresses?: string[]
+} & PoolProgramRef
+
+/**
+ * Parameters shared by Solana TokenAdminRegistry `appendToLookupTable` generation and execution.
+ *
+ * Provide `tokenAddress` (plus `poolProgramAddress` for a custom pool program) to append the
+ * canonical CCIP addresses. Additional addresses may also be included.
+ *
+ * Otherwise, provide `additionalAddresses` only.
+ */
+type AppendToLookupTableParams = {
+  lookupTableAddress: string
+  /** ALT authority. Defaults to payer for unsigned generation and wallet public key for execute. */
+  authority?: string
+} & (AppendAdditionalAddressesParams | AppendCanonicalAddressesParams)
+
+/** Parameters for unsigned Solana lookup table append generation. */
+export type GenerateAppendToLookupTableParams = SolanaGenerateParams<AppendToLookupTableParams>
+
+type ParsedAppendToLookupTableParams = {
+  payer: PublicKey
+  authority: PublicKey
+  lookupTableAddress: PublicKey
+  additionalAddresses: PublicKey[]
+  tokenMint?: PublicKey
+  poolProgramAddress?: PublicKey
+}
+
+/** Unsigned append lookup table result. */
+export type GenerateAppendToLookupTableResult = UnsignedSolanaTx
+
+/** Parameters for executing Solana TokenAdminRegistry `appendToLookupTable`. */
+export type ExecuteAppendToLookupTableParams = SolanaExecuteParams<AppendToLookupTableParams>
+
+/** Result of executing Solana TokenAdminRegistry `appendToLookupTable`. */
+export type ExecuteAppendToLookupTableResult = TransactionResult & {
+  /** Every confirmed transaction signature. */
+  hashes: string[]
+}
+
+/** Builds and submits Solana ALT extend instructions for token pool setup. */
+export class AppendToLookupTable extends SolanaOperation<
+  AppendToLookupTableParams,
+  GenerateAppendToLookupTableResult,
+  ParsedAppendToLookupTableParams
+> {
+  readonly name = 'appendToLookupTable'
+  protected override readonly splitMode = 'resource'
+
+  /** Parses all public keys before any RPC. */
+  protected override prepare(
+    params: GenerateAppendToLookupTableParams,
+  ): ParsedAppendToLookupTableParams {
+    const payer = parsePublicKey(this.name, 'payer', params.payer)
+    const authority =
+      params.authority === undefined
+        ? payer
+        : parsePublicKey(this.name, 'authority', params.authority)
+    const lookupTableAddress = parsePublicKey(
+      this.name,
+      'lookupTableAddress',
+      params.lookupTableAddress,
+    )
+
+    // Runtime guard: the param union already forbids this for typed callers.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (params.poolProgramAddress !== undefined && params.tokenAddress === undefined) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'tokenAddress',
+        'must be provided with poolProgramAddress',
+      )
+    }
+    const tokenMint = parseOptionalPublicKey(this.name, 'tokenAddress', params.tokenAddress)
+    const poolProgramAddress = parseOptionalPublicKey(
+      this.name,
+      'poolProgramAddress',
+      params.poolProgramAddress,
+    )
+    const additionalAddresses = (params.additionalAddresses ?? []).map((address, i) =>
+      parsePublicKey(this.name, `additionalAddresses[${i}]`, address),
+    )
+
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (params.tokenAddress === undefined && !params.additionalAddresses?.length) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'additionalAddresses',
+        'must provide tokenAddress or additionalAddresses',
+      )
+    }
+    return {
+      payer,
+      authority,
+      lookupTableAddress,
+      additionalAddresses,
+      ...(tokenMint !== undefined && { tokenMint }),
+      ...(poolProgramAddress !== undefined && { poolProgramAddress }),
+    }
+  }
+
+  /** Builds unsigned ALT extend instructions. */
+  protected async buildUnsigned(
+    chain: SolanaChain,
+    opts: ParsedAppendToLookupTableParams,
+  ): Promise<GenerateAppendToLookupTableResult> {
+    const { payer, authority, lookupTableAddress } = opts
+    const lookupTable = await chain.connection.getAddressLookupTable(lookupTableAddress)
+
+    if (!lookupTable.value) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'lookupTableAddress',
+        `lookup table not found: ${lookupTableAddress.toBase58()}`,
+      )
+    }
+
+    if (!lookupTable.value.state.authority?.equals(authority)) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'authority',
+        `authority mismatch; ALT authority is ${
+          lookupTable.value.state.authority?.toBase58() ?? 'none'
+        }`,
+      )
+    }
+
+    const existingAddresses = new Set(
+      lookupTable.value.state.addresses.map((address) => address.toBase58()),
+    )
+    const addresses = [...opts.additionalAddresses]
+
+    if (opts.tokenMint) {
+      const { tokenMint } = opts
+      // One pool state read resolves the program and yields the router.
+      const { poolProgram, config } = await resolveExistingPoolConfig(
+        this.name,
+        chain,
+        tokenMint,
+        opts.poolProgramAddress,
+      )
+      const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {
+        lookupTableAddress,
+        tokenMint,
+        poolProgram,
+        router: config.router,
+      })
+      if (ccipAddresses.some((address) => existingAddresses.has(address.toBase58()))) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          'lookupTableAddress',
+          'lookup table already contains canonical CCIP addresses; only append additionalAddresses or use an empty ALT',
+        )
+      }
+
+      addresses.unshift(...ccipAddresses)
+    }
+
+    const appendedAddresses = new Set<string>()
+    for (const address of addresses) {
+      const value = address.toBase58()
+      if (existingAddresses.has(value) || appendedAddresses.has(value)) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          'additionalAddresses',
+          'must not contain addresses already in the ALT or duplicate addresses',
+        )
+      }
+      appendedAddresses.add(value)
+    }
+
+    const totalAddressesAfterAppend = lookupTable.value.state.addresses.length + addresses.length
+    if (totalAddressesAfterAppend > MAX_ALT_ADDRESSES) {
+      throw new CCTParamsInvalidError(
+        this.name,
+        'additionalAddresses',
+        `ALT cannot exceed ${MAX_ALT_ADDRESSES} addresses; requested ${totalAddressesAfterAppend}`,
+      )
+    }
+
+    const instructions: TransactionInstruction[] = []
+    for (let i = 0; i < addresses.length; i += EXTEND_CHUNK_SIZE) {
+      instructions.push(
+        AddressLookupTableProgram.extendLookupTable({
+          payer,
+          authority,
+          lookupTable: lookupTableAddress,
+          addresses: addresses.slice(i, i + EXTEND_CHUNK_SIZE),
+        }),
+      )
+    }
+
+    chain.logger.debug(
+      `${this.name}: lookupTable = ${lookupTableAddress.toBase58()}, appended = ${
+        addresses.length
+      }, total = ${totalAddressesAfterAppend}`,
+    )
+    return {
+      family: ChainFamily.Solana,
+      instructions,
+      mainIndex: 0,
+    }
+  }
+
+  /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
+  override async execute(
+    chain: SolanaChain,
+    params: ExecuteAppendToLookupTableParams,
+  ): Promise<ExecuteAppendToLookupTableResult> {
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+
+    if (params.authority !== undefined) {
+      validateAuthorityMatchesWallet(
+        this.name,
+        parsed.authority,
+        wallet.publicKey,
+        'appendToLookupTable requires authority to be the executing wallet. Use generateUnsignedAppendToLookupTable for vault-owned ALTs and have the vault sign/execute it.',
+      )
+    }
+
+    const tx = await this.buildUnsigned(chain, parsed)
+    const result = await submit(chain, wallet, tx, this.name, computeUnits, this.splitMode, true)
+    return {
+      hash: result.hash,
+      hashes: result.slices!.map(({ signature }) => signature),
+    }
+  }
+}

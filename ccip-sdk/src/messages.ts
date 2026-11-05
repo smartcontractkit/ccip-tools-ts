@@ -2,7 +2,7 @@ import { type BytesLike, dataSlice, hexlify, toBigInt, toNumber } from 'ethers'
 
 import { CCIPMessageDecodeError } from './errors/index.ts'
 import { type FinalityRequested, decodeFinalityRequested } from './extra-args.ts'
-import { type ChainFamily, networkInfo } from './networks.ts'
+import { networkInfo } from './networks.ts'
 import { decodeAddress, getDataBytes } from './utils.ts'
 
 /** Token transfer in MessageV1 format. */
@@ -33,19 +33,20 @@ export type MessageV1 = {
   data: string
 }
 
+/** Renders a MessageV1 address field, given as hex, from the source or the dest chain. */
+type AddressDecoder = (address: string, chain: 'source' | 'dest') => string
+
 /**
  * Decodes a TokenTransferV1 from bytes.
  * @param encoded - The encoded bytes.
  * @param offset - The starting offset.
- * @param sourceFamily - The source chain family for source addresses.
- * @param destFamily - The destination chain family for dest addresses.
+ * @param decodeAddr - Renders the source and dest addresses.
  * @returns The decoded token transfer and the new offset.
  */
 function decodeTokenTransferV1(
   encoded: Uint8Array,
   offset: number,
-  sourceFamily: ChainFamily,
-  destFamily: ChainFamily,
+  decodeAddr: AddressDecoder,
 ): { tokenTransfer: TokenTransferV1; newOffset: number } {
   // version (1 byte)
   if (offset >= encoded.length) throw new CCIPMessageDecodeError('TOKEN_TRANSFER_VERSION')
@@ -65,9 +66,9 @@ function decodeTokenTransferV1(
   if (offset + sourcePoolAddressLength > encoded.length) {
     throw new CCIPMessageDecodeError('TOKEN_TRANSFER_SOURCE_POOL_CONTENT')
   }
-  const sourcePoolAddress = decodeAddress(
+  const sourcePoolAddress = decodeAddr(
     dataSlice(encoded, offset, offset + sourcePoolAddressLength),
-    sourceFamily,
+    'source',
   )
   offset += sourcePoolAddressLength
 
@@ -79,9 +80,9 @@ function decodeTokenTransferV1(
   if (offset + sourceTokenAddressLength > encoded.length) {
     throw new CCIPMessageDecodeError('TOKEN_TRANSFER_SOURCE_TOKEN_CONTENT')
   }
-  const sourceTokenAddress = decodeAddress(
+  const sourceTokenAddress = decodeAddr(
     dataSlice(encoded, offset, offset + sourceTokenAddressLength),
-    sourceFamily,
+    'source',
   )
   offset += sourceTokenAddressLength
 
@@ -93,9 +94,9 @@ function decodeTokenTransferV1(
   if (offset + destTokenAddressLength > encoded.length) {
     throw new CCIPMessageDecodeError('TOKEN_TRANSFER_DEST_TOKEN_CONTENT')
   }
-  const destTokenAddress = decodeAddress(
+  const destTokenAddress = decodeAddr(
     dataSlice(encoded, offset, offset + destTokenAddressLength),
-    destFamily,
+    'dest',
   )
   offset += destTokenAddressLength
 
@@ -107,10 +108,7 @@ function decodeTokenTransferV1(
   if (offset + tokenReceiverLength > encoded.length) {
     throw new CCIPMessageDecodeError('TOKEN_TRANSFER_TOKEN_RECEIVER_CONTENT')
   }
-  const tokenReceiver = decodeAddress(
-    dataSlice(encoded, offset, offset + tokenReceiverLength),
-    destFamily,
-  )
+  const tokenReceiver = decodeAddr(dataSlice(encoded, offset, offset + tokenReceiverLength), 'dest')
   offset += tokenReceiverLength
 
   // extraDataLength and extraData
@@ -144,6 +142,30 @@ function decodeTokenTransferV1(
  * @returns The decoded MessageV1 struct.
  */
 export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
+  return parseMessageV1(encodedMessage, (sourceChainSelector, destChainSelector) => {
+    const families = {
+      source: networkInfo(sourceChainSelector).family,
+      dest: networkInfo(destChainSelector).family,
+    }
+    return (address, chain) => decodeAddress(address, families[chain])
+  })
+}
+
+/**
+ * Decodes a MessageV1 like {@link decodeMessageV1}, but leaves every address as the raw hex bytes
+ * the message encodes, instead of rendering it in its chain family's format (which normalizes,
+ * e.g. a left-padded EVM address to 20 bytes). For passing fields back onchain byte for byte.
+ * @param encodedMessage - The encoded message bytes to decode.
+ * @returns The decoded MessageV1 struct, with 0x-hex addresses.
+ */
+export function decodeMessageV1Raw(encodedMessage: BytesLike): MessageV1 {
+  return parseMessageV1(encodedMessage, () => (address) => address)
+}
+
+function parseMessageV1(
+  encodedMessage: BytesLike,
+  addressDecoder: (sourceChainSelector: bigint, destChainSelector: bigint) => AddressDecoder,
+): MessageV1 {
   const MESSAGE_V1_BASE_SIZE = 79
   const encoded = getDataBytes(encodedMessage)
 
@@ -158,11 +180,7 @@ export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
   // destChainSelector (8 bytes, big endian)
   const destChainSelector = toBigInt(dataSlice(encoded, 9, 17))
 
-  // Get chain families for address decoding
-  const sourceNetworkInfo = networkInfo(sourceChainSelector)
-  const destNetworkInfo = networkInfo(destChainSelector)
-  const sourceFamily = sourceNetworkInfo.family
-  const destFamily = destNetworkInfo.family
+  const decodeAddr = addressDecoder(sourceChainSelector, destChainSelector)
 
   // messageNumber (8 bytes, big endian)
   const messageNumber = toBigInt(dataSlice(encoded, 17, 25))
@@ -186,9 +204,9 @@ export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
   if (offset + onRampAddressLength > encoded.length) {
     throw new CCIPMessageDecodeError('MESSAGE_ONRAMP_ADDRESS_CONTENT')
   }
-  const onRampAddress = decodeAddress(
+  const onRampAddress = decodeAddr(
     dataSlice(encoded, offset, offset + onRampAddressLength),
-    sourceFamily,
+    'source',
   )
   offset += onRampAddressLength
 
@@ -198,9 +216,9 @@ export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
   if (offset + offRampAddressLength > encoded.length) {
     throw new CCIPMessageDecodeError('MESSAGE_OFFRAMP_ADDRESS_CONTENT')
   }
-  const offRampAddress = decodeAddress(
+  const offRampAddress = decodeAddr(
     dataSlice(encoded, offset, offset + offRampAddressLength),
-    destFamily,
+    'dest',
   )
   offset += offRampAddressLength
 
@@ -210,7 +228,7 @@ export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
   if (offset + senderLength > encoded.length) {
     throw new CCIPMessageDecodeError('MESSAGE_SENDER_CONTENT')
   }
-  const sender = decodeAddress(dataSlice(encoded, offset, offset + senderLength), sourceFamily)
+  const sender = decodeAddr(dataSlice(encoded, offset, offset + senderLength), 'source')
   offset += senderLength
 
   // receiverLength and receiver
@@ -219,7 +237,7 @@ export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
   if (offset + receiverLength > encoded.length) {
     throw new CCIPMessageDecodeError('MESSAGE_RECEIVER_CONTENT')
   }
-  const receiver = decodeAddress(dataSlice(encoded, offset, offset + receiverLength), destFamily)
+  const receiver = decodeAddr(dataSlice(encoded, offset, offset + receiverLength), 'dest')
   offset += receiverLength
 
   // destBlobLength and destBlob
@@ -241,7 +259,7 @@ export function decodeMessageV1(encodedMessage: BytesLike): MessageV1 {
   const tokenTransfer: TokenTransferV1[] = []
   if (tokenTransferLength > 0) {
     const expectedEnd = offset + tokenTransferLength
-    const result = decodeTokenTransferV1(encoded, offset, sourceFamily, destFamily)
+    const result = decodeTokenTransferV1(encoded, offset, decodeAddr)
     tokenTransfer.push(result.tokenTransfer)
     offset = result.newOffset
     if (offset !== expectedEnd) throw new CCIPMessageDecodeError('MESSAGE_TOKEN_TRANSFER_CONTENT')

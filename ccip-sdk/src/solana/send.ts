@@ -28,7 +28,10 @@ import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import type { UnsignedSolanaTx } from './types.ts'
 import { resolveATA, simulateTransaction, simulationProvider } from './utils.ts'
 
-function anyToSvmMessage(message: AnyMessage): IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] {
+/** Converts an SDK message into the router's `SVM2AnyMessage` instruction argument. */
+export function anyToSvmMessage(
+  message: AnyMessage,
+): IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] {
   const feeTokenPubkey = message.feeToken ? new PublicKey(message.feeToken) : PublicKey.default
 
   const svmMessage: IdlTypes<typeof CCIP_ROUTER_IDL>['SVM2AnyMessage'] = {
@@ -339,26 +342,8 @@ export async function generateUnsignedCcipSend(
   message: AnyMessage & { fee: bigint },
   opts?: { approveMax?: boolean },
 ): Promise<UnsignedSolanaTx> {
-  const amountsToApprove = (message.tokenAmounts ?? []).reduce(
-    (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
-    {} as Record<string, bigint>,
-  )
-  if (message.feeToken && message.feeToken !== PublicKey.default.toBase58()) {
-    amountsToApprove[message.feeToken] = (amountsToApprove[message.feeToken] ?? 0n) + message.fee
-  }
   const program = newProgram(CCIP_ROUTER_IDL, router, simulationProvider(ctx, sender))
-
-  const approveIxs = []
-  for (const [token, amount] of Object.entries(amountsToApprove)) {
-    const approveIx = await approveRouterSpender(
-      ctx,
-      sender,
-      new PublicKey(token),
-      router,
-      opts?.approveMax ? undefined : amount,
-    )
-    if (approveIx) approveIxs.push(approveIx)
-  }
+  const approveIxs = await generateApproveIxs(ctx, sender, router, message, opts)
 
   const svmMessage = anyToSvmMessage(message)
   const { addressLookupTableAccounts, accounts, tokenIndexes } = await deriveAccountsCcipSend({
@@ -399,6 +384,46 @@ export async function generateUnsignedCcipSend(
     instructions: [...approveIxs, sendIx],
     lookupTables: addressLookupTableAccounts,
   }
+}
+
+/**
+ * Generates the approvals a `ccipSend` needs: the router's fee billing signer moves the
+ * transferred tokens and any non-native fee token out of the sender's token accounts, on both
+ * the 1.6 and the 2.0 send paths.
+ * @param ctx - Context containing connection and logger.
+ * @param sender - Owner of the token accounts.
+ * @param router - Router program address.
+ * @param message - CCIP message with fee.
+ * @param opts - `approveMax` approves the maximum amount instead of the exact one.
+ * @returns Approve instructions for every token lacking a sufficient delegation.
+ */
+export async function generateApproveIxs(
+  ctx: { connection: Connection } & WithLogger,
+  sender: PublicKey,
+  router: PublicKey,
+  message: AnyMessage & { fee: bigint },
+  opts?: { approveMax?: boolean },
+): Promise<TransactionInstruction[]> {
+  const amountsToApprove = (message.tokenAmounts ?? []).reduce(
+    (acc, { token, amount }) => ({ ...acc, [token]: (acc[token] ?? 0n) + amount }),
+    {} as Record<string, bigint>,
+  )
+  if (message.feeToken && message.feeToken !== PublicKey.default.toBase58()) {
+    amountsToApprove[message.feeToken] = (amountsToApprove[message.feeToken] ?? 0n) + message.fee
+  }
+
+  const approveIxs = []
+  for (const [token, amount] of Object.entries(amountsToApprove)) {
+    const approveIx = await approveRouterSpender(
+      ctx,
+      sender,
+      new PublicKey(token),
+      router,
+      opts?.approveMax ? undefined : amount,
+    )
+    if (approveIx) approveIxs.push(approveIx)
+  }
+  return approveIxs
 }
 
 async function approveRouterSpender(

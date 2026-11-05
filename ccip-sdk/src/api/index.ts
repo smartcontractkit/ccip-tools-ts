@@ -64,7 +64,7 @@ export const DEFAULT_TIMEOUT_MS = 30000
 /** SDK version string for telemetry header */
 // generate:nofail
 // `export const SDK_VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-export const SDK_VERSION = '1.14.0-08b67873'
+export const SDK_VERSION = '1.16.1-1d2f850c'
 // generate:end
 
 /** SDK telemetry header name */
@@ -102,7 +102,9 @@ const ensureNetworkInfo = (o: RawNetworkInfo, logger: Logger): NetworkInfo => {
   return Object.assign(o, {
     chainSelector: BigInt(o.chainSelector),
     networkType: o.name.includes('-mainnet') ? NetworkType.Mainnet : NetworkType.Testnet,
-    ...(!('family' in o) && { family: validateChainFamily(o.chainFamily, logger) }),
+    ...(!('family' in o) && {
+      family: validateChainFamily(o.chainFamily, logger),
+    }),
   }) as unknown as NetworkInfo
 }
 
@@ -153,7 +155,10 @@ export class CCIPAPIClient {
   static {
     CCIPAPIClient.fromUrl = memoize(
       (baseUrl?: string, ctx?: CCIPAPIClientContext) => new CCIPAPIClient(baseUrl, ctx),
-      { maxArgs: 1, transformKey: ([baseUrl]) => [baseUrl ?? DEFAULT_API_BASE_URL] },
+      {
+        maxArgs: 1,
+        transformKey: ([baseUrl]) => [baseUrl ?? DEFAULT_API_BASE_URL],
+      },
     )
   }
 
@@ -904,7 +909,10 @@ export class CCIPAPIClient {
         ('version' in raw && typeof raw.version === 'string' && raw.version) || '<2.0',
         { context: { messageId } },
       )
-    return { offRamp: raw.offramp, encodedMessage: hexlify(getDataBytes(raw.encodedMessage)) }
+    return {
+      offRamp: raw.offramp,
+      encodedMessage: hexlify(getDataBytes(raw.encodedMessage)),
+    }
   }
 
   /** `GET /v2/messages/{id}/execution-inputs`, parsed but not interpreted. */
