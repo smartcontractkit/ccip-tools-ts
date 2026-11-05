@@ -15,7 +15,11 @@ import { before, describe, it } from 'node:test'
 // registers every chain family: remote addresses are parsed in the remote chain's format
 import '../../all-chains.ts'
 import { getCantonNetworkConfig } from '../../canton/networks.ts'
-import { ensureGatewaySession, fetchGatewayPrimaryParty } from './gateway.test.helpers.ts'
+import {
+  createGatewayCantonProvider,
+  ensureGatewaySession,
+  fetchGatewayPrimaryParty,
+} from './gateway.test.helpers.ts'
 import { normalizeRemoteAddress } from './token-pool/shared.ts'
 import { CantonTokenManager } from './index.ts'
 
@@ -91,22 +95,20 @@ describe(
 
       await ensureGatewaySession({ gatewayUrl, accessToken, networkId: 'canton:chainlink-testnet' })
       const { CantonChain } = await import('../../canton/index.ts')
-      const { createGatewayLedgerFetch } = await import('./gateway.test.helpers.ts')
-      const chain = await CantonChain.fromUrl(ledgerUrl, {
-        fetch: createGatewayLedgerFetch({
+      const chain = await CantonChain.fromProvider(
+        createGatewayCantonProvider({
           gatewayUrl,
           accessToken,
-          ledgerBaseUrl: network.ledgerUrl!,
+          networkId: 'canton:chainlink-testnet',
+          partyId: owner,
         }),
-        cantonConfig: {
-          party: owner,
-          ccipParty: ccipOwner,
-          jwt: accessToken,
-          edsUrl: edsUrl ?? 'http://unused-here.local', // unused by these reads
-          transferInstructionUrl: 'http://unused-here.local',
-          chainId,
+        {
+          cantonConfig: {
+            ccipParty: ccipOwner,
+            ...(edsUrl ? { externalEdsUrlsByOwner: { '*': edsUrl } } : {}),
+          },
         },
-      })
+      )
       manager = CantonTokenManager.fromChain(chain)
     })
 

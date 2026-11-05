@@ -7,7 +7,7 @@
 
 import { sha256, toUtf8Bytes } from 'ethers'
 
-import type { JsCommands } from '../../../canton/client/index.ts'
+import type { JsCommands } from '../../../canton/clients/ledger-api/client.ts'
 import type { CantonActiveContract, CantonChain } from '../../../canton/index.ts'
 import { getCantonNetworkConfig } from '../../../canton/networks.ts'
 import { encodeAddressToAny, getAddressBytes } from '../../../utils.ts'
@@ -302,7 +302,6 @@ export async function resolveFactoryRef(
   const contract = await chain.findActiveContractByInstanceAddress(
     FACTORY_TEMPLATE_ID,
     factoryInstanceAddress,
-    [party],
   )
   if (!contract) {
     throw new CCTParamsInvalidError(
@@ -343,7 +342,6 @@ export async function resolvePool(
   const contract = await chain.findActiveContractByInstanceAddress(
     Object.values(POOL_TEMPLATE_IDS),
     poolInstanceAddress,
-    [party],
   )
   if (!contract) {
     throw new CCTParamsInvalidError(
@@ -377,7 +375,6 @@ export async function resolveRateLimiterRef(
   const contract = await chain.findActiveContractByInstanceAddress(
     RATE_LIMITER_TEMPLATE_ID,
     rateLimiterInstanceAddress,
-    [poolOwner],
   )
   if (!contract) {
     throw new CCTParamsInvalidError(

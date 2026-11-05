@@ -104,8 +104,8 @@ export interface ResolvedTar {
  * The TAR's only stakeholder is its signatory (ccipOwner) — no observers — so
  * an issuer's participant cannot ACS-read it. Resolution order:
  *
- * 1. **Disclosure service** (`EdsDisclosureProvider.fetchContractDisclosure`)
- *    — the issuer-friendly path: the blob comes from a public endpoint, no
+ * 1. **Disclosure service** (the EDS global disclosure batch endpoint) —
+ *    the issuer-friendly path: the blob comes from a public endpoint, no
  *    ccipOwner visibility or readAs needed. This is the default; it makes
  *    token-admin ops self-sufficient for issuers.
  * 2. **ACS fallback** — for operators whose participant DOES host ccipOwner
@@ -117,13 +117,14 @@ export async function resolveTar(
   sender: string,
   tarInstanceAddress: string,
 ): Promise<ResolvedTar> {
-  const disclosed = await chain.edsDisclosureProvider
-    .fetchContractDisclosure(TAR_TEMPLATE_ID, tarInstanceAddress)
+  const disclosed = await chain.edsClientProvider
+    .globalClientFor(chain.ccipParty)
+    .POST('/ccip/v1/global/disclosure/batch', {
+      body: { addresses: [tarInstanceAddress] },
+    })
+    .then((r) => (r.error ? null : r.data.disclosures[0]))
     .catch(() => null)
   if (disclosed) {
-    const ownerFromRaw = tarInstanceAddress.includes('@')
-      ? tarInstanceAddress.slice(tarInstanceAddress.indexOf('@') + 1)
-      : undefined
     return {
       tarContract: {
         contractId: disclosed.contractId,
@@ -133,14 +134,13 @@ export async function resolveTar(
         // symbolic form, which the interactive-submission path rejects.
         templateId: disclosed.templateId,
       },
-      ccipOwner: disclosed.signatories?.[0] ?? ownerFromRaw,
+      ccipOwner: chain.ccipParty,
     }
   }
 
   const contract = await chain.findActiveContractByInstanceAddress(
     TAR_TEMPLATE_ID,
     tarInstanceAddress,
-    [...new Set([sender, chain.ccipParty])],
   )
   if (!contract) {
     throw new CCTParamsInvalidError(

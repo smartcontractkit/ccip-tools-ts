@@ -13,8 +13,9 @@ import { describe, it } from 'node:test'
 import '../../../../evm/index.ts'
 import '../../../../solana/index.ts'
 import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
+import { createLedgerApiClientFromProvider } from '../../../../canton/clients/ledger-api/client.ts'
 import { CantonChain } from '../../../../canton/index.ts'
-import type { UnsignedCantonTx } from '../../../../canton/types.ts'
+import type { CantonRpcProvider, UnsignedCantonTx } from '../../../../canton/types.ts'
 import { CCIPTxOutcomeUnavailableError } from '../../../../errors/index.ts'
 import { ChainFamily } from '../../../../networks.ts'
 import type { ChainUpdateArg } from '../../daml-types.ts'
@@ -37,31 +38,72 @@ const SOLANA_STORED = '6752055c20b3e9d8746656ddf73855507f87ab6d87523e4c76a7fa360
 function chainWith(templateId = BURN_MINT_POOL_TEMPLATE_ID) {
   const queries: string[][] = []
   type Filter = { identifierFilter: { TemplateFilter: { value: { templateId: string } } } }
+  /** Test-configurable result for `prepareExecuteAndWait` submissions. */
+  let submitResult: unknown
+  /** Test-configurable response for `/v2/updates/update-by-id` lookups. */
+  let updateByIdResult: unknown
   const provider = {
-    getLedgerEnd: async () => ({ offset: 1 }),
-    getActiveContracts: async (req: {
-      eventFormat: { filtersByParty: Record<string, { cumulative: Filter[] }> }
-    }) => {
-      const [filter] = Object.values(req.eventFormat.filtersByParty)
-      queries.push(
-        filter!.cumulative.map((c) => c.identifierFilter.TemplateFilter.value.templateId),
-      )
-      const createdEvent = {
-        contractId: '#pool',
-        templateId,
-        createdEventBlob: 'blob',
-        signatories: [POOL_OWNER],
-        createArgument: { instanceId: 'pool-1' },
+    request: async (args: { method: string; params?: unknown }) => {
+      switch (args.method) {
+        case 'ledgerApi': {
+          const params = (args.params ?? {}) as Record<string, unknown>
+          switch (params.resource) {
+            case '/v2/state/ledger-end':
+              return { offset: 1 }
+            case '/v2/state/active-contracts': {
+              const req = params.body as {
+                eventFormat: { filtersByParty: Record<string, { cumulative: Filter[] }> }
+              }
+              const [filter] = Object.values(req.eventFormat.filtersByParty)
+              queries.push(
+                filter!.cumulative.map((c) => c.identifierFilter.TemplateFilter.value.templateId),
+              )
+              const createdEvent = {
+                contractId: '#pool',
+                templateId,
+                createdEventBlob: 'blob',
+                signatories: [POOL_OWNER],
+                createArgument: { instanceId: 'pool-1' },
+              }
+              return [
+                { contractEntry: { JsActiveContract: { synchronizerId: 'sync', createdEvent } } },
+              ]
+            }
+            case '/v2/updates/update-by-id':
+              return updateByIdResult
+            default:
+              throw new Error(`unexpected ledgerApi resource ${String(params.resource)}`)
+          }
+        }
+        case 'prepareExecuteAndWait':
+          return submitResult
+        default:
+          throw new Error(`unexpected provider method ${args.method}`)
       }
-      return [{ contractEntry: { JsActiveContract: { synchronizerId: 'sync', createdEvent } } }]
     },
+    on: () => provider,
+    emit: () => true,
+    removeListener: () => provider,
   }
   const chain = Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton },
     logger: { debug() {}, info() {}, warn() {}, error() {} },
+    activeParty: POOL_OWNER,
+    ledgerApiClient: createLedgerApiClientFromProvider(provider as CantonRpcProvider),
     provider,
   }) as CantonChain
-  return { chain, queries }
+  return {
+    chain,
+    queries,
+    /** Configure what `prepareExecuteAndWait` submissions resolve to. */
+    submit(result: unknown) {
+      submitResult = result
+    },
+    /** Configure what `/v2/updates/update-by-id` lookups resolve to. */
+    updateById(result: unknown) {
+      updateByIdResult = result
+    },
+  }
 }
 
 /** Generates an update adding one EVM lane, overridden by `update`. */
@@ -203,12 +245,12 @@ describe('applyChainUpdates commandId', () => {
 
 describe('applyChainUpdates committed-but-unavailable outcome', () => {
   it('throws CCIPTxOutcomeUnavailableError when the committed response lacks the exercise event', async () => {
-    const { chain } = chainWith()
-    Object.assign(chain.provider, {
-      submitAndWaitForTransaction: async () => ({
-        transaction: { updateId: 'update-1', events: [] },
-      }),
-    })
+    const mocked = chainWith()
+    const { chain } = mocked
+    // Submission commits as update-1, but the re-fetched update carries no
+    // Transaction (the expected result events are missing).
+    mocked.submit({ tx: { payload: { updateId: 'update-1' } } })
+    mocked.updateById({})
 
     await assert.rejects(
       () =>

@@ -12,12 +12,11 @@
  * @packageDocumentation
  */
 
-import type { JsCommands } from '../../canton/client/index.ts'
-import { getTemplateEntityName } from '../../canton/events.ts'
+import type { JsCommands } from '../../canton/clients/ledger-api/client.ts'
+import { getTemplateEntityName } from '../../canton/daml-parse.ts'
 import type { CantonChain } from '../../canton/index.ts'
-import { submitCantonCommands } from '../../canton/submit-commands.ts'
-import { type UnsignedCantonTx, isCantonWallet } from '../../canton/types.ts'
-import { CCIPError, CCIPWalletInvalidError } from '../../errors/index.ts'
+import type { UnsignedCantonTx } from '../../canton/types.ts'
+import { CCIPError, CCIPTxOutcomeUnavailableError } from '../../errors/index.ts'
 import { CCTTxFailedError } from '../errors.ts'
 import { Operation } from '../operation.ts'
 import type { CantonTransactionResult } from './types.ts'
@@ -34,22 +33,17 @@ export type CantonGenerateParams<P extends object> = P & {
 }
 
 /**
- * Canton execute params: an op's own params plus the signing `wallet`.
- * `sender` is derived from `wallet.party` by {@link CantonOperation.execute},
- * so callers omit `sender` on execute (only `wallet` is required).
+ * Canton execute params: an op's own params plus optional acting party.
  *
- * Structurally includes `sender?` so the type satisfies the base
- * `ExecuteParams<CantonGenerateParams<P>>` contract (which requires `sender`).
+ * Canton signing is bound to the {@link CantonChain}'s provider at
+ * construction (the CLI hands it the wallet's signer; the dApp wallet signs in
+ * browser contexts), so `execute` takes no wallet — `wallet` is accepted
+ * (and ignored) only to satisfy the family-agnostic `ExecuteParams` contract.
  */
 export type CantonExecuteParams<P extends object> = P & {
-  /**
-   * Canton wallet identifying the acting party (and optional external signer).
-   * Declared `unknown` (matching the base `ExecuteParams` contract) and narrowed
-   * to {@link CantonWallet} inside {@link CantonOperation.execute} via
-   * {@link isCantonWallet}, so this override stays assignable to the base.
-   */
-  wallet: unknown
-  /** Acting party ID — optional on execute; derived from `wallet.party`. */
+  /** Ignored: the signer is bound to the chain's provider. Accepted for the base `ExecuteParams` contract. */
+  wallet?: unknown
+  /** Acting party ID — optional on execute; defaults to the chain's active party. */
   sender?: string
 }
 
@@ -89,25 +83,30 @@ export abstract class CantonOperation<
   }
 
   /**
-   * Validates the wallet, derives `sender` from `wallet.party`, builds the
-   * commands, and submits via {@link submitCantonCommands}. Returns the
-   * confirmed `updateId` plus the raw ledger response for result parsing.
+   * Derives `sender` (defaulting to the chain's active party — the signer is
+   * bound to the chain's provider at construction), builds the commands, and
+   * submits via {@link CantonChain.submitCommands}. Returns the confirmed
+   * `updateId` plus the raw ledger response for result parsing.
    */
   async execute(
     chain: CantonChain,
     params: CantonExecuteParams<P>,
   ): Promise<CantonTransactionResult> {
-    const { wallet, ...rest } = params
-    if (!isCantonWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
+    const { wallet: _wallet, ...rest } = params
 
-    const parsed = this.prepare({ ...rest, sender: wallet.party } as CantonGenerateParams<P>)
+    const parsed = this.prepare({
+      ...rest,
+      sender: rest.sender ?? chain.activeParty,
+    } as CantonGenerateParams<P>)
     const commands = await this.buildCommands(chain, parsed)
     let response
     try {
-      response = await submitCantonCommands(chain, commands, wallet.signer)
+      response = await chain.submitCommands(commands, this.name)
     } catch (error) {
       // Not CCTTxNotConfirmedError: Canton submit-and-wait isn't safely retriable.
       if (CCIPError.isCCIPError(error)) {
+        // Already committed — inspect the ledger by updateId, never retry.
+        if (error instanceof CCIPTxOutcomeUnavailableError) throw error
         // Command IDs are deterministic per operation, so a duplicate means the
         // original committed — terminal, non-retryable.
         if (error.context['cantonCode'] === 'DUPLICATE_COMMAND') {

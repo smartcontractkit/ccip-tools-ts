@@ -13,7 +13,9 @@
     "ccip-api-ref/docs/api/**",
     "ccip-api-ref/docs-api/**/*.js",
     "ccip-api-ref/docs-api/**/*.js.map",
-    "ccip-api-ref/scripts/**"
+    "ccip-api-ref/scripts/**",
+    "*.generated.*",
+    "ccip-sdk/src/canton/bindings/**"
   ],
   "rules": {
     "eslint/no-unused-vars": [

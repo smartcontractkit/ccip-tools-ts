@@ -35,7 +35,7 @@
  */
 
 import { hashedRawInstanceAddress } from '../../../../canton/ccv-addresses.ts'
-import type { JsCommands } from '../../../../canton/client/index.ts'
+import type { JsCommands } from '../../../../canton/clients/ledger-api/client.ts'
 import { type CantonChain, decodeDamlRecord } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { CCIPTxOutcomeUnavailableError } from '../../../../errors/index.ts'
@@ -287,7 +287,6 @@ export class DeployTokenPool extends CantonOperation<
     const tokenConfig = await chain.findActiveContractByInstanceAddress(
       TOKEN_CONFIG_TEMPLATE_ID,
       tokenConfigAddress,
-      [...new Set([p.sender, ...actAs])],
     )
     let existingTokenConfigCid: string | undefined
     if (tokenConfig) {

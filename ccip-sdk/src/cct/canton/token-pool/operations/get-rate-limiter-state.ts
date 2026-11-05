@@ -97,11 +97,10 @@ export class GetRateLimiterState extends CantonQuery<
     chain: CantonChain,
     p: ParsedGetRateLimiterState,
   ): Promise<GetRateLimiterStateResult> {
-    const party = p.poolOwner ?? chain.ledgerParty
+    const party = p.poolOwner ?? chain.activeParty
     const contract = await chain.findActiveContractByInstanceAddress(
       RATE_LIMITER_TEMPLATE_ID,
       p.rateLimiterInstanceAddress,
-      [party],
     )
     if (!contract) {
       throw new CCTParamsInvalidError(

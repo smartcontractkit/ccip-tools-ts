@@ -77,7 +77,7 @@ function chainWith(contract: CantonActiveContract | null): CantonChain {
   // impossible); Object.assign overrides only what the test exercises.
   return Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton },
-    ledgerParty: LEDGER_PARTY,
+    activeParty: LEDGER_PARTY,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     async findActiveContractByInstanceAddress(
       _t: string,

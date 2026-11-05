@@ -30,8 +30,8 @@ import type { AccessToken, AuthProvider, AuthorizationCodeAuthConfig } from './t
  * orchestration — spawning a local callback server, opening a browser,
  * resolving `CANTON_CLIENT_ID` / `CANTON_CLIENT_SECRET` from env vars — lives
  * in the CLI (`providers/canton/`), which composes these primitives and hands
- * the resulting JWT (or a `() => Promise<string>` token getter) to
- * {@link CantonConfig}.
+ * the resulting JWT (or a `() => Promise<string>` token getter) to its
+ * Canton JSON API provider.
  *
  * Web/Electron embedders compose these primitives with their own
  * redirect/callback handling.

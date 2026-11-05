@@ -9,6 +9,8 @@
  * @packageDocumentation
  */
 
+import type { CantonRpcProvider } from '../../canton/types.ts'
+
 /** Build the `Authorization` header from a gateway credential. */
 function authHeader(accessToken: string): string {
   if (accessToken.startsWith('ApiKey ') || accessToken.startsWith('Bearer ')) return accessToken
@@ -223,4 +225,62 @@ export function createGatewayLedgerFetch(params: {
 
     return callLedgerApi(lowerMethod, resource, body, query)
   }
+}
+
+/**
+ * A read-only {@link CantonRpcProvider} backed by a Wallet Gateway (CIP-103)
+ * JSON-RPC endpoint: answers party/network detection locally and proxies
+ * `ledgerApi` calls through the gateway session. Read-only — unsupported
+ * methods (prepareExecute, signing) throw.
+ */
+export function createGatewayCantonProvider(params: {
+  gatewayUrl: string
+  accessToken: string
+  networkId: string
+  partyId: string
+}): CantonRpcProvider {
+  const { gatewayUrl, accessToken, networkId, partyId } = params
+  const provider = {
+    async request(args: { method: string; params?: unknown }): Promise<unknown> {
+      switch (args.method) {
+        case 'getActiveNetwork':
+          return { networkId }
+        case 'getPrimaryAccount':
+          return { partyId }
+        case 'ledgerApi': {
+          const response = await fetch(gatewayUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: authHeader(accessToken),
+            },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: `gw-ledger-${cryptoRandomId()}`,
+              method: 'ledgerApi',
+              params: args.params,
+            }),
+          })
+          if (!response.ok) {
+            throw new GatewaySubmitError(
+              `gateway ledgerApi failed: HTTP ${response.status}`,
+              await response.text(),
+            )
+          }
+          const json = (await response.json()) as JsonRpcResponse
+          if (json.error) throw new GatewaySubmitError(json.error.message, json.error.data)
+          return json.result ?? {}
+        }
+        default:
+          throw new GatewaySubmitError(
+            `gateway provider does not support method '${args.method}'`,
+            undefined,
+          )
+      }
+    },
+    on: () => provider,
+    emit: () => true,
+    removeListener: () => provider,
+  }
+  return provider as unknown as CantonRpcProvider
 }

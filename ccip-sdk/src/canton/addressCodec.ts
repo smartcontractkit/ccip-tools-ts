@@ -1,7 +1,8 @@
-import { getBytes, hexlify, toUtf8String } from 'ethers'
+import { getBytes, hexlify, id as keccak256Utf8, toUtf8String } from 'ethers'
 
-import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
+import { CCIPArgumentInvalidError, CCIPError, CCIPErrorCode } from '../errors/index.ts'
 import { getDataBytes, hashedUtf8Hex, isCantonPartyId } from '../utils.ts'
+import type { InstrumentId } from './bindings/splice-api-token-holding-v1-1.0.0/Splice/Api/Token/HoldingV1/index.d.ts'
 
 /*
  * Canton Types
@@ -325,4 +326,41 @@ export function addressesMissing(
 ): CantonAddress[] {
   const gotAddresses = got.map((address) => address.instanceAddress().hex())
   return want.filter((address) => !gotAddresses.includes(address.instanceAddress().hex()))
+}
+
+export class CantonInstrumentId {
+  id: string
+  admin: PartyId
+
+  constructor(id: string, admin: PartyId) {
+    this.id = id
+    this.admin = admin
+  }
+
+  static fromString(instrument: string): CantonInstrumentId {
+    const parts = instrument.split('@')
+    if (parts.length !== 2) {
+      throw new CCIPArgumentInvalidError(
+        'instrument',
+        `invalid Canton instrument ID "${instrument}": expected tokenId@tokenAdmin`,
+      )
+    }
+    return new CantonInstrumentId(parts[0]!, parsePartyId(parts[1]!))
+  }
+
+  static fromBinding(instrument: InstrumentId): CantonInstrumentId {
+    return new CantonInstrumentId(instrument.id, parsePartyId(instrument.admin))
+  }
+
+  toString(): string {
+    return `${this.id}@${this.admin}`
+  }
+
+  toHash(): string {
+    return keccak256Utf8(this.toString())
+  }
+
+  equal(to: CantonInstrumentId): boolean {
+    return this.id === to.id && this.admin === to.admin
+  }
 }

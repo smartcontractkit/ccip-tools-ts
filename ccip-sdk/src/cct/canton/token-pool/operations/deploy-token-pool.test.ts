@@ -62,10 +62,12 @@ function mockChain(
     ccipParty: CCIP_OWNER,
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
     // stubbed failure (not undefined) forces the ACS-fallback branch of resolveTar
-    edsDisclosureProvider: {
-      fetchContractDisclosure: async () => {
-        throw new Error('no EDS in test')
-      },
+    edsClientProvider: {
+      globalClientFor: () => ({
+        POST: async () => {
+          throw new Error('no EDS in test')
+        },
+      }),
     },
     findActiveContractByInstanceAddress: async (templateId: string, address: string) =>
       templateId === TOKEN_CONFIG_TEMPLATE_ID
@@ -406,10 +408,8 @@ describe('deployTokenPool lane remote addresses', () => {
 
 function mockChainWithSubmit(events: unknown[]): CantonChain {
   return mockChain('canton:TestNet', {
-    provider: {
-      submitAndWaitForTransaction: async () => ({
-        transaction: { updateId: 'update-1', events },
-      }),
+    async submitCommands(): Promise<unknown> {
+      return { transaction: { updateId: 'update-1', events } }
     },
   })
 }
@@ -462,27 +462,25 @@ describe('deployTokenPool execute result parsing', () => {
   it('parses results from a param snapshot when the caller mutates params mid-flight', async () => {
     const params = { ...baseParams(), wallet }
     const chain = mockChain('canton:TestNet', {
-      provider: {
-        submitAndWaitForTransaction: async () => {
-          // Simulate the caller reusing and mutating the params object while
-          // the submission is in flight.
-          params.poolType = 'lockRelease'
-          params.instanceId = 'pool-2'
-          params.instrumentId = { admin: CCIP_OWNER, id: 'TESTTOKEN' }
-          return {
-            transaction: {
-              updateId: 'update-1',
-              events: [
-                {
-                  CreatedEvent: {
-                    templateId: concreteTemplateId(BURN_MINT_POOL_TEMPLATE_ID, 'deadbeef'),
-                    contractId: 'pool-cid-1',
-                  },
+      async submitCommands(): Promise<unknown> {
+        // Simulate the caller reusing and mutating the params object while
+        // the submission is in flight.
+        params.poolType = 'lockRelease'
+        params.instanceId = 'pool-2'
+        params.instrumentId = { admin: CCIP_OWNER, id: 'TESTTOKEN' }
+        return {
+          transaction: {
+            updateId: 'update-1',
+            events: [
+              {
+                CreatedEvent: {
+                  templateId: concreteTemplateId(BURN_MINT_POOL_TEMPLATE_ID, 'deadbeef'),
+                  contractId: 'pool-cid-1',
                 },
-              ],
-            },
-          }
-        },
+              },
+            ],
+          },
+        }
       },
     })
 
