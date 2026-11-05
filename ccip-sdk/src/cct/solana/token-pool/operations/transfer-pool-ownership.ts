@@ -124,7 +124,7 @@ export class TransferPoolOwnership extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteTransferPoolOwnershipParams,
   ): Promise<ExecuteTransferPoolOwnershipResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

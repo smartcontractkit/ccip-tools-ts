@@ -92,7 +92,7 @@ export class CreateTokenAccount extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteCreateTokenAccountParams,
   ): Promise<ExecuteCreateTokenAccountResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     const tx = await this.buildUnsigned(chain, parsed)
     const hash = await submit(chain, wallet, tx, this.name, computeUnits)

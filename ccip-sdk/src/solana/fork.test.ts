@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { type ChildProcess, execSync, spawn } from 'node:child_process'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
@@ -17,7 +16,6 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
-  SYSVAR_RENT_PUBKEY,
   SendTransactionError,
 } from '@solana/web3.js'
 import { hexlify } from 'ethers'
@@ -38,6 +36,14 @@ import {
   ExecutionState,
   MessageStatus,
 } from '../types.ts'
+import {
+  type SurfpoolInstance,
+  VERBOSE,
+  closeWebSocket,
+  createSurfpoolInstance,
+  isSurfpoolAvailable,
+  syncRentSysvar,
+} from './__tests__/surfpool.ts'
 import { executeV2 } from './exec-v2.ts'
 import {
   ETHEREUM_TO_SOLANA,
@@ -61,139 +67,8 @@ await useResource(['solana-mainnet', 'api'])
 
 // ── Constants ──
 
-const VERBOSE = !!process.env.VERBOSE
-
 const SOLANA_ROUTER = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
 const ETH_MAINNET_SELECTOR = networkInfo('ethereum-mainnet').chainSelector
-
-// ── Surfpool helpers ──
-interface SurfpoolInstance {
-  host: string
-  port: number
-  start(): Promise<void>
-  stop(): Promise<void>
-}
-
-function isSurfpoolAvailable(): boolean {
-  try {
-    execSync('surfpool --version', { stdio: 'ignore' })
-    return true
-  } catch {
-    return false
-  }
-}
-
-function createSurfpoolInstance({
-  rpcUrl,
-  network = 'mainnet',
-  host = '127.0.0.1',
-  port = 8899,
-}: {
-  rpcUrl?: string
-  network?: 'devnet' | 'mainnet' | 'testnet'
-  port?: number
-  host?: string
-} = {}): SurfpoolInstance {
-  let child: ChildProcess | undefined
-
-  return {
-    host,
-    port,
-    async start() {
-      const args = [
-        'start',
-        '--port',
-        String(port),
-        '--host',
-        host,
-        '--no-tui',
-        '--no-studio',
-        '--no-deploy',
-        '--ws-port',
-        String(port + 1),
-      ]
-      if (rpcUrl) {
-        args.push('--rpc-url', rpcUrl)
-      } else {
-        args.push('--network', network)
-      }
-
-      child = spawn('surfpool', args, { stdio: ['ignore', 'pipe', 'pipe'] })
-
-      child.stdout?.on('data', (data: Buffer) => {
-        if (VERBOSE) process.stdout.write(`[surfpool] ${String(data)}`)
-      })
-      child.stderr?.on('data', (data: Buffer) => {
-        if (VERBOSE) process.stderr.write(`[surfpool] ${String(data)}`)
-      })
-
-      // Wait for RPC to become ready
-      const url = `http://${host}:${port}`
-      const deadline = Date.now() + 60_000
-      while (Date.now() < deadline) {
-        try {
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getVersion', params: [] }),
-          })
-          if (res.ok) return
-        } catch {
-          // not ready yet
-        }
-        await new Promise((r) => setTimeout(r, 500))
-      }
-      throw new Error(`Surfpool did not become ready within 60s at ${url}`)
-    },
-
-    async stop() {
-      if (!child) return
-      const proc = child
-      child = undefined
-
-      return new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          proc.kill('SIGKILL')
-          resolve()
-        }, 5_000)
-
-        proc.on('exit', () => {
-          clearTimeout(timeout)
-          resolve()
-        })
-
-        proc.kill('SIGTERM')
-      })
-    },
-  }
-}
-
-/**
- * Tears down the web3.js websocket BEFORE stopping surfpool. Sends confirm through it
- * (connection.confirmTransaction), and web3.js hands its client `max_reconnects: Infinity` — once
- * surfpool is gone the client would retry the dead socket every second forever, keeping the test
- * process alive long after every test has passed. There is no public accessor for the client, so
- * this pokes the private field, but only through its public CommonClient API
- * (setAutoReconnect/close).
- */
-function closeWebSocket(connection: Connection | undefined) {
-  const wsClient = (
-    connection as unknown as
-      | {
-          _rpcWebSocket?: {
-            setAutoReconnect?: (enable: boolean) => void
-            close?: (code?: number, data?: string) => void
-          }
-        }
-      | undefined
-  )?._rpcWebSocket
-  wsClient?.setAutoReconnect?.(false)
-  try {
-    wsClient?.close?.(1000, 'fork tests done')
-  } catch {
-    // socket already gone
-  }
-}
 
 // ── Tests ──
 
@@ -466,31 +341,7 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       commitment: 'confirmed',
       wsEndpoint: `ws://${surfpoolInstance.host}:${surfpoolInstance.port + 1}`,
     })
-    // Surfpool synthesizes rent from its local SVM defaults instead of cloning devnet's sysvar.
-    // Devnet-created accounts can then fail Anchor's rent-exemption check before execution.
-    const upstream = new Connection(rpcEndpoint('RPC_SOLANA_DEVNET'), 'confirmed')
-    const rent = await upstream.getAccountInfo(SYSVAR_RENT_PUBKEY)
-    assert.ok(rent, 'devnet rent sysvar must exist')
-    await fetch(connection.rpcEndpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'surfnet_setAccount',
-        params: [
-          SYSVAR_RENT_PUBKEY.toBase58(),
-          {
-            data: rent.data.toString('hex'),
-            lamports: rent.lamports,
-            owner: rent.owner.toBase58(),
-            executable: rent.executable,
-          },
-        ],
-      }),
-    }).then((res) => res.text())
-    const forkRent = await connection.getAccountInfo(SYSVAR_RENT_PUBKEY)
-    assert.deepEqual(forkRent?.data, rent.data, 'the fork must use devnet rent settings')
+    await syncRentSysvar(connection, rpcEndpoint('RPC_SOLANA_DEVNET'))
 
     solanaChain = new SolanaChain(connection, networkInfo('solana-devnet'), {
       apiClient: null,

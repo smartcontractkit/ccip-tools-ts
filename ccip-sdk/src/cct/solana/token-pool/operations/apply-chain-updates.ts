@@ -17,6 +17,7 @@ import {
   type SolanaExecuteParams,
   type SolanaGenerateParams,
   SolanaOperation,
+  refreshAccountState,
 } from '../../operation.ts'
 import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
@@ -356,6 +357,7 @@ export class ApplyChainUpdates extends SolanaOperation<
     chain: SolanaChain,
     params: GenerateApplyChainUpdatesParams,
   ): Promise<GenerateApplyChainUpdatesResult> {
+    refreshAccountState(chain)
     const parsed = this.prepare(params)
     return packInstructionGroups(
       this.name,
@@ -380,7 +382,7 @@ export class ApplyChainUpdates extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteApplyChainUpdatesParams,
   ): Promise<ExecuteApplyChainUpdatesResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
     validateAuthorityMatchesWallet(
       this.name,
       new PublicKey(parsed.authority),

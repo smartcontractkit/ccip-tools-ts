@@ -191,7 +191,7 @@ export class ProvideLiquidity extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteProvideLiquidityParams,
   ): Promise<ExecuteProvideLiquidityResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

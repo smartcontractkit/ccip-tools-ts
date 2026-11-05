@@ -202,7 +202,7 @@ export class DeployTokenPool extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteDeployTokenPoolParams,
   ): Promise<ExecuteDeployTokenPoolResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

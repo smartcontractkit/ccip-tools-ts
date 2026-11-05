@@ -159,7 +159,7 @@ export class MintTokens extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteMintTokensParams,
   ): Promise<ExecuteMintTokensResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (parsed.multisigSigners.length > 0) {
       throw new CCTParamsInvalidError(
