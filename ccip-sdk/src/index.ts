@@ -159,7 +159,11 @@ export type { SuiClientLike } from './sui/client.ts'
 export { type SuiGrpcChainClientOptions, SuiGrpcChainClient } from './sui/grpc.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
-export type { SinglePartySignatures, UnsignedCantonTx } from './canton/index.ts'
+export type {
+  CantonCreatedContract,
+  SinglePartySignatures,
+  UnsignedCantonTx,
+} from './canton/index.ts'
 export {
   type CantonOperationalDefaults,
   CANTON_FEE_TOKEN_CLI_SYMBOLS,

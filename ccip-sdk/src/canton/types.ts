@@ -46,6 +46,11 @@ export interface UnsignedCantonTx {
   commands: JsCommands
 }
 
+export interface CantonCreatedContract {
+  contractId: string
+  updateId: string
+}
+
 /**
  * An active contract read from the ACS via
  * {@link CantonChain.findActiveContractByInstanceAddress}.
