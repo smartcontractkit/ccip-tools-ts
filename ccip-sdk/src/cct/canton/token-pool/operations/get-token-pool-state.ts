@@ -18,6 +18,7 @@ import {
   extractRecordField,
 } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { FinalityConfig } from '../../encoding.ts'
 import { CantonQuery } from '../../query.ts'
 import { decodeOptionalParty } from '../../token-admin-registry/shared.ts'
 import { instanceAddressOwner, parsePartyId } from '../../validate.ts'
@@ -41,6 +42,8 @@ export interface PoolRemoteChainConfig {
   inboundCustomBlockConfirmationsRateLimiter: string
   /** Outbound rate limiter raw instance address. */
   outboundRateLimiter: string
+  /** Lane finality config (FTF = `WaitForSafe`/`BlockDepth`). */
+  finalityConfig?: FinalityConfig
 }
 
 /** Result of `getTokenPoolState`: the pool's config. */
@@ -249,7 +252,22 @@ function decodeRemoteChainConfigRecord(
       cfg['inboundCustomBlockConfirmationsRateLimiter'],
     ),
     outboundRateLimiter: decodeRawAddress(cfg['outboundRateLimiter']),
+    finalityConfig: decodeFinalityConfig(cfg['finalityConfig']),
   }
+}
+
+/** Decode a `FinalityConfig` variant (`{tag, value}`, Sum-wrapped in gRPC). */
+function decodeFinalityConfig(value: unknown): FinalityConfig | undefined {
+  const v = extractFieldValue(value) ?? value
+  if (!v || typeof v !== 'object') return undefined
+  const rec = v as Record<string, unknown>
+  const tag = typeof rec['tag'] === 'string' ? rec['tag'] : undefined
+  if (tag === 'WaitForFinality' || tag === 'WaitForSafe') return { type: tag }
+  if (tag === 'BlockDepth') {
+    const depth = Number(extractFieldValue(rec['value']))
+    if (Number.isFinite(depth)) return { type: 'BlockDepth', blockConfirmations: depth }
+  }
+  return undefined
 }
 
 /** Decode a `RawInstanceAddress` newtype (`{unpack: string}`, possibly Sum-wrapped in gRPC) to its raw string. */
