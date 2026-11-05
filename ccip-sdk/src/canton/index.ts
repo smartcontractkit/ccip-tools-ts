@@ -104,7 +104,12 @@ export type {
   // Signature,
   SinglePartySignatures,
 } from './clients/ledger-api/client.ts'
-export type { CantonActiveContract, CantonCreatedContract, CantonExtraArgsV1, UnsignedCantonTx } from './types.ts'
+export type {
+  CantonActiveContract,
+  CantonCreatedContract,
+  CantonExtraArgsV1,
+  UnsignedCantonTx,
+} from './types.ts'
 export { decodeDamlRecord, extractFieldValue, extractRecordField } from './daml-parse.ts'
 export {
   INSTANCE_ADDRESS_LENGTH,

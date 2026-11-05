@@ -5,7 +5,6 @@
  * @packageDocumentation
  */
 
-import { parsePartyId } from '../../../canton/addressCodec.ts'
 import {
   type CantonActiveContract,
   type CantonChain,
@@ -119,16 +118,13 @@ export async function resolveTar(
   tarInstanceAddress: string,
 ): Promise<ResolvedTar> {
   const disclosed = await chain.edsClientProvider
-    .globalClientFor(parsePartyId(sender))
+    .globalClientFor(chain.ccipParty)
     .POST('/ccip/v1/global/disclosure/batch', {
       body: { addresses: [tarInstanceAddress] },
     })
     .then((r) => (r.error ? null : r.data.disclosures[0]))
     .catch(() => null)
   if (disclosed) {
-    const ownerFromRaw = tarInstanceAddress.includes('@')
-      ? tarInstanceAddress.slice(tarInstanceAddress.indexOf('@') + 1)
-      : undefined
     return {
       tarContract: {
         contractId: disclosed.contractId,
@@ -138,8 +134,7 @@ export async function resolveTar(
         // symbolic form, which the interactive-submission path rejects.
         templateId: disclosed.templateId,
       },
-      // The TAR raw instance address embeds its owner (`<instanceId>@<ccipOwner>`).
-      ccipOwner: ownerFromRaw,
+      ccipOwner: chain.ccipParty,
     }
   }
 
