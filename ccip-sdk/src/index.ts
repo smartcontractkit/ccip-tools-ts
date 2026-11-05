@@ -155,7 +155,11 @@ import { SuiChain } from './sui/index.ts'
 export type { UnsignedSuiTx } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
 export type { UnsignedTONTx } from './ton/index.ts'
-export type { SinglePartySignatures, UnsignedCantonTx } from './canton/index.ts'
+export type {
+  CantonCreatedContract,
+  SinglePartySignatures,
+  UnsignedCantonTx,
+} from './canton/index.ts'
 export {
   type CantonOperationalDefaults,
   CANTON_FEE_TOKEN_CLI_SYMBOLS,
