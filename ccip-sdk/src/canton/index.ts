@@ -1479,6 +1479,46 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
+   * Helper method to get the CCVs for a given message.
+   * Returns the Canton RawInstanceAddresses for all verifiers that have verified this message.
+   * The message must be verified already and available on the indexer.
+   * */
+  async getCCVsForMessage(messageId: string): Promise<RawInstanceAddress[]> {
+    // Repeats the same logic we've used in execute() to fetch the verifications from the indexer
+    const collected = await this.getVerifications({
+      offRamp: '',
+      request: {
+        lane: { version: CCIPVersion.V2_0 },
+        message: { messageId },
+      } as Parameters<Chain['getVerifications']>[0]['request'],
+    })
+    if (!('verifications' in collected) || collected.verifications.length === 0) {
+      throw new CCIPError(
+        CCIPErrorCode.METHOD_UNSUPPORTED,
+        'CantonChain.execute: no verifications found on the indexer; at least one verification is required',
+      )
+    }
+
+    return collected.verifications.map((v) => {
+      const destAddress = String(v.destAddress).trim()
+      try {
+        return destAddress.includes('@')
+          ? RawInstanceAddress.fromString(destAddress)
+          : RawInstanceAddress.fromHex(destAddress)
+      } catch (error) {
+        throw new CCIPError(
+          CCIPErrorCode.ADDRESS_INVALID,
+          `CantonChain.execute: CCV destination address ${v.destAddress} is not a raw instance address`,
+          {
+            cause: error instanceof Error ? error : undefined,
+            context: { address: v.destAddress },
+          },
+        )
+      }
+    })
+  }
+
+  /**
    * Executes a CCIP message on Canton by:
    * 1. Building the unsigned command via {@link generateUnsignedExecute}.
    * 2. Submitting the command to the Canton Ledger API.
