@@ -413,6 +413,51 @@ async function axiosFetch(version: '1' | '2', request: Request): Promise<Respons
   }
 }
 
+/** Default delay before retrying a transient Canton API error. */
+const DEFAULT_RETRY_DELAY_MS = 1_000
+
+/**
+ * Build the error for a non-2xx Canton Ledger API response.
+ *
+ * Canton returns structured `JsCantonError` bodies (`{code, cause, …}`, either
+ * bare or wrapped in an `error` envelope). The code lands in `context.cantonCode`
+ * — the CCT operations' DUPLICATE_COMMAND detection reads it — alongside
+ * `statusCode`; 429/5xx responses are marked transient so callers retry them.
+ */
+function cantonApiError(method: string, url: string, statusCode: number, body: string): CCIPError {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    parsed = undefined
+  }
+  const record =
+    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : undefined
+  // Unwrap the gRPC-style `{error: {…}}` envelope when present.
+  const cantonError =
+    typeof record?.['error'] === 'object' && record['error'] !== null
+      ? (record['error'] as Record<string, unknown>)
+      : record
+  const code = typeof cantonError?.['code'] === 'string' ? cantonError['code'] : undefined
+  const cause = typeof cantonError?.['cause'] === 'string' ? cantonError['cause'] : undefined
+
+  const isTransient = statusCode === 429 || statusCode >= 500
+  const detail = code ? `[${code}]${cause ? ` ${cause}` : ''}` : body.slice(0, 200)
+  return new CCIPError(
+    CCIPErrorCode.CANTON_API_ERROR,
+    `Canton Ledger API ${method} ${url} failed (${statusCode}): ${detail}`,
+    {
+      context: {
+        statusCode,
+        ...(code ? { cantonCode: code } : {}),
+        ...(cause ? { cantonCause: cause } : {}),
+      },
+      isTransient,
+      retryAfterMs: isTransient ? DEFAULT_RETRY_DELAY_MS : undefined,
+    },
+  )
+}
+
 interface LedgerJsonRequestOptions {
   method: string
   url: string
@@ -448,19 +493,17 @@ async function ledgerJsonRequest({
   try {
     response = fetchFn ? await fetchFn(request) : await axiosFetch(httpVersion ?? '2', request)
   } catch (error) {
+    // Network-level failures (unreachable, reset) are worth retrying.
     throw new CCIPError(
       CCIPErrorCode.CANTON_API_ERROR,
       `Canton Ledger API ${method} ${url} failed: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error instanceof Error ? error : undefined },
+      { cause: error instanceof Error ? error : undefined, isTransient: true },
     )
   }
 
   const text = await response.text()
   if (!response.ok) {
-    throw new CCIPError(
-      CCIPErrorCode.CANTON_API_ERROR,
-      `Canton Ledger API ${method} ${url} failed (${response.status}): ${text}`,
-    )
+    throw cantonApiError(method, url, response.status, text)
   }
   if (text === '') return {}
   try {
