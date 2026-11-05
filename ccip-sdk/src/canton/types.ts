@@ -46,6 +46,11 @@ export interface UnsignedCantonTx {
   commands: JsCommands
 }
 
+export interface CantonCreatedContract {
+  contractId: string
+  updateId: string
+}
+
 /**
  * Canton-specific send parameters passed via `message.extraArgs` when calling
  * {@link CantonChain.generateUnsignedSendMessage} or {@link CantonChain.sendMessage}.
