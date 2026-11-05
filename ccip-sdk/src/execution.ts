@@ -8,7 +8,7 @@ import {
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import { ChainFamily } from './networks.ts'
-import type { CCIPMessage, CCIPVersion, Lane, WithLogger } from './types.ts'
+import { type CCIPMessage, type Lane, type WithLogger, CCIPVersion } from './types.ts'
 import { decodeAddress, decodeOnRampAddress } from './utils.ts'
 
 /**
@@ -89,15 +89,24 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
 }
 
 /**
- * Discover the OffRamp address for a given OnRamp and destination chain.
+ * Discover the OffRamp address for a given lane (OnRamp and protocol version) on a destination
+ * chain.
  * Results are memoized for performance.
+ *
+ * @remarks
+ * One OnRamp can serve more than one lane version to the same destination. For example, a
+ * Solana 2.0 Router (which is also the OnRamp) keeps its 1.6 entrypoint next to the 2.0 one, and
+ * the destination has a 1.6 OffRamp and a 2.0 OffRamp that both accept that Router. The lane
+ * version selects between them: a 2.0 lane gives a 2.0 OffRamp, and a pre-2.0 lane gives a pre-2.0
+ * OffRamp. Use `request.lane` for a sent message: its version comes from the message shape.
  *
  * @param source - Source chain instance.
  * @param dest - Destination chain instance.
- * @param onRamp - OnRamp contract address on source chain.
+ * @param lane - Lane to discover the OffRamp for: `onRamp` (OnRamp address on source chain) and
+ *   `version` (CCIP protocol version of the lane, e.g. `request.lane.version`).
  * @param ctx - Optional context with logger.
  * @returns OffRamp address on destination chain.
- * @throws CCIPOffRampNotFoundError - When no matching OffRamp is found for the OnRamp
+ * @throws CCIPOffRampNotFoundError - When no OffRamp of the lane's version accepts the OnRamp
  * @example
  * ```typescript
  * import { discoverOffRamp, EVMChain } from '@chainlink/ccip-sdk'
@@ -105,7 +114,8 @@ export function calculateManualExecProof<V extends CCIPVersion = CCIPVersion>(
  * const source = await EVMChain.fromUrl('https://rpc.sepolia.org')
  * const dest = await EVMChain.fromUrl('https://rpc.fuji.avax.network')
  *
- * const offRamp = await discoverOffRamp(source, dest, onRampAddress)
+ * const [request] = await source.getMessagesInTx(txHash)
+ * const offRamp = await discoverOffRamp(source, dest, request.lane)
  * console.log('OffRamp on destination:', offRamp)
  * ```
  * @see {@link calculateManualExecProof} - Use with OffRamp for manual execution
@@ -116,7 +126,7 @@ export const discoverOffRamp = memoize(
   async function discoverOffRamp_(
     source: Chain,
     dest: Chain,
-    onRamp: string,
+    { onRamp, version }: Pick<Lane, 'onRamp' | 'version'>,
     { logger = console }: WithLogger = {},
   ): Promise<string> {
     try {
@@ -124,11 +134,12 @@ export const discoverOffRamp = memoize(
     } catch {
       // pass
     }
+    const isV2 = version >= CCIPVersion.V2_0
 
-    // OnRamp v2.0 has `offRamp` config
+    // OnRamp v2.0 has `offRamp` config; only a 2.0 lane's config gives a 2.0 OffRamp
     const onRampConfig: { typeAndVersion: string; offramp?: string; offRamp?: string } =
-      await source.getOnRampConfig(onRamp, dest.network.chainSelector)
-    if (onRampConfig.offramp || onRampConfig.offRamp) {
+      await source.getOnRampConfig(onRamp, dest.network.chainSelector, { version })
+    if (isV2 && (onRampConfig.offramp || onRampConfig.offRamp)) {
       let decoded = decodeAddress(
         onRampConfig.offramp || onRampConfig.offRamp!,
         dest.network.family,
@@ -145,7 +156,8 @@ export const discoverOffRamp = memoize(
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
     // every (destOnRamp, dest offRamp, onRamp it accepts) triplet considered,
     // reported in the error if none of them accepts our onRamp
-    const examined: { destOnRamp: string; offRamp: string; accepts: string }[] = []
+    const examined: { destOnRamp: string; offRamp: string; accepts: string; version?: string }[] =
+      []
     let sourceOffRamps: string[] = []
     try {
       sourceOffRamps = await source.getOffRampsForRouter(sourceRouter, dest.network.chainSelector)
@@ -207,11 +219,29 @@ export const discoverOffRamp = memoize(
               offRamp,
               offRampsOnRamp,
             })
-            examined.push({ destOnRamp, offRamp, accepts: offRampsOnRamp })
             // both sides are in their source family's canonical onRamp form:
             // this one because every getOffRampConfig decodes it with
             // decodeOnRampAddress, ours because it was normalized above
-            if (offRampsOnRamp === onRamp) {
+            if (offRampsOnRamp !== onRamp) {
+              examined.push({ destOnRamp, offRamp, accepts: offRampsOnRamp })
+              continue
+            }
+            // OffRamps of different versions can accept the same onRamp (e.g. a Solana 2.0
+            // Router serves 1.6 and 2.0 lanes): keep the one of the lane's version
+            const offRampVersion = await dest.typeAndVersion(offRamp).then(
+              ([, v]) => v,
+              (err: unknown) => {
+                logger.debug('discoverOffRamp: no typeAndVersion for dest offRamp', offRamp, err)
+                return undefined
+              },
+            )
+            examined.push({
+              destOnRamp,
+              offRamp,
+              accepts: offRampsOnRamp,
+              ...(offRampVersion && { version: offRampVersion }),
+            })
+            if (offRampVersion == null || offRampVersion >= CCIPVersion.V2_0 === isV2) {
               return offRamp
             }
           }
@@ -223,11 +253,11 @@ export const discoverOffRamp = memoize(
     // source onRamp) that pairing is the answer, and it is otherwise only
     // visible with debug logging on.
     throw new CCIPOffRampNotFoundError(onRamp, dest.network.name, {
-      context: { sourceRouter, sourceOffRamps, examined },
+      context: { version, sourceRouter, sourceOffRamps, examined },
     })
   },
   {
-    transformKey: ([source, dest, onRamp]) =>
-      [source.network.chainSelector, dest.network.chainSelector, onRamp] as const,
+    transformKey: ([source, dest, { onRamp, version }]) =>
+      [source.network.chainSelector, dest.network.chainSelector, onRamp, version] as const,
   },
 )

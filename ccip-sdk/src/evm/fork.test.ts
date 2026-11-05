@@ -527,7 +527,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
           const offRamp: string = await discoverOffRamp(
             solanaSourceChain,
             sepoliaChain,
-            request.lane.onRamp,
+            request.lane,
             solanaSourceChain,
           )
           assert.ok(offRamp, 'offRamp should be discovered')
@@ -603,7 +603,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
           const offRamp: string = await discoverOffRamp(
             solanaSourceChain,
             sepoliaChain,
-            request.lane.onRamp,
+            request.lane,
             solanaSourceChain,
           )
           assert.ok(offRamp, 'offRamp should be discovered')

@@ -114,6 +114,8 @@ export type RawMessageResponse = {
   nonce?: string | null
   routerAddress?: string | null
   version?: string | null
+  /** MessageV1Codec-serialized message: set for 2.0 messages, `null` for 1.6 ones */
+  encodedMessage?: string | null
   receiptTransactionHash?: string
   receiptTimestamp?: string
   deliveryTime?: bigint

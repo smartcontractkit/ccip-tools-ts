@@ -314,7 +314,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     })
     this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
       async: true,
-      maxArgs: 2,
+      maxArgs: 3,
+      // the lane version selects the 1.6 or the 2.0 lane config of a 2.0 router; key on it, not
+      // on the options object's identity (a new literal on every call)
+      transformKey: ([onRamp, destChainSelector, opts]) =>
+        [onRamp, destChainSelector, opts?.version] as const,
       expires: 60e3,
     })
     this.getOffRampConfig = memoize(this.getOffRampConfig.bind(this), {
@@ -622,8 +626,18 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return onRamp
   }
 
-  /** {@inheritDoc Chain.getOnRampConfig} */
-  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+  /**
+   * {@inheritDoc Chain.getOnRampConfig}
+   *
+   * A 2.0 Router serves a 1.6 lane (`ccip_send`, `dest_chain_state` PDA) and a 2.0 lane
+   * (`ccip_send_v2`, `dest_chain_state_v2` PDA) to the same destination. `opts.version`
+   * selects which lane config to read; without it, the Router's own version selects it.
+   */
+  async getOnRampConfig(
+    onRamp: string,
+    destChainSelector: bigint,
+    opts?: { version?: CCIPVersion },
+  ) {
     const [, version, typeAndVersion] = await this.typeAndVersion(onRamp)
     const routerConfig = await this._getRouterConfig(onRamp)
 
@@ -632,7 +646,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     // the lane fee config into that account instead of a separate FeeQuoter dest_chain account
     // (fees are quoted by a committee-verifier CCV at send time). Handle it separately; the rest
     // of the router (Config account) stays byte-compatible with the 1.6 IDL.
-    if (version.startsWith('2.')) {
+    if ((opts?.version ?? version) >= CCIPVersion.V2_0) {
       const program = newProgram(CCIP_ROUTER_V2_IDL, new PublicKey(onRamp), {
         connection: this.connection,
       })

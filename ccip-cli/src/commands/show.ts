@@ -310,7 +310,7 @@ export async function showRequests(
     cancelWaitFinalized?.()
     await finalized$
   } else {
-    offRamp ??= await discoverOffRamp(source!, dest, request.lane.onRamp, source)
+    offRamp ??= await discoverOffRamp(source!, dest, request.lane, source)
 
     let watch
     if (argv.wait) {

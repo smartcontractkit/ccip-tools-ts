@@ -11,6 +11,7 @@ import { raceRpcEndpoint, rpcEndpoint } from '../../../scripts/test-endpoints.ts
 import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { EVMChain } from '../evm/index.ts'
 import { discoverOffRamp } from '../execution.ts'
+import { CCIPVersion } from '../types.ts'
 import type { SuiClientLike } from './client.ts'
 import {
   findOffRampPackagesByCcipActivity,
@@ -449,10 +450,16 @@ describe('SuiChain integration (sui-testnet)', { skip }, () => {
       // onramp/offramp pairing is discovered live in both directions
       const sepolia = await EVMChain.fromUrl(SEPOLIA_RPC)
       try {
-        const toSui = await discoverOffRamp(sepolia, chain, SEPOLIA_ONRAMP)
+        const toSui = await discoverOffRamp(sepolia, chain, {
+          onRamp: SEPOLIA_ONRAMP,
+          version: CCIPVersion.V1_6,
+        })
         assert.equal(toSui, OFFRAMP)
 
-        const fromSui = await discoverOffRamp(chain, sepolia, ONRAMP)
+        const fromSui = await discoverOffRamp(chain, sepolia, {
+          onRamp: ONRAMP,
+          version: CCIPVersion.V1_6,
+        })
         assert.equal(fromSui, SEPOLIA_OFFRAMP)
       } finally {
         sepolia.destroy()

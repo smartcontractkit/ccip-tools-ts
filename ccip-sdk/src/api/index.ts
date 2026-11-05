@@ -1002,14 +1002,19 @@ export class CCIPAPIClient {
     // Build lane - all fields available from API
     const source = ensureNetworkInfo(sourceNetworkInfo, this.logger)
     const dest = ensureNetworkInfo(destNetworkInfo, this.logger)
+    let laneVersion = (version?.replace(/-dev$/, '').replace(/^(\d+\.\d+)(?:\.\d+)?$/, '$1.0') ??
+      CCIPVersion.V1_6) as CCIPVersion
+    // The API reports the OnRamp's version, but a 2.0 OnRamp can also emit 1.6 messages (a
+    // Solana 2.0 Router keeps its 1.6 entrypoint). Only 2.0 messages have an encodedMessage.
+    if (laneVersion >= CCIPVersion.V2_0 && 'encodedMessage' in raw && raw.encodedMessage === null)
+      laneVersion = CCIPVersion.V1_6
     const lane = {
       source,
       sourceChainSelector: source.chainSelector,
       dest,
       destChainSelector: dest.chainSelector,
       onRamp: onramp,
-      version: (version?.replace(/-dev$/, '').replace(/^(\d+\.\d+)(?:\.\d+)?$/, '$1.0') ??
-        CCIPVersion.V1_6) as CCIPVersion,
+      version: laneVersion,
     }
 
     // Build log from API data

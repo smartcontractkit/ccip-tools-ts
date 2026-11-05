@@ -505,7 +505,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
       assert.equal(request.lane.onRamp, 'CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm')
       assert.equal(request.lane.version, '2.0.0')
 
-      const offRamp = await discoverOffRamp(solanaChain, dest, request.lane.onRamp)
+      const offRamp = await discoverOffRamp(solanaChain, dest, request.lane)
       assert.equal(offRamp, SEPOLIA_V2_OFFRAMP)
     }
   })
@@ -580,7 +580,7 @@ describe('Solana Devnet estimateReceiveExecution Tests', { skip }, () => {
     const request = requests[0]!
     assert.equal(request.message.messageId, ESTIMATE_MSG.messageId)
 
-    const offRamp = await discoverOffRamp(source, chain, request.lane.onRamp, source)
+    const offRamp = await discoverOffRamp(source, chain, request.lane, source)
     const estimated = await chain.estimateReceiveExecution({
       offRamp,
       message: {
