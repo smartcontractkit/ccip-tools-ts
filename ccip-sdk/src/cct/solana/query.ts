@@ -7,6 +7,7 @@
 
 import type { SolanaChain } from '../../solana/index.ts'
 import { Query } from '../query.ts'
+import { refreshAccountState } from './operation.ts'
 
 /** Shared base for read-only Solana CCT queries; see {@link Query}. */
 export abstract class SolanaQuery<P extends object, R, Parsed = P> extends Query<
@@ -14,4 +15,10 @@ export abstract class SolanaQuery<P extends object, R, Parsed = P> extends Query
   P,
   R,
   Parsed
-> {}
+> {
+  /** Reads fresh account state; see {@link refreshAccountState}. */
+  override async query(chain: SolanaChain, params: P): Promise<R> {
+    refreshAccountState(chain)
+    return super.query(chain, params)
+  }
+}

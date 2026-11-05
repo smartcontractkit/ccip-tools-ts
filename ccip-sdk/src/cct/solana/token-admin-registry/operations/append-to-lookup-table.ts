@@ -245,7 +245,7 @@ export class AppendToLookupTable extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteAppendToLookupTableParams,
   ): Promise<ExecuteAppendToLookupTableResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

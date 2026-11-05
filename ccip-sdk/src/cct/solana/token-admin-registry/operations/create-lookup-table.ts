@@ -197,7 +197,7 @@ export class CreateLookupTable extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteCreateLookupTableParams,
   ): Promise<ExecuteCreateLookupTableResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.mode !== 'createEmpty' && params.authority !== undefined) {
       validateAuthorityMatchesWallet(

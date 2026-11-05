@@ -112,7 +112,7 @@ export class SetRateLimitAdmin extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteSetRateLimitAdminParams,
   ): Promise<ExecuteSetRateLimitAdminResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

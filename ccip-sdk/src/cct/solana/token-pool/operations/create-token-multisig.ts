@@ -230,7 +230,7 @@ export class CreateTokenMultisig extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteCreateTokenMultisigParams,
   ): Promise<ExecuteCreateTokenMultisigResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
     const mintAccount = await resolveTokenMint(chain.connection, parsed.tokenMint)
 
     const tokenProgram = mintAccount.owner

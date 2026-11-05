@@ -187,7 +187,7 @@ export class UpdateMetadataAuthority extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteUpdateMetadataAuthorityParams,
   ): Promise<ExecuteUpdateMetadataAuthorityResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(
