@@ -1750,63 +1750,48 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       actAs: [this.activeParty],
       disclosedContracts: perPartyRouterFactoryDisclosuresResponse.data.disclosedContracts,
     }
-    const submitResult = await this.submitCommands(createCmd, 'Create PerPartyRouter')
-    if (!submitResult.transaction.transactionHash) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createPerPartyRouter: failed to create router: transaction hash not found in submitted transaction`,
-      )
-    }
+    const { transaction } = await this.submitCommands(createCmd, 'Create PerPartyRouter')
 
-    // Get transaction
-    const response = await this.ledgerApiClient.getUpdateById(
-      submitResult.transaction.transactionHash,
-      {
-        includeTransactions: {
-          eventFormat: {
-            filtersByParty: {
-              [this.activeParty]: {
-                cumulative: [
-                  {
-                    identifierFilter: {
-                      InterfaceFilter: {
-                        value: {
-                          interfaceId: PerPartyRouterIdentifier.toString(),
-                          includeInterfaceView: true,
-                          includeCreatedEventBlob: false,
-                        },
+    // Interface views aren't in submitCommands' update format, so re-fetch with them.
+    const { update } = await this.ledgerApiClient.getUpdateById(transaction.updateId, {
+      includeTransactions: {
+        eventFormat: {
+          filtersByParty: {
+            [this.activeParty]: {
+              cumulative: [
+                {
+                  identifierFilter: {
+                    InterfaceFilter: {
+                      value: {
+                        interfaceId: PerPartyRouterIdentifier.toString(),
+                        includeInterfaceView: true,
+                        includeCreatedEventBlob: false,
                       },
                     },
                   },
-                ],
-              },
+                },
+              ],
             },
-            verbose: true,
           },
-          transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
+          verbose: true,
         },
+        transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
       },
-    )
-    if (!response.update) {
+    })
+    if (!update || !('Transaction' in update)) {
       throw new CCIPError(
         CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createPerPartyRouter: Canton update response did not include an update for hash ${submitResult.transaction.transactionHash}`,
-      )
-    }
-    if (!('Transaction' in response.update)) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createPerPartyRouter: update does not contain transaction`,
+        `CantonChain.createPerPartyRouter: Canton update ${transaction.updateId} is not a Transaction update`,
       )
     }
     const createdEvent = getInterfaceCreatedEventFromTransaction(
-      response.update.Transaction.value,
+      update.Transaction.value,
       PerPartyRouterIdentifier_PkgId,
     )
     if (!createdEvent) {
       throw new CCIPError(
         CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createPerPartyRouter: no CreatedEvent found in tx ${response.update.Transaction.value.transactionHash}`,
+        `CantonChain.createPerPartyRouter: no CreatedEvent found in tx ${transaction.updateId}`,
       )
     }
 
@@ -1863,62 +1848,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       ],
       actAs: [this.activeParty],
     }
-    const submitResult = await this.submitCommands(createCmd, 'Create CCIPSender')
-    if (!submitResult.transaction.transactionHash) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createCCIPSender: failed to create sender: transaction hash not found in submitted transaction`,
-      )
-    }
-
-    // Get transaction
-    const response = await this.ledgerApiClient.getUpdateById(
-      submitResult.transaction.transactionHash,
-      {
-        includeTransactions: {
-          eventFormat: {
-            filtersByParty: {
-              [this.activeParty]: {
-                cumulative: [
-                  {
-                    identifierFilter: {
-                      TemplateFilter: {
-                        value: {
-                          templateId: CCIPSenderIdentifier.toString(),
-                          includeCreatedEventBlob: false,
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-            verbose: true,
-          },
-          transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
-        },
-      },
-    )
-    if (!response.update) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createCCIPSender: Canton update response did not include an update for hash ${submitResult.transaction.transactionHash}`,
-      )
-    }
-    if (!('Transaction' in response.update)) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createCCIPSender: update does not contain transaction`,
-      )
-    }
-    const createdEvent = getCreatedEventFromTransaction(
-      response.update.Transaction.value,
-      CCIPSenderIdentifier,
-    )
+    const { transaction } = await this.submitCommands(createCmd, 'Create CCIPSender')
+    const createdEvent = getCreatedEventFromTransaction(transaction, CCIPSenderIdentifier)
     if (!createdEvent) {
       throw new CCIPError(
         CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createCCIPSender: no CreatedEvent found in tx ${response.update.Transaction.value.transactionHash}`,
+        `CantonChain.createCCIPSender: no CreatedEvent found in tx ${transaction.updateId}`,
       )
     }
 
@@ -2052,62 +1987,12 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       ],
       actAs: [this.activeParty],
     }
-    const submitResult = await this.submitCommands(createCmd, 'Create CCIPReceiver')
-    if (!submitResult.transaction.transactionHash) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createCCIPReceiver: failed to create receiver: transaction hash not found in submitted transaction`,
-      )
-    }
-
-    // Get transaction
-    const response = await this.ledgerApiClient.getUpdateById(
-      submitResult.transaction.transactionHash,
-      {
-        includeTransactions: {
-          eventFormat: {
-            filtersByParty: {
-              [this.activeParty]: {
-                cumulative: [
-                  {
-                    identifierFilter: {
-                      TemplateFilter: {
-                        value: {
-                          templateId: CCIPReceiverIdentifier.toString(),
-                          includeCreatedEventBlob: false,
-                        },
-                      },
-                    },
-                  },
-                ],
-              },
-            },
-            verbose: true,
-          },
-          transactionShape: 'TRANSACTION_SHAPE_LEDGER_EFFECTS',
-        },
-      },
-    )
-    if (!response.update) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createCCIPReceiver: Canton update response did not include an update for hash ${submitResult.transaction.transactionHash}`,
-      )
-    }
-    if (!('Transaction' in response.update)) {
-      throw new CCIPError(
-        CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createCCIPReceiver: update does not contain transaction`,
-      )
-    }
-    const createdEvent = getCreatedEventFromTransaction(
-      response.update.Transaction.value,
-      CCIPReceiverIdentifier,
-    )
+    const { transaction } = await this.submitCommands(createCmd, 'Create CCIPReceiver')
+    const createdEvent = getCreatedEventFromTransaction(transaction, CCIPReceiverIdentifier)
     if (!createdEvent) {
       throw new CCIPError(
         CCIPErrorCode.CANTON_API_ERROR,
-        `CantonChain.createCCIPReceiver: no CreatedEvent found in tx ${response.update.Transaction.value.transactionHash}`,
+        `CantonChain.createCCIPReceiver: no CreatedEvent found in tx ${transaction.updateId}`,
       )
     }
 
