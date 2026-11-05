@@ -316,48 +316,98 @@ describe(
     })
 
     // Ethereum -> Monad LBTC message through LombardTokenPool 2.1: the payload hash is only in the
-    // source CCIPMessageSent's verifierBlobs, so the request is read from the source chain
+    // source CCIPMessageSent's verifierBlobs, so the request is read from the source chain.
+    //
+    // The message is resolved at runtime, newest first: the keyless Monad endpoint behind
+    // RPC_MONAD_MAINNET retains only a few days of receipts and archive state, so a pinned
+    // message/tx stops being replayable within about a week (observed 2026-11: a 10-day-old
+    // receipt is pruned, a 2-day-old one still answers).
+    const LBTC_ETHEREUM = '0x8236a87084f8B84306f72007F36F2618A5634494'
+    const LOMBARD_RESOLVER = '0xd314336866369adf98EDC14F95Ed05eD87CC74A8'
+
     it('composes Lombard ccvData accepted by the real Lombard verifier', async () => {
-      const SOURCE_TX = '0xe6006b2b65b353b5283b1f670d92a7dfd9f2345c952d14550db4ff3ffbc57d51'
-      const LOMBARD_RESOLVER = '0xd314336866369adf98EDC14F95Ed05eD87CC74A8'
-      const OFF_RAMP = '0xa315658c5E11b0Ca99dE255F07F10E6C584E4e01'
       const ethereumChain = await EVMChain.fromUrl(ETHEREUM_RPC, { apiClient: null })
       const monadChain = await EVMChain.fromUrl(MONAD_RPC, { apiClient: null })
       try {
-        const [request] = await ethereumChain.getMessagesInTx(SOURCE_TX)
-        assert.ok(request)
-        const api = CCIPAPIClient.fromUrl()
-        const { metadata } = await api.getMessageById(request.message.messageId)
-        // the committee verifier's signatures come from the API, the Lombard CCV's from the fallback
-        const fromApi = await api.getVerifications(request.message.messageId)
-        const lombardFromApi = fromApi.find((v) => v.destAddress === LOMBARD_RESOLVER)
-        const verifications = await collectAndSimulate(
-          monadChain,
-          request,
-          OFF_RAMP,
-          metadata.receiptTransactionHash!,
-          Object.fromEntries(
-            fromApi
-              .filter((v) => v !== lombardFromApi)
-              .map((v) => [v.destAddress, hexlify(v.ccvData)]),
-          ),
-        )
-        const lombard = verifications.find((v) => v.destAddress === LOMBARD_RESOLVER)
-        assert.ok(lombard, 'the fallback must compose a result for the Lombard verifier')
-        // [LombardVerifier 2.1.0 tag][payloadLength][payload][proofLength][proof]: the tag and the
-        // payload match what the CCV posted; the proof may carry a different subset of the notary
-        // signatures (the posted one zeroes those beyond the threshold), and the simulated
-        // `execute` above is what proves it valid
-        const ours = hexlify(lombard.ccvData)
-        const posted = hexlify(lombardFromApi!.ccvData)
-        const payloadEnd = 2 + 2 * (4 + 2 + parseInt(ours.slice(10, 14), 16))
-        assert.equal(ours.slice(0, 10), '0x5b9253ce')
-        assert.equal(ours.slice(0, payloadEnd), posted.slice(0, payloadEnd))
-        assert.equal(ours.length, posted.length)
+        await replayNewestLombardMessage(ethereumChain, monadChain)
       } finally {
         ethereumChain.provider.destroy()
         monadChain.provider.destroy()
       }
     })
+
+    async function replayNewestLombardMessage(
+      ethereumChain: EVMChain,
+      monadChain: EVMChain,
+    ): Promise<void> {
+      const api = CCIPAPIClient.fromUrl()
+
+      const page = await api.searchMessages(
+        {
+          sourceChainSelector: ETHEREUM_SELECTOR,
+          destChainSelector: MONAD_SELECTOR,
+          sourceTokenAddress: LBTC_ETHEREUM,
+        },
+        { limit: 100 },
+      )
+      const candidates = page.data.filter((msg) => msg.status === 'SUCCESS').slice(0, 5)
+      assert.ok(candidates.length, 'CCIP API has no recent executed Ethereum→Monad LBTC message')
+
+      const errors: string[] = []
+      for (const { messageId, sendTransactionHash } of candidates) {
+        try {
+          const { metadata } = await api.getMessageById(messageId)
+          const offRamp = metadata.offRamp
+          const receiptTxHash = metadata.receiptTransactionHash
+          // candidate eligibility: move on (do not fail) for messages without Lombard data
+          if (!offRamp || !receiptTxHash) {
+            errors.push(`${messageId}: no offRamp/receipt in API metadata`)
+            continue
+          }
+          // the committee verifier's signatures come from the API, the Lombard CCV's from the fallback
+          const fromApi = await api.getVerifications(messageId)
+          const lombardFromApi = fromApi.find((v) => v.destAddress === LOMBARD_RESOLVER)
+          if (!lombardFromApi) {
+            errors.push(`${messageId}: API has no Lombard verification`)
+            continue
+          }
+          const [request] = await ethereumChain.getMessagesInTx(sendTransactionHash)
+          if (!request) {
+            errors.push(`${messageId}: source tx carries no CCIP message`)
+            continue
+          }
+          const verifications = await collectAndSimulate(
+            monadChain,
+            request,
+            offRamp,
+            receiptTxHash,
+            Object.fromEntries(
+              fromApi
+                .filter((v) => v !== lombardFromApi)
+                .map((v) => [v.destAddress, hexlify(v.ccvData)]),
+            ),
+          )
+          const lombard = verifications.find((v) => v.destAddress === LOMBARD_RESOLVER)
+          assert.ok(lombard, 'the fallback must compose a result for the Lombard verifier')
+          // [LombardVerifier 2.1.0 tag][payloadLength][payload][proofLength][proof]: the tag and
+          // the payload match what the CCV posted; the proof may carry a different subset of the
+          // notary signatures (the posted one zeroes those beyond the threshold), and the
+          // simulated `execute` above is what proves it valid
+          const ours = hexlify(lombard.ccvData)
+          const posted = hexlify(lombardFromApi.ccvData)
+          const payloadEnd = 2 + 2 * (4 + 2 + parseInt(ours.slice(10, 14), 16))
+          assert.equal(ours.slice(0, 10), '0x5b9253ce')
+          assert.equal(ours.slice(0, payloadEnd), posted.slice(0, payloadEnd))
+          assert.equal(ours.length, posted.length)
+          return
+        } catch (err) {
+          // a replay that cannot reach the chain (pruned receipt/state, RPC error) moves on to
+          // the next candidate; a wrong SDK result fails at once
+          if (err instanceof assert.AssertionError) throw err
+          errors.push(`${messageId}: ${(err as Error).message}`)
+        }
+      }
+      assert.fail(`no recent Ethereum→Monad LBTC message could be replayed:\n${errors.join('\n')}`)
+    }
   },
 )
