@@ -199,18 +199,32 @@ const captureRecentTokenlessSend = async (
   return undefined
 }
 
-describe('SuiChain integration (sui-testnet)', { skip }, () => {
+/**
+ * Retention gate, at load time so the suite can be skipped as a whole: every test below
+ * runs against the captured send. Public sui-testnet fullnodes keep only a few weeks of
+ * history, and the onramp can stay quiet for longer: as of 2026-11-05 its newest send
+ * (2026-10-21, 4DoxyAJ8cy8ZgAeczAnaM1o8hEkyPYQjA255eH8Kkmz8) was pruned on every public
+ * endpoint the SDK can use (fullnode.testnet.sui.io, rpc-testnet.suiscan.xyz; only
+ * Mysten's GraphQL service, which the SDK does not speak, still had it). The suite then
+ * skips, and runs again once a new send lands or RPC_SUI_TESTNET points at an endpoint
+ * that still serves one. Errors other than pruning still fail the file.
+ */
+// fromUrl detects the transport the raced endpoint speaks (gRPC-Web or JSON-RPC)
+const suiChain = skip ? undefined : await SuiChain.fromUrl(SUI_TESTNET_RPC)
+const capturedSend = suiChain && (await captureRecentTokenlessSend(suiChain.client))
+const suiteSkip =
+  skip ||
+  (!capturedSend &&
+    `no tokenless CCIPMessageSent on the onramp that ${SUI_TESTNET_RPC} still serves ` +
+      '(public fullnodes prune history): send one, or set RPC_SUI_TESTNET to an endpoint ' +
+      'with longer retention')
+
+describe('SuiChain integration (sui-testnet)', { skip: suiteSkip }, () => {
   let chain: SuiChain
   let fixture: SendFixture
-  before(async () => {
-    // fromUrl detects the transport the raced endpoint speaks (gRPC-Web or JSON-RPC)
-    chain = await SuiChain.fromUrl(SUI_TESTNET_RPC)
-    const captured = await captureRecentTokenlessSend(chain.client)
-    if (!captured)
-      throw new Error(
-        'no tokenless CCIPMessageSent on the onramp within the capture budget — check chain activity or widen the scan',
-      )
-    fixture = captured
+  before(() => {
+    chain = suiChain!
+    fixture = capturedSend!
   })
 
   it('connects and detects sui-testnet', () => {
