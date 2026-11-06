@@ -1321,13 +1321,24 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * {@link OnRampConfig} base interface declares — they may include extra fields
    * available only on specific versions.
    *
+   * One OnRamp can serve more than one lane version to the same destination: a Solana 2.0
+   * Router keeps its 1.6 lane config next to the 2.0 one. Give `opts.version` to select
+   * the lane; families whose OnRamp serves one version only ignore it. The lane version is
+   * not the contract version: the returned `typeAndVersion` always identifies the contract.
+   *
    * @param onRamp - OnRamp contract address.
    * @param destChainSelector - Destination chain selector.
+   * @param opts - Optional lane selection: `version` is the CCIP protocol version of the
+   *   lane (e.g. `request.lane.version`). Default: the contract's own version.
    * @returns Merged OnRamp config — at minimum `router`, `type`, `version`, `typeAndVersion`.
    *
    * @throws {@link CCIPContractTypeInvalidError} if address is not an OnRamp.
    */
-  abstract getOnRampConfig(onRamp: string, destChainSelector: bigint): Promise<OnRampConfig>
+  abstract getOnRampConfig(
+    onRamp: string,
+    destChainSelector: bigint,
+    opts?: { version?: CCIPVersion },
+  ): Promise<OnRampConfig>
 
   /**
    * Fetch the full OffRamp configuration for a given source chain.

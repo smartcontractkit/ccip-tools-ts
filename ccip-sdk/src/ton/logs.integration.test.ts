@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 
+import { Address } from '@ton/core'
+
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPError, CCIPLogsStreamInconsistentError } from '../errors/index.ts'
@@ -19,29 +21,31 @@ await useResource(['ton-testnet'])
  * Live-testnet coverage of the three getLogs scan shapes the ccip-o11y Temporal
  * pollers actually drive (pollConfigs/pollRequests:ton-testnet, observed 2026-08):
  *
- *  A. startTime-only (24h lookback, watermark 0) on a busy address with unmatched
+ *  A. startTime-only (the scan window, watermark 0) on a busy address with unmatched
  *     topics — the cold backfill. Must take the TonCenter v3 index fast path: one
  *     /messages page + cached /masterchainInfo tip + paged /transactions meta — never
  *     the per-tx v2 chain walk.
  *  A2. startTime-only with a MATCHING topic — same fast path, and it actually yields:
  *     real logs hydrated from v2 by (lt, hash) after the sparse index seeding.
- *  B. startBlock a day old, no hint — the v2 walk: paginates the account's tx chain
+ *  B. startBlock at the window floor, no hint — the v2 walk: paginates the account's tx chain
  *     over the window and streams matches progressively (first yield in seconds).
  *     Deep windows (floor older than ~4h, estimated live from the account's lt rate)
  *     hydrate in bounded ≤100-tx v2 pages driven by the index's ordered lt list —
  *     memory stays O(batch) at any depth; shallow scans stay on plain v2 pagination.
- *  C. A `since` hint a day old — the walk resumes exclusively off the cursor; the
+ *  C. A `since` hint from earlier in the window — the walk resumes exclusively off the cursor; the
  *     hinted transaction is not re-streamed (the exclusive lt cursor reaches the wire
  *     as `to_lt`). The lt list itself is one paged index read; hydration stays on v2.
  *  D. A quiet (dormant) address — the v3 seed answers "no events since T" in exactly
  *     one /messages call (plus the cached tip), never touching the v2 walk.
  *
- * Address is the ton-testnet OnRamp that both pollers target. The `since` cursor is
- * captured at RUNTIME: the first CCIPMessageSent log of the last ~25h, read through
- * the SDK's own startTime scan, so the window stays day-scale on every run. Activity
- * on these contracts is organic, so assertions are on shapes and call patterns, not
- * exact counts. A scan that never comes back clean within the retry budget fails
- * with the last error and the wire counters.
+ * Address is the ton-testnet OnRamp that both pollers target. The scan window is
+ * anchored at RUNTIME: the pollers' 24h lookback, widened (bounded) to end shortly
+ * after the newest on-chain event, because organic testnet activity pauses for days
+ * and a fixed day window then holds no log to shape the hydration assertions on. The
+ * `since` cursor is the first CCIPMessageSent log of that window, read through the
+ * SDK's own startTime scan. Assertions are on shapes and call patterns, not exact
+ * counts. A scan that never comes back clean within the retry budget fails with the
+ * last error and the wire counters.
  *
  * Run against any TON v2 endpoint; defaults to the public index (paced, so slow):
  *   node --test src/ton/logs.integration.test.ts
@@ -64,7 +68,12 @@ const CONFIG_TOPICS = [
   'DynamicConfigSet',
 ]
 const CCIP_MESSAGE_SENT = crc32('CCIPMessageSent') // 0xa45d293c
+const HOUR_S = 3_600
 const DAY_S = 86_400
+/** Deepest the scan window is widened to when the lane has been quiet for days. */
+const MAX_LOOKBACK_S = 3 * DAY_S
+/** The widened window ends this long after the newest event the index knows. */
+const ACTIVITY_MARGIN_S = 6 * HOUR_S
 
 // A dormant testnet OffRamp (from the older skipped integration suite): no
 // external-out messages in months — the "quiet address" case. Test D fails with a
@@ -196,6 +205,35 @@ async function collect(logs: AsyncIterable<ChainLog>, max = Infinity) {
 }
 
 /**
+ * Unix time of the newest external-out event the TonCenter v3 index has for
+ * `address` — the anchor the scan window is widened to. One /messages page, no v2
+ * hydration. Returns undefined when the index is unavailable (a v2-only endpoint):
+ * the window then keeps the pollers' plain 24h lookback.
+ */
+async function fetchNewestV3EventTime(address: string): Promise<number | undefined> {
+  try {
+    const base = new URL(V3_BASE)
+    const url = new URL(`${base.pathname.replace(/\/+$/, '')}/messages`, base)
+    for (const [key, value] of base.searchParams) url.searchParams.append(key, value)
+    url.searchParams.set('source', Address.parse(address).toRawString())
+    url.searchParams.set('destination', 'null') // external-out ("log") messages only
+    url.searchParams.set('direction', 'out')
+    url.searchParams.set('sort', 'desc')
+    url.searchParams.set('limit', '1')
+    const fetchV3 = createRateLimitedFetch(tonRateLimitProfile(V3_BASE, { maxRetries: 3 }), {
+      logger: LOGGER,
+    })
+    const res = await fetchV3(url, { headers: { Accept: 'application/json' } })
+    if (!res.ok) return undefined
+    const { messages } = (await res.json()) as { messages?: { created_at?: unknown }[] }
+    const created = Number(messages?.[0]?.created_at)
+    return Number.isFinite(created) && created > 0 ? created : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Runs `scan` (under a fresh spyFetch) until `problem` returns undefined for an
  * attempt, retrying transient errors and unclean shapes with growing spacing.
  * Fails with the last error or problem and the wire counters when the attempts or
@@ -241,11 +279,14 @@ async function runAttempts<T>(
 describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   let chain: TONChain
   /** Indexed-tip snapshot taken once at suite start: the pinned scan window END for
-   * every scan and retry attempt below, so every attempt scans the SAME fixed ~24h
+   * every scan and retry attempt below, so every attempt scans the SAME fixed
    * window (a deterministic shape for the wire assertions) instead of one that grows
    * with each backoff. The fast path never declines on the pin (the index tip only
    * moves forward), and the walk fallback is bounded by the same snapshot. */
   let endBlockPin: number
+  /** Floor of every scan below: the pollers' 24h lookback, or the widened window
+   * computed in `before` (never deeper than {@link MAX_LOOKBACK_S}). */
+  let windowStart: number
   let cursor: Promise<ChainLog> | undefined
 
   before(async () => {
@@ -256,12 +297,22 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       }),
       v3BaseUrl: V3_BASE,
     })
+    // The pollers' steady state is a 24h lookback, but organic testnet activity
+    // pauses for days: widen the window (bounded) to end shortly after the newest
+    // event the index has, so every scan below still sees real logs. With a busy
+    // lane the anchor is inside the last day and the window stays exactly 24h.
+    const nowS = Math.floor(Date.now() / 1e3)
+    const anchor = (await fetchNewestV3EventTime(ADDR)) ?? nowS
+    windowStart = Math.max(
+      nowS - MAX_LOOKBACK_S,
+      Math.min(nowS - DAY_S, anchor - ACTIVITY_MARGIN_S),
+    )
   })
   after(() => chain.destroy())
 
-  const lastDay = () => ({ startTime: Math.floor(Date.now() / 1e3) - DAY_S, endBlock: endBlockPin })
+  const lastWindow = () => ({ startTime: windowStart, endBlock: endBlockPin })
 
-  /** The `since` cursor for tests C: the first CCIPMessageSent log of the last ~25h. */
+  /** The `since` cursor for tests C/D: the first CCIPMessageSent log of the window. */
   const getCursor = () =>
     (cursor ??= runAttempts(
       () =>
@@ -269,20 +320,20 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
           chain.getLogs({
             address: ADDR,
             topics: ['CCIPMessageSent'],
-            startTime: Math.floor(Date.now() / 1e3) - DAY_S - 3600,
+            startTime: windowStart - HOUR_S,
             endBlock: endBlockPin,
           }),
           1,
         ),
-      (r) => (r.logs.length ? undefined : 'no CCIPMessageSent log of the OnRamp in the last 25h'),
+      (r) => (r.logs.length ? undefined : 'no CCIPMessageSent log of the OnRamp in the window'),
     ).then(({ result }) => result.logs[0]!))
 
   it(
-    'startTime-only 24h scan: v3 index fast path, no v2 tx-chain pagination',
+    'startTime-only cold backfill: v3 index fast path, no v2 tx-chain pagination',
     { timeout: 600_000 },
     async () => {
       const { result, calls, elapsedMs, attempts } = await runAttempts(
-        () => collect(chain.getLogs({ address: ADDR, topics: CONFIG_TOPICS, ...lastDay() })),
+        () => collect(chain.getLogs({ address: ADDR, topics: CONFIG_TOPICS, ...lastWindow() })),
         (r, c) =>
           r.truncated
             ? 'the index self-contradicted mid-stream'
@@ -312,14 +363,17 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   )
 
   it(
-    'startTime-only 24h scan with a matching topic: v3 seed + v2 hydration yields real logs',
+    'startTime-only cold backfill with a matching topic: v3 seed + v2 hydration yields real logs',
     { timeout: 600_000 },
     async () => {
       // A truncated prefix is valid (the block in progress is dropped — the same
       // contract as a chain gap on the v2 walk).
       const { result, calls } = await runAttempts(
         () =>
-          collect(chain.getLogs({ address: ADDR, topics: ['CCIPMessageSent'], ...lastDay() }), 3),
+          collect(
+            chain.getLogs({ address: ADDR, topics: ['CCIPMessageSent'], ...lastWindow() }),
+            3,
+          ),
         (r, c) =>
           !r.logs.length ? 'no log yielded' : c.walkPages ? 'fell back to the v2 walk' : undefined,
       )
@@ -344,10 +398,10 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   )
 
   it(
-    'startBlock a day old: bounded index-driven walk streams matches progressively',
+    'startBlock at the window floor: bounded index-driven walk streams matches progressively',
     { timeout: 600_000 },
     async () => {
-      const startBlock = await chain.getMCSeqNoByUnixtime(Math.floor(Date.now() / 1e3) - DAY_S)
+      const startBlock = await chain.getMCSeqNoByUnixtime(windowStart)
       // 25 matching logs ≈ 57 txs walked here — past the 16-tx threshold, so the v3
       // seqno oracle must have engaged; without it this many txs cost ~100+
       // lookupBlock/getBlockHeader calls (the pre-oracle 24h walk was 444 total). The
@@ -407,7 +461,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   )
 
   it(
-    'since cursor a day old, composite-only hint: resumes on the v2 walk, tx-exclusive',
+    'since cursor in the window, composite-only hint: resumes on the v2 walk, tx-exclusive',
     { timeout: 900_000 },
     async () => {
       const oldLog = await getCursor()
@@ -463,7 +517,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   )
 
   it(
-    'since cursor a day old, with per-log index: hint scan on the v3 /messages fast path',
+    'since cursor in the window, with per-log index: hint scan on the v3 /messages fast path',
     { timeout: 900_000 },
     async () => {
       // The hint's `index` IS its log's created_lt: the message-granular index floors
