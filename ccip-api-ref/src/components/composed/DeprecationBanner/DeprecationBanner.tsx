@@ -12,6 +12,8 @@ export interface DeprecationBannerProps {
   migrationLink?: string
   /** Custom message */
   message?: string
+  /** Custom link text (defaults to "View {newVersion} Documentation") */
+  linkLabel?: string
 }
 
 /**
@@ -23,6 +25,7 @@ export function DeprecationBanner({
   newVersion = 'v2',
   migrationLink = '/api/',
   message,
+  linkLabel,
 }: DeprecationBannerProps): React.JSX.Element {
   const defaultMessage = `API ${version} is deprecated and will be removed in a future release. Please migrate to ${newVersion}.`
 
@@ -32,7 +35,7 @@ export function DeprecationBanner({
         <span className={styles.icon}>&#9888;</span>
         <span className={styles.message}>{message || defaultMessage}</span>
         <Link to={migrationLink} className={styles.link}>
-          View {newVersion} Documentation &rarr;
+          {linkLabel ?? `View ${newVersion} Documentation`} &rarr;
         </Link>
       </div>
     </div>
