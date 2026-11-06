@@ -35,6 +35,7 @@ import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1, decodeMessageV1Raw } from './messages.ts'
 import { type NetworkInfo, type NetworkType, ChainFamily, networkInfo } from './networks.ts'
 import {
+  type GetOffchainTokenDataOpts,
   type TokenVerifier,
   CCTP_V2_CCV_TAG,
   getAttestedVersionTag,
@@ -1774,8 +1775,13 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   async getOffchainTokenData(
     request: PickDeep<CCIPRequest, 'log.transactionHash' | `message`>,
+    opts: GetOffchainTokenDataOpts = {},
   ): Promise<OffchainTokenData[]> {
-    return getOffchainTokenData(request, this)
+    const watch =
+      opts.watch instanceof AbortSignal
+        ? AbortSignal.any([opts.watch, this.abort])
+        : opts.watch && this.abort
+    return getOffchainTokenData(request, { logger: this.logger, ...opts, watch })
   }
 
   /**

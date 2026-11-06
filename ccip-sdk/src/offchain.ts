@@ -2,6 +2,7 @@ import { type BytesLike, dataLength, dataSlice, hexlify, id, toNumber } from 'et
 import type { PickDeep } from 'type-fest'
 
 import {
+  CCIPError,
   CCIPLbtcAttestationNotApprovedError,
   CCIPLbtcAttestationNotFoundError,
   CCIPUsdcAttestationError,
@@ -11,7 +12,7 @@ import { parseSourceTokenData } from './evm/messages.ts'
 import { fetchWithTimeout } from './fetch.ts'
 import { NetworkType, networkInfo } from './networks.ts'
 import type { CCIPRequest, OffchainTokenData, WithLogger } from './types.ts'
-import { getDataBytes } from './utils.ts'
+import { getDataBytes, sleep } from './utils.ts'
 
 const CIRCLE_API_URL = {
   mainnet: 'https://iris-api.circle.com',
@@ -92,12 +93,14 @@ export async function getUsdcAttestation(
     txHash: string
   },
   networkType: NetworkType,
+  { signal }: { signal?: AbortSignal } = {},
 ): Promise<{ attestation: string; message: string }> {
   const { sourceDomain, nonce, messageId, txHash } = opts
   const circleApiBaseUrl =
     networkType === NetworkType.Mainnet ? CIRCLE_API_URL.mainnet : CIRCLE_API_URL.testnet
   const res = await fetch(
     `${circleApiBaseUrl}/v2/messages/${sourceDomain}?transactionHash=${txHash}`,
+    { signal },
   )
   const json = (await res.json()) as CctpAttestationResponse
   const messageIdHex = messageId != null ? hexlify(messageId).slice(2) : undefined
@@ -194,6 +197,7 @@ type LombardAttestationsResponse = { attestations: Array<LombardAttestation> }
 export async function getLbtcAttestation(
   payloadHash: string,
   networkType: NetworkType,
+  { signal }: { signal?: AbortSignal } = {},
 ): Promise<{
   attestation: string
 }> {
@@ -202,6 +206,7 @@ export async function getLbtcAttestation(
   const res = await fetch(`${lbtcApiBaseUrl}/api/bridge/v1/deposits/getByHash`, {
     method: 'POST',
     body: JSON.stringify({ messageHash: [payloadHash] }),
+    ...(signal && { signal }),
   })
   const response = (await res.json()) as LombardAttestationsResponse | null
   if (response == null || !('attestations' in response)) {
@@ -317,6 +322,10 @@ export type GetOffchainTokenDataOpts = WithLogger & {
    * `[tag][sourceDomain][depositHash]` payload carries it itself.
    */
   usdcSourceDomain?: number
+  /** Poll transient attestation errors until ready or aborted. Default: one-shot. */
+  watch?: boolean | AbortSignal
+  /** Poll delay in milliseconds; defaults to the error retryAfterMs hint. */
+  pollInterval?: number
 }
 
 /**
@@ -332,9 +341,26 @@ export type GetOffchainTokenDataOpts = WithLogger & {
  */
 export async function getOffchainTokenData(
   request: PickDeep<CCIPRequest, 'log.transactionHash' | `message`>,
-  { logger = console, usdcSourceDomain }: GetOffchainTokenDataOpts = {},
+  { logger = console, usdcSourceDomain, watch, pollInterval }: GetOffchainTokenDataOpts = {},
 ): Promise<OffchainTokenData[]> {
   const { networkType } = networkInfo(request.message.sourceChainSelector)
+  const signal = watch instanceof AbortSignal ? watch : undefined
+  async function fetchAttestation<T>(fetch: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      signal?.throwIfAborted()
+      try {
+        const data = await fetch()
+        signal?.throwIfAborted()
+        return data
+      } catch (err) {
+        signal?.throwIfAborted()
+        if (!watch || !CCIPError.isCCIPError(err) || !err.isTransient) throw err
+        if (!attempt) logger.info('Token attestation pending; waiting...')
+        logger.debug('Attestation pending:', err.message)
+        await sleep(pollInterval ?? err.retryAfterMs ?? 10_000, signal)
+      }
+    }
+  }
 
   function looksUsdcData(extraData: BytesLike) {
     const cctpV2 = parseCctpV2ExtraData(extraData)
@@ -391,23 +417,27 @@ export async function getOffchainTokenData(
           return
         }
         try {
-          const usdcAttestation = await getUsdcAttestation(
-            { ...usdcOpts, sourceDomain, txHash: request.log.transactionHash },
-            networkType,
+          const usdcAttestation = await fetchAttestation(() =>
+            getUsdcAttestation(
+              { ...usdcOpts, sourceDomain, txHash: request.log.transactionHash },
+              networkType,
+              { signal },
+            ),
           )
           return { _tag: 'usdc', extraData, ...usdcAttestation }
         } catch (err) {
+          signal?.throwIfAborted()
           // maybe not a USDC transfer, or not ready
           logger.warn(`❌ CCTP: Failed to fetch attestation for message:`, request.message, err)
         }
       } else if (looksLbtcData(extraData)) {
         try {
-          const lbtcAttestation = await getLbtcAttestation(
-            hexlify(getDataBytes(extraData)),
-            networkType,
+          const lbtcAttestation = await fetchAttestation(() =>
+            getLbtcAttestation(hexlify(getDataBytes(extraData)), networkType, { signal }),
           )
           return { _tag: 'lbtc', extraData, ...lbtcAttestation }
         } catch (err) {
+          signal?.throwIfAborted()
           logger.warn(`❌ LBTC: Failed to fetch attestation for message:`, extraData, err)
         }
       }

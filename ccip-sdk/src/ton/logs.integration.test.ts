@@ -38,11 +38,12 @@ await useResource(['ton-testnet'])
  *  D. A quiet (dormant) address — the v3 seed answers "no events since T" in exactly
  *     one /messages call (plus the cached tip), never touching the v2 walk.
  *
- * Address is the ton-testnet OnRamp that both pollers target. The scan window is
+ * The source OnRamp can be quiet for days; its active destination OffRamp supplies fresh
+ * execution events for these generic scan-shape assertions. The deep-walk window is
  * anchored at RUNTIME: the pollers' 24h lookback, widened (bounded) to end shortly
  * after the newest on-chain event, because organic testnet activity pauses for days
  * and a fixed day window then holds no log to shape the hydration assertions on. The
- * `since` cursor is the first CCIPMessageSent log of that window, read through the
+ * `since` cursor comes from a short slice near the newest event, read through the
  * SDK's own startTime scan. Assertions are on shapes and call patterns, not exact
  * counts. A scan that never comes back clean within the retry budget fails with the
  * last error and the wire counters.
@@ -58,7 +59,7 @@ const skip = !!process.env.SKIP_INTEGRATION_TESTS
 const VERBOSE = !!process.env.VERBOSE
 const LOGGER = VERBOSE ? console : { ...console, debug: () => {} }
 
-const ADDR = 'EQDioi9PI32Wo1oBwkUp0pj1AhwvAHiKiZCfgrr0iDqu3lTA' // raw 0:e2a22f4f…aaede
+const ONRAMP = 'EQDioi9PI32Wo1oBwkUp0pj1AhwvAHiKiZCfgrr0iDqu3lTA'
 const CONFIG_TOPICS = [
   'ConfigSet',
   'DestChainSelectorAdded',
@@ -67,7 +68,8 @@ const CONFIG_TOPICS = [
   'SourceChainConfigUpdated',
   'DynamicConfigSet',
 ]
-const CCIP_MESSAGE_SENT = crc32('CCIPMessageSent') // 0xa45d293c
+const EVENT_TOPIC = 'ExecutionStateChanged'
+const EVENT_TOPIC_HASH = crc32(EVENT_TOPIC)
 const HOUR_S = 3_600
 const DAY_S = 86_400
 /** Deepest the scan window is widened to when the lane has been quiet for days. */
@@ -278,31 +280,44 @@ async function runAttempts<T>(
 
 describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   let chain: TONChain
+  let address: string
   /** Indexed-tip snapshot taken once at suite start: the pinned scan window END for
    * every scan and retry attempt below, so every attempt scans the SAME fixed
    * window (a deterministic shape for the wire assertions) instead of one that grows
    * with each backoff. The fast path never declines on the pin (the index tip only
    * moves forward), and the walk fallback is bounded by the same snapshot. */
   let endBlockPin: number
-  /** Floor of every scan below: the pollers' 24h lookback, or the widened window
+  /** Floor of the deep walk: the pollers' 24h lookback, or the widened window
    * computed in `before` (never deeper than {@link MAX_LOOKBACK_S}). */
   let windowStart: number
+  let eventAnchor: number
+  let recentStart: number
   let cursor: Promise<ChainLog> | undefined
 
   before(async () => {
     chain = await TONChain.fromUrl(TON_TESTNET_RPC, { logger: LOGGER })
+    const sourceSelector = 16015286601757825753n
+    const router = await chain.getRouterForOnRamp(ONRAMP, sourceSelector)
+    const offRamps = await chain.getOffRampsForRouter(router, sourceSelector)
+    assert.ok(offRamps[0], 'an active Sepolia OffRamp must exist')
+    address = offRamps[0]
+
+    // The pollers' steady state is a 24h lookback, but organic testnet activity
+    // pauses for days: widen the window (bounded) to end shortly after the newest
+    // event the index has, so every scan below still sees real logs. With a busy
+    // lane the anchor is inside the last day and the window stays exactly 24h.
+    const nowS = Math.floor(Date.now() / 1e3)
+    const anchor = (await fetchNewestV3EventTime(address)) ?? nowS
+    // Pin after selecting the event, so a newly indexed event is not beyond our cutoff.
     endBlockPin = await fetchV3IndexedTip({
       rateLimitedFetch: createRateLimitedFetch(tonRateLimitProfile(V3_BASE, { maxRetries: 3 }), {
         logger: LOGGER,
       }),
       v3BaseUrl: V3_BASE,
     })
-    // The pollers' steady state is a 24h lookback, but organic testnet activity
-    // pauses for days: widen the window (bounded) to end shortly after the newest
-    // event the index has, so every scan below still sees real logs. With a busy
-    // lane the anchor is inside the last day and the window stays exactly 24h.
-    const nowS = Math.floor(Date.now() / 1e3)
-    const anchor = (await fetchNewestV3EventTime(ADDR)) ?? nowS
+    eventAnchor = anchor
+    // Fast-path shape tests need only a few events, not the entire historical burst.
+    recentStart = anchor - HOUR_S
     windowStart = Math.max(
       nowS - MAX_LOOKBACK_S,
       Math.min(nowS - DAY_S, anchor - ACTIVITY_MARGIN_S),
@@ -310,22 +325,22 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   })
   after(() => chain.destroy())
 
-  const lastWindow = () => ({ startTime: windowStart, endBlock: endBlockPin })
+  const recentWindow = () => ({ startTime: recentStart, endBlock: endBlockPin })
 
-  /** The `since` cursor for tests C/D: the first CCIPMessageSent log of the window. */
+  /** The `since` cursor for tests C/D: the first execution log of the window. */
   const getCursor = () =>
     (cursor ??= runAttempts(
       () =>
         collect(
           chain.getLogs({
-            address: ADDR,
-            topics: ['CCIPMessageSent'],
-            startTime: windowStart - HOUR_S,
+            address: address,
+            topics: [EVENT_TOPIC],
+            startTime: recentStart - HOUR_S,
             endBlock: endBlockPin,
           }),
           1,
         ),
-      (r) => (r.logs.length ? undefined : 'no CCIPMessageSent log of the OnRamp in the window'),
+      (r) => (r.logs.length ? undefined : 'no execution log of the OffRamp in the window'),
     ).then(({ result }) => result.logs[0]!))
 
   it(
@@ -333,7 +348,15 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
     { timeout: 600_000 },
     async () => {
       const { result, calls, elapsedMs, attempts } = await runAttempts(
-        () => collect(chain.getLogs({ address: ADDR, topics: CONFIG_TOPICS, ...lastWindow() })),
+        () =>
+          collect(
+            chain.getLogs({
+              address: address,
+              topics: CONFIG_TOPICS,
+              startTime: eventAnchor,
+              endBlock: endBlockPin,
+            }),
+          ),
         (r, c) =>
           r.truncated
             ? 'the index self-contradicted mid-stream'
@@ -370,15 +393,12 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       // contract as a chain gap on the v2 walk).
       const { result, calls } = await runAttempts(
         () =>
-          collect(
-            chain.getLogs({ address: ADDR, topics: ['CCIPMessageSent'], ...lastWindow() }),
-            3,
-          ),
+          collect(chain.getLogs({ address: address, topics: [EVENT_TOPIC], ...recentWindow() }), 3),
         (r, c) =>
           !r.logs.length ? 'no log yielded' : c.walkPages ? 'fell back to the v2 walk' : undefined,
       )
       for (const l of result.logs) {
-        assert.equal(l.topics[0], CCIP_MESSAGE_SENT)
+        assert.equal(l.topics[0], EVENT_TOPIC_HASH)
         assert.ok(Number(l.blockNumber) > 0, 'stamped with the index-authoritative mc seqno')
       }
       assert.ok(
@@ -402,21 +422,18 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
     { timeout: 600_000 },
     async () => {
       const startBlock = await chain.getMCSeqNoByUnixtime(windowStart)
-      // 25 matching logs ≈ 57 txs walked here — past the 16-tx threshold, so the v3
-      // seqno oracle must have engaged; without it this many txs cost ~100+
-      // lookupBlock/getBlockHeader calls (the pre-oracle 24h walk was 444 total). The
-      // oracle dies on a transient public-index 429 (fail-fast → per-tx fallback — the
-      // designed degradation), so an attempt without index meta is retried.
+      // A floor older than four hours engages the index-driven walk before its first yield.
+      // Three logs prove the path without hydrating the entire burst over the public RPC.
       const { result, calls } = await runAttempts(
         () =>
           collect(
             chain.getLogs({
-              address: ADDR,
-              topics: ['CCIPMessageSent'],
+              address: address,
+              topics: [EVENT_TOPIC],
               startBlock,
               endBlock: endBlockPin,
             }),
-            25,
+            3,
           ),
         (r, c) =>
           r.truncated
@@ -428,7 +445,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       const { logs } = result
       assert.ok(logs.length >= 3, 'streams matching logs')
       for (const l of logs) {
-        assert.equal(l.topics[0], CCIP_MESSAGE_SENT)
+        assert.equal(l.topics[0], EVENT_TOPIC_HASH)
         assert.ok(Number(l.blockNumber) >= startBlock, 'log at/above the requested floor')
       }
       assert.ok(
@@ -440,7 +457,7 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
       assert.equal(calls.v3messages, 0, 'a startBlock floor never opens the event index')
       assert.ok(calls.walkPages >= 1, 'v2 tx-chain pagination used')
       // Bounded by PAGES, not by walked txs: the walked count drifts with organic
-      // traffic, but a per-tx seqno fallback for 25 logs would mean ~100+ index
+      // traffic, but a per-tx seqno fallback over a deep window would mean ~100+ index
       // calls — a few pages is the oracle's signature either way.
       assert.ok(
         calls.v3transactions <= 12,
@@ -477,8 +494,8 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         () =>
           collect(
             chain.getLogs({
-              address: ADDR,
-              topics: ['CCIPMessageSent'],
+              address: address,
+              topics: [EVENT_TOPIC],
               since: hint,
               endBlock: endBlockPin,
             }),
@@ -528,8 +545,8 @@ describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
         () =>
           collect(
             chain.getLogs({
-              address: ADDR,
-              topics: ['CCIPMessageSent'],
+              address: address,
+              topics: [EVENT_TOPIC],
               since: oldLog,
               endBlock: endBlockPin,
             }),

@@ -23,7 +23,7 @@ import { Contract, hexlify, randomBytes, zeroPadValue } from 'ethers'
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
-import { reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { raceRpcEndpoint, reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import type { Chain } from '../chain.ts'
@@ -31,7 +31,7 @@ import { CCIPDestSimulationUnavailableError } from '../errors/index.ts'
 import { estimateReceiveExecution } from '../gas.ts'
 import { type CCIPRequest, type CCIPVerifications, CCIPVersion } from '../types.ts'
 import { interfaces } from './const.ts'
-import { simulateReleaseOrMint } from './simulate.ts'
+import { IPOOL_V2_INTERFACE_ID, simulateReleaseOrMint } from './simulate.ts'
 import { EVMChain } from './index.ts'
 
 // Live RPCs: the CCIP 2.0 lane (Arbitrum -> Ethereum) and the LBTC prod lanes (Ethereum <-> Monad).
@@ -41,7 +41,6 @@ const skip = !!process.env.SKIP_INTEGRATION_TESTS
 
 await useResource(['ethereum-mainnet', 'monad-mainnet', 'arbitrum-mainnet'])
 
-const ETHEREUM_RPC = skip ? '' : await reachableRpcEndpoint('RPC_ETHEREUM_MAINNET')
 const ETHEREUM_SELECTOR = 5009297550715157269n
 
 // this suite issues no eth_getLogs at all (only eth_call/eth_chainId), so the
@@ -63,6 +62,27 @@ const V2_LANE = {
   destPool: '0x6eC2a0B3E92819A881f30e70478320BCEaAA4FF1', // BurnMintTokenPool 2.0.0
   destOffRamp: '0x408428bca0e24A25ac8baAc1b70f64AF257717c3', // OffRamp 2.0.0
 }
+
+// A chain-id response alone does not prove a public gateway can serve contract reads.
+const ETHEREUM_RPC = skip
+  ? ''
+  : await raceRpcEndpoint('RPC_ETHEREUM_MAINNET', async (url) => {
+      const chain = await EVMChain.fromUrl(url, {
+        apiClient: null,
+        abort: AbortSignal.timeout(10_000),
+      })
+      try {
+        const pool = new Contract(V2_LANE.destPool, interfaces.TokenPool_v2_0, chain.provider)
+        await Promise.all([
+          chain.typeAndVersion(V2_LANE.destOffRamp),
+          pool.getFunction('supportsInterface')(IPOOL_V2_INTERFACE_ID),
+          pool.getFunction('getToken')(),
+        ])
+        return true
+      } finally {
+        chain.destroy()
+      }
+    })
 
 const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}

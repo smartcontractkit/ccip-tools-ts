@@ -102,7 +102,7 @@ export async function handler(argv: Awaited<ReturnType<typeof builder>['argv']> 
 export async function showRequests(
   ctx: Ctx,
   argv: Parameters<typeof handler>[0],
-  opts?: { request?: CCIPRequest },
+  opts?: { request?: CCIPRequest; getChain?: ChainGetter },
 ) {
   const { output, logger } = ctx
 
@@ -120,7 +120,7 @@ export async function showRequests(
   let getChain: ChainGetter
   let tx$: Promise<[Chain, ChainTransaction]> | undefined
   if (opts?.request) {
-    getChain = fetchChainsFromRpcs(ctx, argv)
+    getChain = opts.getChain ?? fetchChainsFromRpcs(ctx, argv)
   } else {
     const chainsResult = fetchChainsFromRpcs(ctx, argv, argv.txHashOrId)
     getChain = chainsResult[0]
@@ -231,22 +231,55 @@ export async function showRequests(
     return // `false` used by call at end of `send` command without `--wait`
   }
 
-  let cancelWaitFinalized: (() => void) | undefined
-  const finalized$ = (async () => {
+  const pendingAc = new AbortController()
+  const pending = AbortSignal.any([pendingAc.signal, ctx.abort])
+  const finalizedAc = new AbortController()
+  const finalizedSignal = AbortSignal.any([finalizedAc.signal, pending])
+  const cancelPending = () => pendingAc.abort()
+  const isStopped = () => pending.aborted
+  let commitFound = false as boolean
+  // Stop late background output even when an RPC does not support cancellation.
+  const pendingCtx: Ctx = {
+    ...ctx,
+    output: {
+      write: (...args) => {
+        if (!isStopped()) output.write(...args)
+      },
+      table: (...args) => {
+        if (!isStopped()) output.table(...args)
+      },
+    },
+  }
+  const finality$ = (async () => {
     if (argv.wait) {
       logger.info(`[${MessageStatus.Sent}] Waiting for source chain finalization...`)
       if (!source) return
-      const finalizedAc = new AbortController()
-      cancelWaitFinalized = finalizedAc.abort.bind(finalizedAc)
       const finalized = await source.waitFinalized({
         log: request.log,
-        abort: finalizedAc.signal,
+        abort: finalizedSignal,
       })
-      // undefined => cancelled (e.g. execution already found, FTF message); don't claim finalization
-      if (finalized) logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
+      if (isStopped()) return
+      // A commit can cancel finality without cancelling the independent attestation wait.
+      if (finalized && !finalizedSignal.aborted)
+        logger.info(`[${MessageStatus.SourceFinalized}] Source chain finalized`)
+      if (!commitFound)
+        logger.info(`[${MessageStatus.SourceFinalized}] Waiting for commit on destination chain...`)
     }
+  })().catch((err) => {
+    if (!finalizedSignal.aborted)
+      logger.warn(
+        'Source finalization unavailable',
+        err instanceof Error && !argv.verbose ? err.message : err,
+      )
+  })
 
-    const offchainTokenData = await source?.getOffchainTokenData(request)
+  // Issuer APIs can become ready while a source-finality RPC is still in flight.
+  const attestations$ = (async () => {
+    if (isStopped()) return
+    const offchainTokenData = await source?.getOffchainTokenData(request, {
+      watch: argv.wait ? pending : undefined,
+    })
+    if (isStopped()) return
     if (offchainTokenData?.length && offchainTokenData.some((d) => !!d)) {
       switch (argv.format) {
         case Format.log: {
@@ -256,7 +289,8 @@ export async function showRequests(
         case Format.pretty:
           output.write('Attestations:')
           for (const attestation of offchainTokenData) {
-            const { _tag: type, ...rest } = attestation!
+            if (!attestation) continue
+            const { _tag: type, ...rest } = attestation
             prettyTable.call(ctx, { type, ...rest })
           }
           break
@@ -266,15 +300,22 @@ export async function showRequests(
       }
     }
 
-    if (argv.wait)
-      logger.info(`[${MessageStatus.SourceFinalized}] Waiting for commit on destination chain...`)
-    else if (
+    if (
+      !argv.wait &&
       !request.metadata?.receiptTransactionHash &&
       argv.format !== Format.json &&
       !ctx.abort.aborted
     )
       output.write('Commit (dest):')
-  })()
+  })().catch((err) => {
+    if (!isStopped())
+      logger.warn(
+        'Attestations unavailable',
+        err instanceof Error && !argv.verbose ? err.message : err,
+      )
+  })
+
+  const finalized$ = Promise.all([finality$, attestations$])
 
   let dest!: Chain
   try {
@@ -286,11 +327,12 @@ export async function showRequests(
       '— emitting partial result:',
       err,
     )
+    cancelPending()
     emitJsonEnvelope()
     throw err
   }
 
-  let execs$, cancelWaitVerifications: (() => void) | undefined, verifications$
+  let execs$, verifications$
   let receiptsHeaderPrinted = false
   const printReceiptsHeader = () => {
     if (!receiptsHeaderPrinted && argv.format !== Format.json) {
@@ -307,17 +349,11 @@ export async function showRequests(
       sourceChainSelector: request.message.sourceChainSelector,
       sequenceNumber: request.message.sequenceNumber,
     })
-    cancelWaitFinalized?.()
-    await finalized$
+    if (!argv.wait) await finalized$
   } else {
     offRamp ??= await discoverOffRamp(source!, dest, request.lane, source)
 
-    let watch
-    if (argv.wait) {
-      const ac = new AbortController()
-      watch = ac.signal
-      cancelWaitVerifications = ac.abort.bind(ac)
-    }
+    const watch = argv.wait ? pending : undefined
     verifications$ = (async () => {
       const indexer = resolveIndexer(argv, dest, logger, source)
       const verifications = await dest.getVerifications({
@@ -327,8 +363,11 @@ export async function showRequests(
         indexer,
         watch,
       })
-      cancelWaitFinalized?.()
-      await finalized$
+      if (isStopped()) return
+      commitFound = true
+      if (argv.wait) finalizedAc.abort()
+      else await finalized$
+      if (isStopped()) return
       if (argv.wait)
         logger.info(`[${MessageStatus.Committed}] Commit report accepted on destination chain`)
       switch (argv.format) {
@@ -336,17 +375,19 @@ export async function showRequests(
           output.write('commit =', verifications)
           break
         case Format.pretty:
-          await prettyVerifications.call(ctx, dest, verifications, request)
+          await prettyVerifications.call(pendingCtx, dest, verifications, request)
           break
         case Format.json:
           jsonEnvelope!.verifications = verifications
           break
       }
+      if (isStopped()) return
       if (argv.wait)
         logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
       else printReceiptsHeader()
       return verifications
     })().catch((err) => {
+      if (isStopped()) return
       logger.warn(
         'Verifications unavailable',
         err instanceof Error && !argv.verbose ? err.message : err,
@@ -362,13 +403,15 @@ export async function showRequests(
       sequenceNumber: request.message.sequenceNumber,
       startTime: request.log.blockTimestamp,
       verifications: !argv.wait ? await verifications$ : undefined,
-      watch: argv.wait && ctx.abort,
+      watch: argv.wait && pending,
     })
   }
 
   let found = false
   for await (const exec of execs$) {
-    await verifications$
+    // An execution is authoritative. Never await slower attestation or commit RPCs here.
+    if (argv.wait) cancelPending()
+    else await verifications$
     const status =
       exec.receipt.state === ExecutionState.Success ? MessageStatus.Success : MessageStatus.Failed
     const statusMessage =
@@ -386,7 +429,10 @@ export async function showRequests(
           exec,
           request,
           exec.log.tx?.from ??
-            (await dest.getTransaction(exec.log.transactionHash).catch(() => null))?.from,
+            // Receipt enrichment must not delay the first execution in watch mode.
+            (!argv.wait
+              ? (await dest.getTransaction(exec.log.transactionHash).catch(() => null))?.from
+              : undefined),
         )
         break
       case Format.json:
@@ -398,8 +444,9 @@ export async function showRequests(
     if (argv.wait) break
   }
   if (!found) {
-    cancelWaitVerifications?.()
-    logger.warn(`No execution receipt found for request`)
+    cancelPending()
+    if (!ctx.abort.aborted) logger.warn(`No execution receipt found for request`)
   }
   emitJsonEnvelope()
+  cancelPending()
 }
