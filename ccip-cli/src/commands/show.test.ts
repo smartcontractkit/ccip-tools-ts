@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { it } from 'node:test'
+import { type TestContext, it } from 'node:test'
 
 import {
   type CCIPExecution,
@@ -19,6 +19,7 @@ import { type Ctx, Format } from './types.ts'
 const sourceNetwork = networkInfo('solana-devnet')
 const destNetwork = networkInfo('ethereum-testnet-sepolia')
 const sender = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'
+const executor = '0x' + 'ee'.repeat(20)
 const offRamp = '0x' + 'ab'.repeat(20)
 const txHash = '0x' + '22'.repeat(32)
 const messageId = '0x' + '42'.repeat(32)
@@ -54,6 +55,13 @@ const commit = {
 } as CCIPVerifications
 const attestations: OffchainTokenData[] = [{ _tag: 'usdc', attestation: '0xab' }]
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve))
+/** Mock `setTimeout`, so a test can end the 5 s grace that a found execution gives in `--wait`. */
+const mockGrace = (t: TestContext) => t.mock.timers.enable({ apis: ['setTimeout'] })
+/** Let the found execution start its grace, then end the grace. */
+const endGrace = async (t: TestContext) => {
+  await flush()
+  t.mock.timers.tick(5_000)
+}
 
 function fixture(
   config: {
@@ -62,6 +70,8 @@ function fixture(
     commit?: CCIPVerifications
     attestations?: OffchainTokenData[]
     block?: Promise<number>
+    origin?: Promise<string>
+    receiptsError?: Error
   } = {},
 ) {
   const finality = Promise.withResolvers<unknown>()
@@ -125,11 +135,16 @@ function fixture(
       calls.push('receipts')
       take(opts.watch)
       receipts = opts
+      if (config.receiptsError) throw config.receiptsError
       if (config.empty) return
       await exec.promise
       yield execution(config.state)
     },
     getBlockTimestamp: async () => config.block ?? 1_700_000_005,
+    getTransaction: async () => {
+      calls.push('origin')
+      return { from: await (config.origin ?? executor) }
+    },
   }
   const getChain: ChainGetter = async (id) =>
     (id === sourceNetwork.chainSelector ? source : dest) as unknown as Chain
@@ -159,15 +174,17 @@ const indexOf = (writes: unknown[][], name: string) => writes.findIndex(([first]
 
 for (const state of [ExecutionState.Success, ExecutionState.Failed]) {
   it(
-    `wait: prints first execution (${state}) and cancels unfinished waits`,
+    `wait: prints first execution (${state}) and cancels waits that miss the grace`,
     { timeout: 1000 },
-    async () => {
+    async (t) => {
+      mockGrace(t)
       const f = fixture({ state })
       const show = f.run({ wait: true })
       if (state === ExecutionState.Success) f.attestation.resolve(attestations)
       await flush()
       assert.equal(indexOf(f.writes, 'attestations =') >= 0, state === ExecutionState.Success)
       f.exec.resolve()
+      await endGrace(t)
       await show
       assert.ok(indexOf(f.writes, 'receipt =') >= 0)
       assert.ok(
@@ -188,6 +205,28 @@ for (const state of [ExecutionState.Success, ExecutionState.Failed]) {
   )
 }
 
+it(
+  'wait: keeps commit and attestations that become ready within the grace',
+  { timeout: 1000 },
+  async (t) => {
+    mockGrace(t) // the grace never ends here: the test times out if the receipt waits for it
+    const f = fixture()
+    const show = f.run({ wait: true })
+    f.exec.resolve()
+    await flush()
+    assert.equal(indexOf(f.writes, 'receipt ='), -1)
+    f.attestation.resolve(attestations)
+    f.verification.resolve(commit)
+    f.finality.resolve({})
+    await show
+    const names = ['attestations =', 'commit =', 'receipt =']
+    const indices = names.map((name) => indexOf(f.writes, name))
+    assert.ok(indices.every((index, n) => index >= 0 && (n === 0 || index > indices[n - 1]!)))
+    assert.ok(f.signals.every((signal) => signal.aborted))
+    assert.deepEqual(f.warnings, [])
+  },
+)
+
 it('wait: cleans up when no execution is found', async () => {
   const f = fixture({ empty: true })
   await f.run({ wait: true })
@@ -197,11 +236,20 @@ it('wait: cleans up when no execution is found', async () => {
   assert.ok(f.signals.every((signal) => signal.aborted))
 })
 
-it('json: preserves completed commit without waiting for attestation', async () => {
+it('wait: cancels background waits when the receipt scan fails', async () => {
+  const f = fixture({ receiptsError: new Error('rpc down') })
+  await assert.rejects(f.run({ wait: true }), /rpc down/)
+  assert.equal(f.signals.length, 4)
+  assert.ok(f.signals.every((signal) => signal.aborted))
+})
+
+it('json: keeps a ready commit and drops an attestation that misses the grace', async (t) => {
+  mockGrace(t)
   const f = fixture({ commit })
   const show = f.run({ wait: true, format: Format.json })
   await flush()
   f.exec.resolve()
+  await endGrace(t)
   await show
   assert.equal(f.writes.length, 1)
   const doc = jsonParse(f.writes[0]![0] as string) as {
@@ -220,21 +268,39 @@ it('json: preserves completed commit without waiting for attestation', async () 
   assert.deepEqual(f.warnings, [])
 })
 
-it('pretty: prints receipt without origin lookup and suppresses late verification tables', async () => {
+it('pretty: prints receipt origin and suppresses late verification tables', async (t) => {
+  mockGrace(t)
   const block = Promise.withResolvers<number>()
   const f = fixture({ block: block.promise })
   const show = f.run({ wait: true, format: Format.pretty })
   f.verification.resolve(commit)
   await flush()
   f.exec.resolve()
+  await endGrace(t)
   await show
-  assert.ok(f.tables.some((table) => table.state === '✅ success'))
+  assert.ok(f.tables.some((table) => table.state === '✅ success' && !!table.origin))
   const counts = [f.tables.length, f.writes.length, f.infos.length]
   block.resolve(1_700_000_005)
   await flush()
   assert.deepEqual([f.tables.length, f.writes.length, f.infos.length], counts)
   assert.ok(f.tables.every((table) => !('merkleRoot' in table)))
   assert.ok(f.infos.every(([line]) => !String(line).startsWith('[BLESSED]')))
+  assert.deepEqual(f.warnings, [])
+})
+
+it('pretty: a slow origin lookup does not hold the receipt past the grace', async (t) => {
+  mockGrace(t)
+  const f = fixture({ attestations, commit, origin: new Promise<string>(() => {}) })
+  const show = f.run({ wait: true, format: Format.pretty })
+  f.finality.resolve({})
+  await flush()
+  f.exec.resolve()
+  await endGrace(t)
+  await show
+  assert.ok(f.calls.includes('origin'))
+  const receipt = f.tables.find((table) => table.state === '✅ success')
+  assert.ok(receipt)
+  assert.equal(receipt.origin, undefined)
   assert.deepEqual(f.warnings, [])
 })
 

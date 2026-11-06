@@ -3,10 +3,12 @@ import type { PickDeep } from 'type-fest'
 
 import {
   CCIPError,
+  CCIPHttpError,
   CCIPLbtcAttestationNotApprovedError,
   CCIPLbtcAttestationNotFoundError,
   CCIPUsdcAttestationError,
   CCIPUsdcBurnFeesError,
+  isTransientHttpStatus,
 } from './errors/index.ts'
 import { parseSourceTokenData } from './evm/messages.ts'
 import { fetchWithTimeout } from './fetch.ts'
@@ -98,11 +100,12 @@ export async function getUsdcAttestation(
   const { sourceDomain, nonce, messageId, txHash } = opts
   const circleApiBaseUrl =
     networkType === NetworkType.Mainnet ? CIRCLE_API_URL.mainnet : CIRCLE_API_URL.testnet
-  const res = await fetch(
+  const json = (await fetchIssuerJson(
     `${circleApiBaseUrl}/v2/messages/${sourceDomain}?transactionHash=${txHash}`,
+    'getUsdcAttestation',
     { signal },
-  )
-  const json = (await res.json()) as CctpAttestationResponse
+    (cause) => new CCIPUsdcAttestationError(txHash, undefined, { cause, context: opts }),
+  )) as CctpAttestationResponse
   const messageIdHex = messageId != null ? hexlify(messageId).slice(2) : undefined
   let att
   if ('messages' in json) {
@@ -188,6 +191,37 @@ type LombardAttestation =
 type LombardAttestationsResponse = { attestations: Array<LombardAttestation> }
 
 /**
+ * Fetch an issuer API response as JSON, with a request timeout.
+ *
+ * Failures that a later poll can recover from become transient errors: 429/5xx statuses become
+ * {@link CCIPHttpError}, and dropped connections or bodies that are not JSON (e.g. a proxy's HTML
+ * error page) become the issuer's own pending error from `pendingError`.
+ */
+async function fetchIssuerJson(
+  url: string,
+  operation: string,
+  opts: { signal?: AbortSignal; init?: RequestInit },
+  pendingError: (cause: Error) => CCIPError,
+): Promise<unknown> {
+  let res
+  try {
+    res = await fetchWithTimeout(url, operation, opts)
+  } catch (err) {
+    // undici reports a failed connection as `TypeError('fetch failed')`
+    if (err instanceof TypeError) throw pendingError(err)
+    throw err
+  }
+  if (isTransientHttpStatus(res.status)) throw new CCIPHttpError(res.status, res.statusText)
+  try {
+    return await res.json()
+  } catch (err) {
+    opts.signal?.throwIfAborted()
+    if (err instanceof SyntaxError) throw pendingError(err)
+    throw err
+  }
+}
+
+/**
  * Returns the LBTC attestation for a given payload hash
  *
  * @param payloadHash - hash of the payload of the LBTC transfer
@@ -203,12 +237,12 @@ export async function getLbtcAttestation(
 }> {
   const lbtcApiBaseUrl =
     networkType === NetworkType.Mainnet ? LOMBARD_API_URL.mainnet : LOMBARD_API_URL.testnet
-  const res = await fetch(`${lbtcApiBaseUrl}/api/bridge/v1/deposits/getByHash`, {
-    method: 'POST',
-    body: JSON.stringify({ messageHash: [payloadHash] }),
-    ...(signal && { signal }),
-  })
-  const response = (await res.json()) as LombardAttestationsResponse | null
+  const response = (await fetchIssuerJson(
+    `${lbtcApiBaseUrl}/api/bridge/v1/deposits/getByHash`,
+    'getLbtcAttestation',
+    { signal, init: { method: 'POST', body: JSON.stringify({ messageHash: [payloadHash] }) } },
+    (cause) => new CCIPLbtcAttestationNotFoundError(payloadHash, undefined, { cause }),
+  )) as LombardAttestationsResponse | null
   if (response == null || !('attestations' in response)) {
     throw new CCIPLbtcAttestationNotFoundError(payloadHash, response)
   }

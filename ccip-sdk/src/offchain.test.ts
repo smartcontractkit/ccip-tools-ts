@@ -264,10 +264,11 @@ describe('getLbtcAttestation', () => {
       mockedFetch.mock.calls[0]?.arguments[0],
       'https://gastald-testnet.prod.lombard.finance/api/bridge/v1/deposits/getByHash',
     )
-    assert.deepEqual(mockedFetch.mock.calls[0].arguments[1], {
-      method: 'POST',
-      body: JSON.stringify({ messageHash: [approvedPayloadHash1] }),
-    })
+    const { method, body } = mockedFetch.mock.calls[0].arguments[1]
+    assert.deepEqual(
+      { method, body },
+      { method: 'POST', body: JSON.stringify({ messageHash: [approvedPayloadHash1] }) },
+    )
     assert.equal(result.attestation, approvedPayloadAttestation1)
   })
 
@@ -279,10 +280,11 @@ describe('getLbtcAttestation', () => {
       mockedFetch.mock.calls[0]?.arguments[0],
       'https://mainnet.prod.lombard.finance/api/bridge/v1/deposits/getByHash',
     )
-    assert.deepEqual(mockedFetch.mock.calls[0].arguments[1], {
-      method: 'POST',
-      body: JSON.stringify({ messageHash: [approvedPayloadHash1] }),
-    })
+    const { method, body } = mockedFetch.mock.calls[0].arguments[1]
+    assert.deepEqual(
+      { method, body },
+      { method: 'POST', body: JSON.stringify({ messageHash: [approvedPayloadHash1] }) },
+    )
     assert.equal(result.attestation, approvedPayloadAttestation1)
   })
 
@@ -638,6 +640,37 @@ describe('getOffchainTokenData watch', () => {
       },
     )
   }
+
+  it('polls through dropped connections, 5xx, and bodies that are not JSON', async (t) => {
+    const replies = [
+      () => Promise.reject(new TypeError('fetch failed')),
+      () => Promise.resolve(new Response('<html>bad gateway</html>', { status: 502 })),
+      () => Promise.resolve(new Response('<html>maintenance</html>', { status: 200 })),
+      () => Promise.resolve(new Response(JSON.stringify(circle('complete')))),
+    ]
+    const fetch = t.mock.method(globalThis, 'fetch', () => replies.shift()!())
+    const log = logger()
+    const result = await getOffchainTokenData(request(), {
+      logger: log,
+      watch: true,
+      pollInterval: 0,
+    })
+    assert.equal(fetch.mock.callCount(), 4)
+    assert.equal(result[1]?._tag, 'usdc')
+    assert.equal(log.warn.mock.callCount(), 0)
+  })
+
+  it('reports a 5xx once without watch', async (t) => {
+    const fetch = t.mock.method(
+      globalThis,
+      'fetch',
+      async () => new Response('<html>unavailable</html>', { status: 503 }),
+    )
+    const log = logger()
+    assert.deepEqual(await getOffchainTokenData(request(), { logger: log }), [undefined, undefined])
+    assert.equal(fetch.mock.callCount(), 1)
+    assert.equal(log.warn.mock.callCount(), 1)
+  })
 })
 
 describe('getLbtcPayloadHash', () => {

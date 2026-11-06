@@ -79,6 +79,7 @@ import {
 import {
   getDataBytes,
   getSourceDecimalsFromExtraData,
+  linkAbortSignals,
   parseTypeAndVersion,
   resolveTokenDecimals,
   scaleDecimals,
@@ -1777,11 +1778,22 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
     request: PickDeep<CCIPRequest, 'log.transactionHash' | `message`>,
     opts: GetOffchainTokenDataOpts = {},
   ): Promise<OffchainTokenData[]> {
-    const watch =
-      opts.watch instanceof AbortSignal
-        ? AbortSignal.any([opts.watch, this.abort])
-        : opts.watch && this.abort
-    return getOffchainTokenData(request, { logger: this.logger, ...opts, watch })
+    if (!(opts.watch instanceof AbortSignal)) {
+      const watch = opts.watch && this.abort
+      return getOffchainTokenData(request, { logger: this.logger, ...opts, watch })
+    }
+    // Link rather than compose with AbortSignal.any: a composite over the chain-lifetime
+    // `this.abort` can pin in Node's gcPersistentSignals (see linkAbortSignals).
+    const link = linkAbortSignals([opts.watch, this.abort])
+    try {
+      return await getOffchainTokenData(request, {
+        logger: this.logger,
+        ...opts,
+        watch: link.signal,
+      })
+    } finally {
+      link.unlink()
+    }
   }
 
   /**

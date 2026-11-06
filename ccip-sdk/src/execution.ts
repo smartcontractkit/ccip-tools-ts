@@ -260,5 +260,7 @@ export const discoverOffRamp = memoize(
     transformKey: ([source, dest, { onRamp, version }]) =>
       [source.network.chainSelector, dest.network.chainSelector, onRamp, version] as const,
     maxSize: 50,
+    // evict rejections, so a transient RPC error or a half-deployed lane is retried
+    async: true,
   },
 )

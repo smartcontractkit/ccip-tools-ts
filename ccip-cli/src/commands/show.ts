@@ -317,136 +317,153 @@ export async function showRequests(
 
   const finalized$ = Promise.all([finality$, attestations$])
 
-  let dest!: Chain
+  // Stop the background waits on every exit path, errors included.
   try {
-    dest = await getChain(request.lane.destChainSelector)
-  } catch (err) {
-    logger.debug(
-      'No dest RPC available for',
-      request.lane.destChainSelector,
-      '— emitting partial result:',
-      err,
-    )
-    cancelPending()
-    emitJsonEnvelope()
-    throw err
-  }
-
-  let execs$, verifications$
-  let receiptsHeaderPrinted = false
-  const printReceiptsHeader = () => {
-    if (!receiptsHeaderPrinted && argv.format !== Format.json) {
-      output.write('Receipts (dest):')
-      receiptsHeaderPrinted = true
+    let dest!: Chain
+    try {
+      dest = await getChain(request.lane.destChainSelector)
+    } catch (err) {
+      logger.debug(
+        'No dest RPC available for',
+        request.lane.destChainSelector,
+        '— emitting partial result:',
+        err,
+      )
+      emitJsonEnvelope()
+      throw err
     }
-  }
 
-  if (request.metadata?.receiptTransactionHash) {
-    // if we got last receipt metadata from api, just fetch it instead of scanning (faster)
-    execs$ = await dest.getExecutionReceiptsInTx(request.metadata.receiptTransactionHash, {
-      offRamp,
-      messageId: request.message.messageId,
-      sourceChainSelector: request.message.sourceChainSelector,
-      sequenceNumber: request.message.sequenceNumber,
-    })
-    if (!argv.wait) await finalized$
-  } else {
-    offRamp ??= await discoverOffRamp(source!, dest, request.lane, source)
+    let execs$, verifications$
+    let receiptsHeaderPrinted = false
+    const printReceiptsHeader = () => {
+      if (!receiptsHeaderPrinted && argv.format !== Format.json) {
+        output.write('Receipts (dest):')
+        receiptsHeaderPrinted = true
+      }
+    }
 
-    const watch = argv.wait ? pending : undefined
-    verifications$ = (async () => {
-      const indexer = resolveIndexer(argv, dest, logger, source)
-      const verifications = await dest.getVerifications({
+    if (request.metadata?.receiptTransactionHash) {
+      // if we got last receipt metadata from api, just fetch it instead of scanning (faster)
+      execs$ = await dest.getExecutionReceiptsInTx(request.metadata.receiptTransactionHash, {
         offRamp,
-        request,
-        ...argv,
-        indexer,
-        watch,
+        messageId: request.message.messageId,
+        sourceChainSelector: request.message.sourceChainSelector,
+        sequenceNumber: request.message.sequenceNumber,
       })
-      if (isStopped()) return
-      commitFound = true
-      if (argv.wait) finalizedAc.abort()
-      else await finalized$
-      if (isStopped()) return
-      if (argv.wait)
-        logger.info(`[${MessageStatus.Committed}] Commit report accepted on destination chain`)
+      if (!argv.wait) await finalized$
+    } else {
+      offRamp ??= await discoverOffRamp(source!, dest, request.lane, source)
+
+      const watch = argv.wait ? pending : undefined
+      verifications$ = (async () => {
+        const indexer = resolveIndexer(argv, dest, logger, source)
+        const verifications = await dest.getVerifications({
+          offRamp,
+          request,
+          ...argv,
+          indexer,
+          watch,
+        })
+        if (isStopped()) return
+        commitFound = true
+        if (argv.wait) finalizedAc.abort()
+        else await finalized$
+        if (isStopped()) return
+        if (argv.wait)
+          logger.info(`[${MessageStatus.Committed}] Commit report accepted on destination chain`)
+        switch (argv.format) {
+          case Format.log:
+            output.write('commit =', verifications)
+            break
+          case Format.pretty:
+            await prettyVerifications.call(pendingCtx, dest, verifications, request)
+            break
+          case Format.json:
+            jsonEnvelope!.verifications = verifications
+            break
+        }
+        if (isStopped()) return
+        if (argv.wait)
+          logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
+        else printReceiptsHeader()
+        return verifications
+      })().catch((err) => {
+        if (isStopped()) return
+        logger.warn(
+          'Verifications unavailable',
+          err instanceof Error && !argv.verbose ? err.message : err,
+        )
+        if (!argv.wait) printReceiptsHeader()
+        return undefined
+      })
+      execs$ = dest.getExecutionReceipts({
+        ...argv,
+        offRamp,
+        messageId: request.message.messageId,
+        sourceChainSelector: request.message.sourceChainSelector,
+        sequenceNumber: request.message.sequenceNumber,
+        startTime: request.log.blockTimestamp,
+        verifications: !argv.wait ? await verifications$ : undefined,
+        watch: argv.wait && pending,
+      })
+    }
+
+    let found = false
+    for await (const exec of execs$) {
+      let origin = exec.log.tx?.from
+      const origin$ =
+        origin == null && argv.format === Format.pretty
+          ? (async () => {
+              origin = (await dest.getTransaction(exec.log.transactionHash)).from
+            })().catch(() => {})
+          : undefined
+      if (argv.wait) {
+        // An execution is authoritative. Give data that is ready (e.g. for a message that was
+        // executed before the wait started) a short grace, then cancel the slower waits.
+        await withGrace(Promise.all([finalized$, verifications$, origin$]), EXEC_GRACE_MS)
+        cancelPending()
+      } else await Promise.all([verifications$, origin$])
+      const status =
+        exec.receipt.state === ExecutionState.Success ? MessageStatus.Success : MessageStatus.Failed
+      const statusMessage =
+        exec.receipt.state === ExecutionState.Success
+          ? 'Message executed on destination chain'
+          : 'Message execution failed on destination chain'
+      logger.info(`[${status}] ${statusMessage}`)
       switch (argv.format) {
         case Format.log:
-          output.write('commit =', verifications)
+          output.write('receipt =', withDateTimestamp(exec))
           break
         case Format.pretty:
-          await prettyVerifications.call(pendingCtx, dest, verifications, request)
+          prettyReceipt.call(ctx, exec, request, origin)
           break
         case Format.json:
-          jsonEnvelope!.verifications = verifications
+          jsonEnvelope!.receipts ??= []
+          jsonEnvelope!.receipts.push(exec)
           break
       }
-      if (isStopped()) return
-      if (argv.wait)
-        logger.info(`[${MessageStatus.Blessed}] Waiting for execution on destination chain...`)
-      else printReceiptsHeader()
-      return verifications
-    })().catch((err) => {
-      if (isStopped()) return
-      logger.warn(
-        'Verifications unavailable',
-        err instanceof Error && !argv.verbose ? err.message : err,
-      )
-      if (!argv.wait) printReceiptsHeader()
-      return undefined
-    })
-    execs$ = dest.getExecutionReceipts({
-      ...argv,
-      offRamp,
-      messageId: request.message.messageId,
-      sourceChainSelector: request.message.sourceChainSelector,
-      sequenceNumber: request.message.sequenceNumber,
-      startTime: request.log.blockTimestamp,
-      verifications: !argv.wait ? await verifications$ : undefined,
-      watch: argv.wait && pending,
-    })
-  }
-
-  let found = false
-  for await (const exec of execs$) {
-    // An execution is authoritative. Never await slower attestation or commit RPCs here.
-    if (argv.wait) cancelPending()
-    else await verifications$
-    const status =
-      exec.receipt.state === ExecutionState.Success ? MessageStatus.Success : MessageStatus.Failed
-    const statusMessage =
-      exec.receipt.state === ExecutionState.Success
-        ? 'Message executed on destination chain'
-        : 'Message execution failed on destination chain'
-    logger.info(`[${status}] ${statusMessage}`)
-    switch (argv.format) {
-      case Format.log:
-        output.write('receipt =', withDateTimestamp(exec))
-        break
-      case Format.pretty:
-        prettyReceipt.call(
-          ctx,
-          exec,
-          request,
-          exec.log.tx?.from ??
-            // Receipt enrichment must not delay the first execution in watch mode.
-            (!argv.wait
-              ? (await dest.getTransaction(exec.log.transactionHash).catch(() => null))?.from
-              : undefined),
-        )
-        break
-      case Format.json:
-        jsonEnvelope!.receipts ??= []
-        jsonEnvelope!.receipts.push(exec)
-        break
+      found = true
+      if (argv.wait) break
     }
-    found = true
-    if (argv.wait) break
-  }
-  if (!found) {
+    if (!found) {
+      cancelPending()
+      if (!ctx.abort.aborted) logger.warn(`No execution receipt found for request`)
+    }
+    emitJsonEnvelope()
+  } finally {
     cancelPending()
-    if (!ctx.abort.aborted) logger.warn(`No execution receipt found for request`)
   }
-  emitJsonEnvelope()
-  cancelPending()
+}
+
+/** Longest time a found execution waits for commit, attestation and origin data in `--wait`. */
+const EXEC_GRACE_MS = 5_000
+
+/** Wait for `work` to settle, but not longer than `ms`. */
+async function withGrace(work: Promise<unknown>, ms: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([work, new Promise((resolve) => (timer = setTimeout(resolve, ms)))])
+  } finally {
+    clearTimeout(timer)
+  }
 }
