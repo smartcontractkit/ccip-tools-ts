@@ -515,7 +515,7 @@ export class CCIPMessageNotVerifiedYetError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   const offRamp = await discoverOffRamp(source, dest, request)
+ *   const offRamp = await discoverOffRamp(source, dest, request.lane)
  * } catch (error) {
  *   if (error instanceof CCIPOffRampNotFoundError) {
  *     console.log(`No offRamp for ${error.context.onRamp} on ${error.context.destNetwork}`)

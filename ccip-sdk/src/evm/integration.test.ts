@@ -626,7 +626,7 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
         const seen: ExecutionState[] = []
         try {
           const request = await apiClient.getMessageById(messageId)
-          const offRamp = await discoverOffRamp(baseSepChain, opSepChain, request.lane.onRamp, {
+          const offRamp = await discoverOffRamp(baseSepChain, opSepChain, request.lane, {
             logger: testLogger,
           })
           for await (const exec of opSepChain.getExecutionReceipts({

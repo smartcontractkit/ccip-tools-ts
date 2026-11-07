@@ -65,9 +65,10 @@ jobs:
 
       # >= 1.5.0 forks as Agave 4.x (solana-core 4.1.2) and accepts version-1
       # transactions, which the SDK sends when a tx exceeds the v0 packet limit
-      - name: Install Surfpool v1.5.0 (for SVM fork tests)
+      # v1.7.0 fixes RPC worker/datasource deadlocks that stall transaction confirmation.
+      - name: Install Surfpool v1.7.0 (for SVM fork tests)
         run: |
-          curl -sSL https://github.com/solana-foundation/surfpool/releases/download/v1.5.0/surfpool-linux-x64.tar.gz \
+          curl -sSL https://github.com/solana-foundation/surfpool/releases/download/v1.7.0/surfpool-linux-x64.tar.gz \
             | tar xz -C /usr/local/bin
 
       - name: Verify surfpool is available

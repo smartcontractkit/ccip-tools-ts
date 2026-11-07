@@ -22,7 +22,7 @@ await useResource(['ton-testnet'])
  * ExecutionStateChanged decoding against real BOCs, getTransaction, getMessagesInTx,
  * getBlockTimestamp, getTokenInfo and getBalance. The getLogs scan SHAPES (index vs
  * walk, wire call counts) are logs.integration.test.ts's job; this suite only needs
- * one recent log of each kind, so every scan uses a short window and a fixture
+ * one recent log of each kind, so every scan uses a bounded window and a fixture
  * selected at RUNTIME — the pinned addresses and Jan-2026 sends of the old suite
  * aged out of the live deployment.
  *
@@ -54,6 +54,9 @@ const EXECUTION_STATE_CHANGED_TOPIC = crc32('ExecutionStateChanged') // 0x4c94c3
 
 const HOUR_S = 3600
 const DAY_S = 86_400
+/** Fixture lookback: ton-testnet traffic bursts and then pauses for days; three days
+ * matches logs.integration.test.ts's MAX_LOOKBACK_S, which still bounds the scan. */
+const FIXTURE_LOOKBACK_S = 3 * DAY_S
 /** Wall-clock a single fixture scan spends retrying before it fails. */
 const RETRY_SPACING_MS = [5_000, 15_000, 30_000]
 
@@ -96,7 +99,7 @@ async function firstMatch<T>(what: string, scan: () => Promise<T | undefined>): 
 
 describe('TON index integration tests (live testnet)', { skip }, () => {
   let chain: TONChain
-  /** Recent-message fixture: the first TON -> sepolia send of the last two days. */
+  /** Recent-message fixture: the first TON -> sepolia send of the fixture lookback. */
   let message$: Promise<{ log: ChainLog; message: CCIPMessage_V1_6_EVM }> | undefined
   let router$: Promise<string> | undefined
   let offRamp$: Promise<string> | undefined
@@ -113,11 +116,11 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
   const recentStart = (ageS: number) => Math.floor(Date.now() / 1e3) - ageS
 
   const messageFixture = () =>
-    (message$ ??= firstMatch('a TON -> sepolia CCIPMessageSent in the last 2 days', async () => {
+    (message$ ??= firstMatch('a TON -> sepolia CCIPMessageSent in the last 3 days', async () => {
       for await (const log of chain.getLogs({
         address: ONRAMP,
         topics: ['CCIPMessageSent'],
-        startTime: recentStart(2 * DAY_S),
+        startTime: recentStart(FIXTURE_LOOKBACK_S),
       })) {
         const message = TONChain.decodeMessage(log) as CCIPMessage_V1_6_EVM | undefined
         if (message?.destChainSelector === SEPOLIA_CHAIN_SELECTOR) return { log, message }
@@ -256,7 +259,7 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       for await (const found of chain.getLogs({
         address: ONRAMP,
         topics: ['CCIPMessageSent'],
-        startTime: recentStart(2 * DAY_S),
+        startTime: recentStart(FIXTURE_LOOKBACK_S),
         endBlock,
       })) {
         logs.push(found)
@@ -608,7 +611,9 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
     })
 
     it('should fetch transaction by composite hash', async () => {
-      const tx = await chain.getTransaction(knownTxHash)
+      const tx = await firstMatch('the transaction by composite hash', () =>
+        chain.getTransaction(knownTxHash),
+      )
 
       assert.equal(tx.hash, knownTxHash)
       assert.ok(tx.blockNumber > 0, 'blockNumber should be positive')

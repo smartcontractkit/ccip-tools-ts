@@ -35,6 +35,7 @@ import type { LeafHasher } from './hasher/common.ts'
 import { decodeMessageV1, decodeMessageV1Raw } from './messages.ts'
 import { type NetworkInfo, type NetworkType, ChainFamily, networkInfo } from './networks.ts'
 import {
+  type GetOffchainTokenDataOpts,
   type TokenVerifier,
   CCTP_V2_CCV_TAG,
   getAttestedVersionTag,
@@ -78,6 +79,7 @@ import {
 import {
   getDataBytes,
   getSourceDecimalsFromExtraData,
+  linkAbortSignals,
   parseTypeAndVersion,
   resolveTokenDecimals,
   scaleDecimals,
@@ -1321,13 +1323,24 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * {@link OnRampConfig} base interface declares — they may include extra fields
    * available only on specific versions.
    *
+   * One OnRamp can serve more than one lane version to the same destination: a Solana 2.0
+   * Router keeps its 1.6 lane config next to the 2.0 one. Give `opts.version` to select
+   * the lane; families whose OnRamp serves one version only ignore it. The lane version is
+   * not the contract version: the returned `typeAndVersion` always identifies the contract.
+   *
    * @param onRamp - OnRamp contract address.
    * @param destChainSelector - Destination chain selector.
+   * @param opts - Optional lane selection: `version` is the CCIP protocol version of the
+   *   lane (e.g. `request.lane.version`). Default: the contract's own version.
    * @returns Merged OnRamp config — at minimum `router`, `type`, `version`, `typeAndVersion`.
    *
    * @throws {@link CCIPContractTypeInvalidError} if address is not an OnRamp.
    */
-  abstract getOnRampConfig(onRamp: string, destChainSelector: bigint): Promise<OnRampConfig>
+  abstract getOnRampConfig(
+    onRamp: string,
+    destChainSelector: bigint,
+    opts?: { version?: CCIPVersion },
+  ): Promise<OnRampConfig>
 
   /**
    * Fetch the full OffRamp configuration for a given source chain.
@@ -1763,8 +1776,24 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    */
   async getOffchainTokenData(
     request: PickDeep<CCIPRequest, 'log.transactionHash' | `message`>,
+    opts: GetOffchainTokenDataOpts = {},
   ): Promise<OffchainTokenData[]> {
-    return getOffchainTokenData(request, this)
+    if (!(opts.watch instanceof AbortSignal)) {
+      const watch = opts.watch && this.abort
+      return getOffchainTokenData(request, { logger: this.logger, ...opts, watch })
+    }
+    // Link rather than compose with AbortSignal.any: a composite over the chain-lifetime
+    // `this.abort` can pin in Node's gcPersistentSignals (see linkAbortSignals).
+    const link = linkAbortSignals([opts.watch, this.abort])
+    try {
+      return await getOffchainTokenData(request, {
+        logger: this.logger,
+        ...opts,
+        watch: link.signal,
+      })
+    } finally {
+      link.unlink()
+    }
   }
 
   /**
