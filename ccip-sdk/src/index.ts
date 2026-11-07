@@ -120,6 +120,7 @@ export {
   bytesToBuffer,
   decodeAddress,
   getDataBytes,
+  getSourceTokenFromExtraData,
   isSupportedTxHash,
   jsonParse,
   jsonStringify,

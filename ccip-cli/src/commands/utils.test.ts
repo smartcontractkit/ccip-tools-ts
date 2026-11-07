@@ -5,16 +5,18 @@ import {
   type Chain,
   CCIPChainNotFoundError,
   CCIPCommitNotFoundError,
+  CCIPLocalTokenRequiredError,
   CCIPTokenDecimalsUnavailableError,
   CCIPUsdcAttestationError,
   ChainFamily,
 } from '@chainlink/ccip-sdk/src/index.ts'
-import { makeError } from 'ethers'
+import { AbiCoder, makeError } from 'ethers'
 
 import {
   formatCCIPError,
   formatDisplayAddress,
   formatDisplayTxHash,
+  formatToken,
   parseTokenAmounts,
   prettyFormat,
   yieldResolved,
@@ -168,6 +170,52 @@ describe('pretty display formatters', () => {
         ChainFamily.Solana,
       ),
       '5uVS6SjKKrvP6khfA9hiRk68pwuNVjZXCJQNxwwp1MXs9cozT3q8dkfAhPPKcGheiBqbKnfZaf8yznxJ7pvrLgMM',
+    )
+  })
+})
+
+describe('formatToken', () => {
+  const POOL = '0x' + '11'.repeat(20)
+  const TOKEN = '0x8FE4D867DB59E38E7bA7D98DC14ac1826c79CF9f'
+  const coder = AbiCoder.defaultAbiCoder()
+  // a multi-token pool's long pool data: decimals, encoded source token, additional data
+  const longPoolData = coder.encode(
+    ['uint256', 'bytes', 'bytes'],
+    [6n, coder.encode(['address'], [TOKEN]), '0x'],
+  )
+  const source = (getTokenForTokenPool: (pool: string) => Promise<string>) =>
+    ({
+      network: { family: ChainFamily.EVM },
+      getTokenForTokenPool,
+      getTokenInfo: async (token: string) => {
+        assert.equal(token, TOKEN)
+        return { symbol: 'TKN', decimals: 6 }
+      },
+    }) as unknown as Chain
+
+  it('reads the source token from multi-token pool data, not from the pool', async () => {
+    const chain = source(() => Promise.reject(new Error('pool read')))
+    assert.equal(
+      await formatToken(chain, {
+        amount: 1_500_000n,
+        sourcePoolAddress: POOL,
+        extraData: longPoolData,
+      }),
+      '1.5 TKN',
+    )
+  })
+
+  it('shows raw units when a multi-token pool cannot select the token', async () => {
+    const chain = source(() =>
+      Promise.reject(new CCIPLocalTokenRequiredError(POOL, 'BurnMintMultiTokenPool 2.1.0-dev')),
+    )
+    assert.equal(
+      await formatToken(
+        chain,
+        { amount: 7n, sourcePoolAddress: POOL, extraData: '0x' },
+        ChainFamily.EVM,
+      ),
+      `7 (raw units) ${POOL}`,
     )
   })
 })

@@ -17,6 +17,7 @@ import {
   CCIPMessageNotVerifiedYetError,
   CCIPNotImplementedError,
   CCIPRateLimitExceededError,
+  CCIPSourcePoolRevertError,
   CCIPTokenDecimalsInsufficientError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenTransferPausedError,
@@ -567,6 +568,13 @@ export type TokenPoolRemotesOpts = {
    * single-token pools.
    */
   token?: string
+}
+
+/** The `tokenReceiver` in a message's extra args (GenericExtraArgsV3), if set. */
+function getExtraArgsTokenReceiver(extraArgs: unknown): string | undefined {
+  if (!extraArgs || typeof extraArgs !== 'object' || !('tokenReceiver' in extraArgs)) return
+  const { tokenReceiver } = extraArgs
+  return typeof tokenReceiver === 'string' && tokenReceiver ? tokenReceiver : undefined
 }
 
 /**
@@ -1678,8 +1686,14 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * records, the requested finality (`message.extraArgs.finality`) against the token's allowed
    * finality, and the rate limit bucket of the requested finality class for the amount after the
    * token fee, as the pool consumes it. Other pools keep the check of the default outbound bucket
-   * for the full amount. It does not simulate the pool, so token-level checks such as a blocklist
-   * or a hook can still reject the send.
+   * for the full amount.
+   *
+   * With a `sender`, it then simulates each source pool's `lockOrBurn` (families with
+   * {@link Chain.simulateLockOrBurn}), so the pool's own checks, such as an RMN curse, a hook or a
+   * sender or receiver blocklist, block the send too. Only a decoded pool revert blocks
+   * ({@link CCIPSourcePoolRevertError}); a simulation that cannot run is skipped. Without a
+   * `sender` (e.g. from `getFee`), the simulation is skipped, as allowlists and blocklists depend
+   * on it.
    *
    * @param opts - The router, destination and message (`tokenAmounts`, and optional `extraArgs`).
    * @throws {@link CCIPRateLimitExceededError} if amount exceeds the rate limit (capacity or available) for remote
@@ -1687,25 +1701,25 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * @throws {@link CCIPTokenTransferPausedError} if a pause stops the token's outbound transfers
    * @throws {@link CCIPLaneConfigIncompleteError} if the token's lane lacks a config record that a send requires
    * @throws {@link CCIPFinalityNotAllowedError} if the token's pool does not allow the requested finality
+   * @throws {@link CCIPSourcePoolRevertError} if a source pool's `lockOrBurn` simulation reverts
    * @returns true if all token transfers are supported and within the rate limit
-   *
-   * @example
-   * ```typescript
-   * await chain.checkSendMessage({
-   *   router,
-   *   destChainSelector,
-   *   message: { tokenAmounts: [{ token, amount }], extraArgs: { finality: 'safe' } },
-   * })
-   * ```
+   * @internal
    */
   async checkSendMessage({
     router,
     destChainSelector,
     message,
+    sender,
   }: PickDeep<
     SendMessageOpts,
     'router' | 'destChainSelector' | 'message.tokenAmounts' | 'message.extraArgs'
-  >): Promise<true> {
+  > & {
+    /** Receiver of the prospective message, passed to the `lockOrBurn` simulation */
+    message: { receiver?: string }
+    /** Sender of the prospective message; enables the source pool `lockOrBurn` simulation */
+    sender?: string
+  }): Promise<true> {
+    let onRamp: string | undefined
     let registry
     for (const { token, amount } of message.tokenAmounts ?? []) {
       // Native value transfers aren't pool-managed (no registry entry / rate limiter),
@@ -1751,13 +1765,34 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
             : tokenTransferFeeConfig.finalityTransferFeeBps
         bucketAmount = amount - (amount * BigInt(bps)) / 10_000n
       }
-      if (!bucket) continue
-      if (bucketAmount > bucket.tokens) {
+      if (bucket && bucketAmount > bucket.tokens) {
         throw new CCIPRateLimitExceededError('OUTBOUND', bucket, {
           ...lane,
           amount: bucketAmount,
           registry,
         })
+      }
+
+      if (!sender || !this.simulateLockOrBurn) continue
+      const { finality, tokenArgs } = getRequestedFinality(message.extraArgs)
+      try {
+        onRamp ??= await this.getOnRampForRouter(router, destChainSelector)
+        await this.simulateLockOrBurn({
+          onRamp,
+          destChainSelector,
+          token,
+          amount,
+          originalSender: sender,
+          receiver: message.receiver,
+          tokenReceiver: getExtraArgsTokenReceiver(message.extraArgs),
+          tokenArgs,
+          finality,
+        })
+      } catch (err) {
+        // a decoded pool revert is the verdict the real send would get; anything else
+        // (transport, state-override artifacts) leaves the send to the checks above
+        if (err instanceof CCIPSourcePoolRevertError) throw err
+        this.logger.debug(`lockOrBurn simulation unavailable for token=${token}:`, err)
       }
     }
     return true
