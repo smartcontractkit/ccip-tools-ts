@@ -113,6 +113,33 @@ describe('DeployTokenPool (cct/solana)', () => {
       assert.equal(unsigned.instructions[0]!.programId.toBase58(), LOCK_RELEASE_POOL_PROGRAM)
     })
 
+    it('uses poolProgramAddress for the program and derived PDAs', async () => {
+      const poolProgram = Keypair.generate().publicKey
+      const chain = Object.assign(stubChain(), {
+        connection: { getAccountInfo: async () => ({ owner: TOKEN_PROGRAM_ID }) },
+        typeAndVersion: async () => ['LockReleaseTokenPool', '1.6.0'],
+      })
+      const unsigned = await new DeployTokenPool().generate(chain, {
+        tokenAddress: TOKEN,
+        poolType: 'lock-release',
+        poolProgramAddress: poolProgram.toBase58(),
+        payer: PAYER,
+        authority: AUTHORITY,
+        createPoolSignerATA: true,
+        allowlist: [Keypair.generate().publicKey.toBase58()],
+      })
+      const poolSigner = deriveTokenPoolSignerPda(poolProgram, new PublicKey(TOKEN))
+
+      assert.equal(unsigned.instructions[0]!.programId.toBase58(), poolProgram.toBase58())
+      assert.equal(unsigned.instructions[2]!.programId.toBase58(), poolProgram.toBase58())
+      assert.equal(
+        unsigned.poolAddress,
+        deriveTokenPoolConfigPda(poolProgram, new PublicKey(TOKEN)).toBase58(),
+      )
+      assert.equal(unsigned.poolSignerAddress, poolSigner.toBase58())
+      assert.equal(unsigned.instructions[1]!.keys[2]!.pubkey.toBase58(), poolSigner.toBase58())
+    })
+
     it('defaults authority to payer', async () => {
       const unsigned = await generate({ authority: undefined })
 
@@ -143,6 +170,35 @@ describe('DeployTokenPool (cct/solana)', () => {
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'deployTokenPool' &&
           err.context.param === 'poolType',
+      )
+    })
+
+    it('rejects an invalid poolProgramAddress', async () => {
+      await assert.rejects(
+        () => generate({ poolProgramAddress: 'not-a-pubkey' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'poolProgramAddress',
+      )
+    })
+
+    it('rejects a poolProgramAddress whose program reports the other pool type', async () => {
+      const chain = Object.assign(stubChain(), {
+        typeAndVersion: async () => ['BurnMintTokenPool', '1.6.0'],
+      })
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(chain, {
+            tokenAddress: TOKEN,
+            poolType: 'lock-release',
+            poolProgramAddress: Keypair.generate().publicKey.toBase58(),
+            payer: PAYER,
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'deployTokenPool' &&
+          err.context.param === 'poolProgramAddress',
       )
     })
 

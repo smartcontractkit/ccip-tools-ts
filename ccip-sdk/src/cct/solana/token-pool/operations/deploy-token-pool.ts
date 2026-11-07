@@ -22,8 +22,10 @@ import {
 import { submit } from '../../submit.ts'
 import { CreateTokenAccount } from '../../token/operations/create-token-account.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
   validateAuthorityMatchesWallet,
+  validatePoolProgramType,
   validatePoolType,
   validateUniquePublicKeys,
 } from '../../validate.ts'
@@ -32,7 +34,8 @@ import {
  * Parameters for initializing a Solana token pool, optionally with an allowlist.
  *
  * @remarks Targets only the canonical CCIP pool programs selected by `poolType` (`burn-mint`,
- * `lock-release`). Deploying a custom pool program is intentionally unsupported because this
+ * `lock-release`), at their canonical address or, on clusters where they are deployed elsewhere,
+ * at `poolProgramAddress`. Deploying a custom pool program is intentionally unsupported because this
  * operation initializes pools through the SDK's bundled program IDL; custom programs may use a
  * different initialize instruction or pool-state PDA layout. This is a deploy-operation scope,
  * not a protocol limitation: the registry and lookup-table operations remain program-agnostic.
@@ -40,8 +43,16 @@ import {
 type DeployTokenPoolParams = {
   /** Token mint address this pool manages. */
   tokenAddress: string
-  /** Canonical token pool program to deploy: BurnMint or LockRelease. */
+  /**
+   * Canonical token pool program to deploy: BurnMint or LockRelease. Selects the default program
+   * address when `poolProgramAddress` is omitted.
+   */
   poolType: TokenPoolType
+  /**
+   * Address of the `poolType` program. Defaults to the canonical address for `poolType`; set it
+   * where that program is deployed elsewhere. The pool state and signer PDAs derive from it.
+   */
+  poolProgramAddress?: string
   /**
    * Addresses to seed into the pool allowlist during initialization.
    * Providing any address also enables allowlist enforcement.
@@ -68,6 +79,7 @@ export type GenerateDeployTokenPoolParams = SolanaGenerateParams<DeployTokenPool
 
 type ParsedDeployTokenPoolParams = {
   tokenMint: PublicKey
+  poolType: TokenPoolType
   poolProgram: PublicKey
   payer: PublicKey
   authority: PublicKey
@@ -122,7 +134,10 @@ export class DeployTokenPool extends SolanaOperation<
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {
       tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      poolProgram: resolveTokenPoolProgram(params.poolType),
+      poolType: params.poolType,
+      poolProgram:
+        parseOptionalPublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress) ??
+        resolveTokenPoolProgram(params.poolType),
       payer,
       authority:
         params.authority === undefined
@@ -138,7 +153,10 @@ export class DeployTokenPool extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedDeployTokenPoolParams,
   ): Promise<GenerateDeployTokenPoolResult> {
-    const { tokenMint, poolProgram, payer, authority, allowlist, createPoolSignerATA } = opts
+    const { tokenMint, poolType, poolProgram, payer, authority, allowlist, createPoolSignerATA } =
+      opts
+    // An override pointing at the other pool type would deploy that type, ignoring `poolType`.
+    await validatePoolProgramType(this.name, chain, poolProgram, poolType)
     const program = createTokenPoolProgram(chain, poolProgram, payer)
     const state = deriveTokenPoolConfigPda(poolProgram, tokenMint)
     const poolSigner = deriveTokenPoolSignerPda(poolProgram, tokenMint)

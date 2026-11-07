@@ -41,8 +41,9 @@ export const TOKEN_POOL_PROGRAMS = {
  */
 export type PoolProgramRef = {
   /**
-   * Custom token pool program that owns the pool. Omit for a canonical burn-mint or lock-release
-   * pool, which is resolved on-chain from `tokenAddress`.
+   * Token pool program that owns the pool. Omit for a burn-mint or lock-release pool at the
+   * canonical program address, which is resolved on-chain from `tokenAddress`; set it for a custom
+   * program or where the pool programs are deployed elsewhere.
    */
   poolProgramAddress?: string
 }
