@@ -1937,10 +1937,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       opts.message,
       networkInfo(destChainSelector).family,
     )
-    const message = {
-      ...populatedMessage,
-      fee: opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage })),
-    }
+    // getFee runs checkSendMessage with these opts, `sender` included, so the source pools'
+    // lockOrBurn simulation runs too; a given fee skips getFee, so run the check directly
+    let fee = opts.message.fee
+    if (fee == null) fee = await this.getFee({ ...opts, message: populatedMessage })
+    else await this.checkSendMessage({ ...opts, message: populatedMessage })
+    const message = { ...populatedMessage, fee }
     if (this.network.name.startsWith('hedera-') && (message.feeToken || '').match(/^(0x)?0*$/i))
       message.fee *= BigInt(10) ** BigInt(10) // hedera's tinybar to weibar for msg.value native fee
 
@@ -3282,6 +3284,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ? ta.extraData
           : undefined
       if (sourcePoolData === undefined) {
+        // A multi-token pool checks the source token and the token identity metadata that only
+        // the source pool's real pool data carries (the base checks above already read its
+        // pauses, records and inbound bucket): a synthesized payload would false-block. Skip its
+        // simulation; a verdict deferred for this token stands
+        if (poolTypeAndVersion && isMultiTokenPoolType(poolTypeAndVersion[0])) continue
         // the dest token's own (optional) view, else the pool's declared decimals, else the
         // family default — see resolveTokenDecimals
         const decimals = await resolveTokenDecimals(this, token, tokenPool!)

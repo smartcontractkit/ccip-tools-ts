@@ -18,6 +18,7 @@ import {
   CCIPLaneConfigIncompleteError,
   CCIPLocalTokenRequiredError,
   CCIPRateLimitExceededError,
+  CCIPSourcePoolRevertError,
   CCIPTokenNotConfiguredError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTokenTransferPausedError,
@@ -545,6 +546,72 @@ describe('EVMChain multi-token pool send preflight', () => {
       assert.equal(err.context.tokens, 100n)
       return true
     })
+  })
+
+  it('checkSendMessage simulates lockOrBurn only with a sender', async () => {
+    const chain = chainWithRegistry(oneLaneProvider({}))
+    const calls: unknown[] = []
+    chain.simulateLockOrBurn = async (opts) => {
+      calls.push(opts)
+      return {
+        sourcePoolAddress: POOL,
+        destTokenAddress: '0x',
+        destPoolData: '0x',
+        destTokenAmount: 1n,
+      }
+    }
+    assert.equal(await chain.checkSendMessage(sendOpts(1n)), true)
+    assert.equal(calls.length, 0)
+
+    const RECEIVER = '0x' + 'ab'.repeat(20)
+    const opts = sendOpts(5n, 'safe')
+    const message = { ...opts.message, receiver: RECEIVER }
+    assert.equal(await chain.checkSendMessage({ ...opts, message, sender: ROUTER }), true)
+    assert.deepEqual(calls, [
+      {
+        onRamp: ONRAMP,
+        destChainSelector: DEST.chainSelector,
+        token: TOKEN,
+        amount: 5n,
+        originalSender: ROUTER,
+        receiver: RECEIVER,
+        tokenReceiver: undefined,
+        tokenArgs: '0x',
+        finality: 'safe',
+      },
+    ])
+  })
+
+  it('checkSendMessage throws a lockOrBurn revert, and skips a simulation that cannot run', async () => {
+    const chain = chainWithRegistry(oneLaneProvider({}))
+    const revert = new CCIPSourcePoolRevertError('SenderNotAllowed(address)', {
+      context: { token: TOKEN },
+    })
+    chain.simulateLockOrBurn = () => Promise.reject(revert)
+    await assert.rejects(chain.checkSendMessage({ ...sendOpts(1n), sender: ROUTER }), revert)
+
+    chain.simulateLockOrBurn = () => Promise.reject(new Error('could not detect network'))
+    assert.equal(await chain.checkSendMessage({ ...sendOpts(1n), sender: ROUTER }), true)
+  })
+
+  it('generateUnsignedSendMessage runs the preflight with the sender when a fee is given', async () => {
+    const chain = chainWithRegistry(oneLaneProvider({}))
+    const stop = new Error('stop after the preflight')
+    let checked: { sender?: string } | undefined
+    chain.checkSendMessage = (opts) => {
+      checked = opts
+      return Promise.reject(stop)
+    }
+    await assert.rejects(
+      chain.generateUnsignedSendMessage({
+        sender: ROUTER,
+        router: ROUTER,
+        destChainSelector: DEST.chainSelector,
+        message: { receiver: REMOTE_TOKEN, tokenAmounts: [{ token: TOKEN, amount: 1n }], fee: 1n },
+      }),
+      stop,
+    )
+    assert.equal(checked?.sender, ROUTER)
   })
 
   it('checkSendMessage deducts the default-finality fee for a finalized send', async () => {

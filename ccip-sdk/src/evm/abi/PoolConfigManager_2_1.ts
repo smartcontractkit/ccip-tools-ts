@@ -3,7 +3,7 @@
  * per-lane configuration of a multi-token pool. Hand-written from the public `IPoolConfigManager`
  * and `PoolConfigManager` in smartcontractkit/chainlink-ccip
  * `chains/evm/contracts/{interfaces,pools/MultiTokenPool}` at
- * 21710ed66224ab6c141b57df81665853a29a4ede. Only the views the SDK reads are included. Two of them
+ * e6282c35ce2e053787714f9c8283789a577a22f8. Only the views the SDK reads are included. Two of them
  * are not in `IPoolConfigManager`: `getStaticConfig()` gives the three policy stores that emit the
  * configuration events, and `getLaneRecordLevelBatch` shows which record each lane resolves.
  * The errors include those of the three policy stores, which revert through the PCM and the pool.

@@ -3,7 +3,7 @@
  * and keeps their configuration in a PoolConfigManager. Hand-written from the public interfaces
  * `IMultiTokenPool`, `IGetPoolConfigManager` and `MultiTokenPool` in smartcontractkit/chainlink-ccip
  * `chains/evm/contracts/{interfaces,pools/MultiTokenPool}` at
- * 21710ed66224ab6c141b57df81665853a29a4ede.
+ * e6282c35ce2e053787714f9c8283789a577a22f8. The errors include `BurnMintMultiTokenPool`'s.
  * The single-token getters (`getToken()`, `getDynamicConfig()`, `getSupportedChains()`, rate
  * limiters) do not exist on these pools; `getRemoteToken(uint64)` and `isSupportedChain(uint64)`
  * revert with `LocalTokenRequired()`.
@@ -102,6 +102,14 @@ export default [
     inputs: [
       { type: 'address', name: 'localToken' },
       { type: 'uint64', name: 'destChainSelector' },
+    ],
+  },
+  {
+    name: 'InvalidBurnAddress',
+    type: 'error',
+    inputs: [
+      { type: 'address', name: 'token' },
+      { type: 'address', name: 'burnAddress' },
     ],
   },
 ] as const

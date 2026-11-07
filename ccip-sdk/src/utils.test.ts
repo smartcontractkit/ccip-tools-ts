@@ -19,6 +19,7 @@ import {
   getBlockNumberAtOrAfter,
   getDataBytes,
   getSourceDecimalsFromExtraData,
+  getSourceTokenFromExtraData,
   isBase64,
   jsonParse,
   jsonStringify,
@@ -1519,6 +1520,14 @@ describe('getSourceDecimalsFromExtraData', () => {
       assert.equal(getSourceDecimalsFromExtraData('0x' + word(6n).slice(2).repeat(6)), undefined)
       // the long form with trailing junk does not re-encode to the same bytes
       assert.equal(getSourceDecimalsFromExtraData(long(6n) + word(1n).slice(2)), undefined)
+    })
+
+    it('reads the source token of the long form only', () => {
+      const TOKEN = '0x8FE4D867DB59E38E7bA7D98DC14ac1826c79CF9f'
+      assert.equal(getSourceTokenFromExtraData(long(6n), ChainFamily.EVM), TOKEN)
+      assert.equal(getSourceTokenFromExtraData(long(18n, word(42n)), ChainFamily.EVM), TOKEN)
+      for (const extraData of [undefined, '0x', word(6n), long(6n) + word(1n).slice(2)])
+        assert.equal(getSourceTokenFromExtraData(extraData, ChainFamily.EVM), undefined)
     })
   })
 })
