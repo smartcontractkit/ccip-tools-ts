@@ -32,9 +32,9 @@
     "brace-expansion": "5.0.12",
     "c8": "^12.0.0",
     "fill-range": "^7.1.1",
-    "oxfmt": "0.73.0",
-    "oxlint": "1.88.0",
-    "oxlint-tsgolint": "7.0.2004",
+    "oxfmt": "0.74.0",
+    "oxlint": "1.89.0",
+    "oxlint-tsgolint": "7.0.2005",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "yaml": "2.9.1"
   },
@@ -61,7 +61,11 @@
     "tmp": "^0.2.7",
     "jayson": "^5.0.0",
     "tinypool": "^2.2.0",
-    "postcss-selector-parser": "7.1.6"
+    "postcss-selector-parser": "7.1.6",
+    "test-exclude": {
+      "glob": "14.0.2",
+      "minimatch": "11.0.1"
+    }
   },
   "allowScripts": {
     "@trufflesuite/bigint-buffer@1.1.10": true,

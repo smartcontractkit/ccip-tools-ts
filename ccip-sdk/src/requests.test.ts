@@ -11,6 +11,7 @@ import {
   buildMessageForDest,
   decodeMessage,
   getMessageById,
+  getMessageVersion,
   getMessagesInBatch,
   getMessagesInRange,
   getMessagesInTx,
@@ -593,10 +594,11 @@ describe('getMessagesInRange', () => {
     assert.equal(localChain.getLaneForOnRamp.mock.calls.length, 2)
   })
 
-  it('should resolve lane via typeAndVersion for v1.6+ messages with destChainSelector', async () => {
+  it('should resolve lane version from the message shape for v1.6+ messages with destChainSelector', async () => {
     const localChain = new MockChain()
+    // the emitting contract is 2.0 (e.g. an upgraded Solana Router), but the message is 1.6
     localChain.typeAndVersion.mock.mockImplementation(() =>
-      Promise.resolve(['OnRamp', CCIPVersion.V1_6, `OnRamp ${CCIPVersion.V1_6}`]),
+      Promise.resolve(['OnRamp', CCIPVersion.V2_0, `OnRamp ${CCIPVersion.V2_0}`]),
     )
     // Override decodeMessage to return a message with destChainSelector (v1.6+)
     MockChain.decodeMessage.mock.mockImplementation(
@@ -660,8 +662,8 @@ describe('getMessagesInRange', () => {
     }
 
     assert.equal(results.length, 1)
-    // Lane should use typeAndVersion path (not getLaneForOnRamp)
-    assert.equal(localChain.typeAndVersion.mock.calls.length, 1)
+    // Lane version comes from the message (no offRampAddress => 1.6), not the contract
+    assert.equal(localChain.typeAndVersion.mock.calls.length, 0)
     assert.equal(localChain.getLaneForOnRamp.mock.calls.length, 0)
     // Lane should have destChainSelector from the message
     assert.equal(results[0]!.lane.destChainSelector, 4949039107694359620n)
@@ -1402,5 +1404,30 @@ describe('decodeMessage', () => {
         )
       })
     })
+  })
+})
+
+describe('getMessageVersion', () => {
+  const header = {
+    messageId: `0x${'11'.repeat(32)}`,
+    sourceChainSelector: 16423721717087811551n,
+    destChainSelector: 16015286601757825753n,
+    sequenceNumber: 1n,
+  }
+
+  it('returns 1.6 for a message without offRampAddress (e.g. Solana CCIPMessageSent)', () => {
+    const message = { ...header, nonce: 0n, extraArgs: '0x' } as unknown as Parameters<
+      typeof getMessageVersion
+    >[0]
+    assert.equal(getMessageVersion(message), CCIPVersion.V1_6)
+  })
+
+  it('returns 2.0 for a message with offRampAddress (e.g. Solana CCIPMessageSentV2)', () => {
+    const message = {
+      ...header,
+      onRampAddress: 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C',
+      offRampAddress: `0x${'22'.repeat(20)}`,
+    } as unknown as Parameters<typeof getMessageVersion>[0]
+    assert.equal(getMessageVersion(message), CCIPVersion.V2_0)
   })
 })

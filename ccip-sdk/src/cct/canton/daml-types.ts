@@ -37,6 +37,11 @@ export type ChoiceContextArg = {
   values: Record<string, unknown>
 }
 
+/** `Splice.Api.Token.MetadataV1.Metadata` (values is a TextMap Text → JSON object). */
+export type MetadataArg = {
+  values: Record<string, string>
+}
+
 // ─── CCIP.CodecV2 ──────────────────────────────────────────────────────────
 
 /** `CCIP.CodecV2.FinalityConfig.FinalityConfig` — WaitForFinality | WaitForSafe | BlockDepth Int. */
@@ -80,6 +85,12 @@ export type BurnMintTokenPoolArg = {
   poolReceiveContext: ChoiceContextArg
   transferTimeout: TransferTimeoutArg
   deps: PoolDepsArg
+}
+
+/** `LockReleaseTokenPool` create arguments — the burn-mint fields plus holdings labels. */
+export type LockReleaseTokenPoolArg = BurnMintTokenPoolArg & {
+  /** Labels on pool-owned holdings (for DA's holdings disclosure API). Mandatory on this template. */
+  poolReceiveMetadata: MetadataArg
 }
 
 /** `RateLimiterDeploySpec` (per-lane rate limiter to deploy via Initialize). */
@@ -130,3 +141,69 @@ export type ApplyChainUpdatesArg = {
   remoteChainSelectorsToRemove: string[]
   chainsToAdd: ChainUpdateArg[]
 }
+
+/** `SetRateLimitConfig` choice argument (nonconsuming; `Numeric 0` → JSON string). */
+export type SetRateLimitConfigArg = {
+  caller: string
+  rateLimiterCid: string
+  newIsEnabled: boolean
+  newCapacity: string
+  newRate: string
+}
+
+/** `RateLimitConfigArgs` (per-chain limiter swap within SetRateLimiterReferences). */
+export type RateLimitConfigArgsArg = {
+  remoteChainSelector: string
+  inboundRateLimiter: RawInstanceAddressArg
+  inboundCustomBlockConfirmationsRateLimiter: RawInstanceAddressArg
+  outboundRateLimiter: RawInstanceAddressArg
+}
+
+/** `SetRateLimiterReferences` choice argument. */
+export type SetRateLimiterReferencesArg = {
+  rateLimitConfigArgs: RateLimitConfigArgsArg[]
+}
+
+/** `SetTransferTimeout` choice argument. */
+export type SetTransferTimeoutArg = {
+  newTransferTimeout: TransferTimeoutArg
+}
+
+/** `SetObservers` choice argument. */
+export type SetObserversArg = {
+  observers: string[]
+}
+
+/** `SetDynamicConfig` choice argument (`Optional Party` → string | null). */
+export type SetDynamicConfigArg = {
+  rateLimitAdmin: string | null
+}
+
+/** `TokenTransferFeeConfigArgs` (`Numeric 0`/`Int` → JSON string). */
+export type TokenTransferFeeConfigArgsArg = {
+  destChainSelector: string
+  /** The choice rejects `false` — disable via `disableTokenTransferFeeConfigArgs` instead. */
+  isEnabled: boolean
+  destGasOverhead: string
+  destBytesOverhead: string
+  feeUSDCents: string
+  feeBps: string
+}
+
+/** `ApplyTokenTransferFeeConfigUpdates` choice argument. */
+export type ApplyTokenTransferFeeConfigUpdatesArg = {
+  tokenTransferFeeConfigArgs: TokenTransferFeeConfigArgsArg[]
+  disableTokenTransferFeeConfigArgs: string[]
+}
+
+/**
+ * `Splice.Api.Token.MetadataV1.AnyValue` — scalar subset supported for pool
+ * receive-context entries (contract IDs go through the dedicated
+ * `AddPoolReceiveContextContractValue` choice instead).
+ */
+export type AnyValueArg =
+  | DamlVariant<'AV_Text', string>
+  | DamlVariant<'AV_Int', string>
+  | DamlVariant<'AV_Decimal', string>
+  | DamlVariant<'AV_Bool', boolean>
+  | DamlVariant<'AV_Party', string>
