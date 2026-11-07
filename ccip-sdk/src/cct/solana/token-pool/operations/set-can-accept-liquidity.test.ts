@@ -6,7 +6,7 @@ import { Keypair, PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import { lockReleaseTokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
 import { SetCanAcceptLiquidity } from './set-can-accept-liquidity.ts'
 
@@ -118,6 +118,44 @@ describe('SetCanAcceptLiquidity (cct/solana)', () => {
           (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
         )
       }
+    })
+  })
+
+  describe('CCIP 2.0', () => {
+    const withVersion = (typeAndVersion: string[]) =>
+      Object.assign(chain(), { typeAndVersion: async () => typeAndVersion })
+
+    it('rejects 2.0 pools, which removed the instruction, before building', async () => {
+      await assert.rejects(
+        () =>
+          new SetCanAcceptLiquidity().generate(
+            withVersion(['lockreleaseTokenPool', '2.0.0', 'lockrelease-token-pool 2.0.0']),
+            {
+              tokenAddress: TOKEN,
+              payer: PAYER,
+              allow: ALLOW,
+            },
+          ),
+        (err: unknown) =>
+          err instanceof CCTOperationUnsupportedError &&
+          err.context.operation === 'setCanAcceptLiquidity' &&
+          err.context.version === '2.0.0',
+      )
+    })
+
+    it('still builds for pre-2.0 pools', async () => {
+      const unsigned = await new SetCanAcceptLiquidity().generate(
+        withVersion(['lockreleaseTokenPool', '1.6.2', 'lockrelease-token-pool 1.6.2']),
+        {
+          tokenAddress: TOKEN,
+          payer: PAYER,
+          allow: ALLOW,
+        },
+      )
+      assert.equal(
+        lockReleaseTokenPoolCoder.instruction.decode(unsigned.instructions[0]!.data)?.name,
+        'setCanAcceptLiquidity',
+      )
     })
   })
 

@@ -487,20 +487,46 @@ export function validateDelegation(
 }
 
 /**
- * Verifies that a rebalancer may move liquidity for a lock-release pool.
- * @throws {@link CCTTxFailedError} If the authority is not the rebalancer or liquidity is disabled.
+ * Reads a token pool program's CCIP version from its `typeVersion`, e.g. `'1.6.2'` or `'2.0.0'`.
+ * The program ID can't tell versions apart: mainnet and prod testnet run 1.6 and 2.0 under the same
+ * IDs.
+ * @returns `undefined` for a custom program without `typeVersion`.
+ */
+export async function resolvePoolProgramVersion(
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+): Promise<string | undefined> {
+  try {
+    return (await chain.typeAndVersion(poolProgram.toBase58()))[1]
+  } catch {
+    // Custom pool programs may not implement `typeVersion`.
+    return undefined
+  }
+}
+
+/** Whether a pool program version is CCIP 2.0 or later; `undefined` (unknown) counts as earlier. */
+export function isPoolVersionAtLeast2(version: string | undefined): version is string {
+  return version !== undefined && Number.parseInt(version, 10) >= 2
+}
+
+/**
+ * Verifies that a rebalancer may move liquidity for a lock-release pool. Before CCIP 2.0 the pool
+ * must also accept liquidity; 2.0 pools no longer enforce `canAcceptLiquidity`.
+ * @throws {@link CCTTxFailedError} If the authority is not the rebalancer, or a pre-2.0 pool has
+ * liquidity disabled.
  */
 export function validatePoolLiquidityConfig(
   operation: string,
   config: TokenPoolConfig,
   authority: PublicKey,
+  poolVersion: string | undefined,
 ): void {
   if (!config.rebalancer.equals(authority))
     throw new CCTTxFailedError(
       operation,
       `pool rebalancer is ${config.rebalancer.toBase58()}, not ${authority.toBase58()}; set it with setRebalancer first`,
     )
-  if (!config.canAcceptLiquidity)
+  if (!isPoolVersionAtLeast2(poolVersion) && !config.canAcceptLiquidity)
     throw new CCTTxFailedError(
       operation,
       'pool does not accept liquidity; enable it with setCanAcceptLiquidity(true) first',
