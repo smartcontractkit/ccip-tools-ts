@@ -543,6 +543,6 @@ async function sendMessage(
       logIndex: undefined,
       verifiers: undefined,
     },
-    { request },
+    { request, getChain },
   )
 }
