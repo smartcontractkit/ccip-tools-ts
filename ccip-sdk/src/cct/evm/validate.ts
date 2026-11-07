@@ -1,7 +1,8 @@
 /**
  * Generic parameter primitives for EVM CCT ops — one Solidity type or one JS shape each, no domain
  * knowledge and no chain access, so every one of them throws {@link CCTParamsInvalidError} before
- * the first RPC. Op-specific rules (rate limits, lane shapes) live with their op.
+ * the first RPC. Op-specific rules (rate limits, lane shapes) live with their op; the one
+ * exception is {@link validateBaseERC20Params}, shared by both `BaseERC20` deploy ops.
  *
  * @packageDocumentation
  */
@@ -210,4 +211,56 @@ export function validateArray(
         `${param}[${i}]`,
         'must not be a hole — the array is sparse, and a missing element cannot be encoded',
       )
+}
+
+/**
+ * Validates the `BaseERC20` constructor params shared by `CrossChainToken` and
+ * `CrossChainPoolToken`: `name`, `symbol`, `decimals`, `maxSupply`, `preMint` (`<= maxSupply` when
+ * capped), `preMintRecipient` and `ccipAdmin`.
+ * @remarks Mirrors the `BaseERC20` constructor: `preMintRecipient` is set (and non-zero) iff
+ * `preMint > 0`, else it reverts `PreMintAddressNotSet` / `PreMintRecipientSetWithZeroPreMint`.
+ * @throws {@link CCTParamsInvalidError} if any of those params is invalid
+ */
+export function validateBaseERC20Params(
+  operation: string,
+  p: {
+    name: string
+    symbol: string
+    decimals: number
+    maxSupply: bigint
+    preMint?: bigint
+    preMintRecipient?: string
+    ccipAdmin?: string
+  },
+): void {
+  validateNonEmptyString(operation, 'name', p.name)
+  validateNonEmptyString(operation, 'symbol', p.symbol)
+  validateUint8(operation, 'decimals', p.decimals)
+  validateUint256(operation, 'maxSupply', p.maxSupply)
+  const preMint = p.preMint ?? 0n
+  validateUint256(operation, 'preMint', preMint)
+  if (p.maxSupply !== 0n && preMint > p.maxSupply)
+    throw new CCTParamsInvalidError(
+      operation,
+      'preMint',
+      `must be <= maxSupply (${p.maxSupply}), got ${preMint}`,
+    )
+  if (preMint > 0n) {
+    if (p.preMintRecipient === undefined)
+      throw new CCTParamsInvalidError(operation, 'preMintRecipient', 'must be set when preMint > 0')
+    validateAddress(operation, 'preMintRecipient', p.preMintRecipient)
+    if (p.preMintRecipient === ZeroAddress)
+      throw new CCTParamsInvalidError(
+        operation,
+        'preMintRecipient',
+        'must be non-zero when preMint > 0',
+      )
+  } else if (p.preMintRecipient !== undefined) {
+    throw new CCTParamsInvalidError(
+      operation,
+      'preMintRecipient',
+      'must be unset when preMint is 0',
+    )
+  }
+  if (p.ccipAdmin !== undefined) validateAddress(operation, 'ccipAdmin', p.ccipAdmin)
 }

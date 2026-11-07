@@ -65,6 +65,8 @@ console.log('Token config CID:', deployment.tokenConfigCid)
 
 The pool owner is `instrumentId.admin`, and the token administrator `admin` defaults to it. The CCIP owner is the owner of the pool's `deps.tokenAdminRegistry`.
 
+Lock-release pools default `poolReceiveMetadata` to the standard CCIP holdings label (`cip-112/receiver.id = "ccip-public"`) so locked holdings are publicly disclosable for the execute path — pass `poolReceiveMetadata: {}` to opt out. If the owner has a registry `TransferPreapproval`, deploy discovers it and wires it into the pool's receive context automatically.
+
 `deployment.poolInstanceAddress` is optional on the result, so narrow it before reusing it in `applyChainUpdates` or `getTokenPoolState`, both of which require a `string`:
 
 ```typescript
@@ -111,6 +113,33 @@ When deploying initial lanes, every `lanes` entry requires all three limiter spe
 :::note
 `applyChainUpdates` references `inboundRateLimiter` and `outboundRateLimiter` by raw instance address (`"instanceId@party"`). It does not create them and does not accept capacity or rate. Limiter contracts are created only by `deployTokenPool`, whose atomic `Initialize` builds each lane's limiters from a full spec (instance ID, enabled, capacity, rate) and returns their contract IDs on the result as `rateLimiterCids`. The manager exposes no standalone rate-limiter creation operation, so the limiter contracts a post-deploy lane points at must already exist on-ledger.
 :::
+
+## Update pool configuration
+
+Two post-deploy writes adjust a live pool in place (both consume and return the pool contract — read state again after each call):
+
+`setRateLimitConfig` retunes one lane limiter. Callable by the pool owner or the pool's `rateLimitAdmin`. Note: `isEnabled: false` means unlimited throughput; to block a direction, set `isEnabled: true` with zero capacity and rate.
+
+```typescript
+await cct.setRateLimitConfig({
+  wallet,
+  poolInstanceAddress,
+  rateLimiterInstanceAddress: process.env.OUTBOUND_RATE_LIMITER!,
+  isEnabled: true,
+  capacity: 1000000n,
+  rate: 100n,
+})
+```
+
+`setObservers` replaces the pool's EDS observer parties — add your EDS's party so it auto-discovers and serves the pool.
+
+```typescript
+await cct.setObservers({
+  wallet,
+  poolInstanceAddress,
+  observers: [process.env.EDS_OBSERVER_PARTY!],
+})
+```
 
 ## Verify the configuration
 

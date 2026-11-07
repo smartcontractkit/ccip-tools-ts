@@ -33,6 +33,9 @@ class MockChain extends Chain {
   private mockRouterForOnRamp: Map<string, string> = new Map()
   private mockOffRampsForRouter: Map<string, string[]> = new Map()
   private mockOnRampForOffRamp: Map<string, string> = new Map()
+  private mockTypeAndVersionFor: Map<string, string> = new Map()
+  // 2.0 lane config `offRamp` per onRamp (a 2.0 OnRamp keeps its lane's OffRamp)
+  private mockV2OffRampForOnRamp: Map<string, string> = new Map()
 
   constructor(chainId: number, typeAndVersion: string = 'EVM2EVMOffRamp 1.5.0') {
     super(networkInfo(chainId))
@@ -53,6 +56,14 @@ class MockChain extends Chain {
 
   setOnRampForOffRamp(offRamp: string, onRamp: string) {
     this.mockOnRampForOffRamp.set(offRamp, onRamp)
+  }
+
+  setTypeAndVersion(address: string, typeAndVersion: string) {
+    this.mockTypeAndVersionFor.set(address, typeAndVersion)
+  }
+
+  setV2OffRampForOnRamp(onRamp: string, offRamp: string) {
+    this.mockV2OffRampForOnRamp.set(onRamp, offRamp)
   }
 
   override async getBlockTimestamp(block: number | 'finalized'): Promise<number> {
@@ -105,9 +116,10 @@ class MockChain extends Chain {
     }
   }
 
-  async typeAndVersion(_address: string): Promise<[string, string, string]> {
-    const parts = this.mockTypeAndVersion.split(' ') as [string, string]
-    return [parts[0], parts[1], this.mockTypeAndVersion]
+  async typeAndVersion(address: string): Promise<[string, string, string]> {
+    const typeAndVersion = this.mockTypeAndVersionFor.get(address) ?? this.mockTypeAndVersion
+    const parts = typeAndVersion.split(' ') as [string, string]
+    return [parts[0], parts[1], typeAndVersion]
   }
 
   override async getRouterForOnRamp(_onRamp: string, _destChainSelector: bigint): Promise<string> {
@@ -121,12 +133,20 @@ class MockChain extends Chain {
     return '0xRouter'
   }
 
-  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+  async getOnRampConfig(
+    onRamp: string,
+    destChainSelector: bigint,
+    opts?: { version?: CCIPVersion },
+  ) {
+    const v2OffRamp = this.mockV2OffRampForOnRamp.get(onRamp)
     return {
       router: this.mockRouterForOnRamp.get(onRamp) || '0xDefaultRouter',
       destChainSelector,
       feeQuoter: '0xFeeQuoter',
       typeAndVersion: 'EVM2EVMOnRamp 1.5.0',
+      // like a Solana 2.0 Router: only the 2.0 lane config (the default one) has `offRamp`
+      ...(v2OffRamp &&
+        (opts?.version ?? CCIPVersion.V2_0) >= CCIPVersion.V2_0 && { offRamp: v2OffRamp }),
     }
   }
 
@@ -451,7 +471,10 @@ describe('discoverOffRamp', () => {
     destChain.setOffRampsForRouter('0xDestRouter', ['0xDestOffRamp'])
     destChain.setOnRampForOffRamp('0xDestOffRamp', onRamp)
 
-    const result = await discoverOffRamp(sourceChain, destChain, onRamp)
+    const result = await discoverOffRamp(sourceChain, destChain, {
+      onRamp,
+      version: CCIPVersion.V1_5,
+    })
 
     assert.equal(result, '0xDestOffRamp')
   })
@@ -484,7 +507,8 @@ describe('discoverOffRamp', () => {
     ) // This won't match the onRamp we're looking for
 
     await assert.rejects(
-      async () => await discoverOffRamp(sourceChain, destChain, onRamp),
+      async () =>
+        await discoverOffRamp(sourceChain, destChain, { onRamp, version: CCIPVersion.V1_5 }),
       /No matching offRamp found/,
     )
   })
@@ -512,7 +536,59 @@ describe('discoverOffRamp', () => {
     destChain.setOffRampsForRouter(rawDestRouter, [rawOffRamp])
     destChain.setOnRampForOffRamp(rawOffRamp, rawOnRamp)
 
-    const result = await discoverOffRamp(sourceChain, destChain, friendlyOnRamp)
+    const result = await discoverOffRamp(sourceChain, destChain, {
+      onRamp: friendlyOnRamp,
+      version: CCIPVersion.V1_6,
+    })
     assert.equal(result, rawOffRamp, 'offRamp should be returned in raw TON form')
+  })
+
+  it('should pick the OffRamp of the lane version when 1.6 and 2.0 OffRamps accept the same onRamp', async () => {
+    // Solana 2.0 Router (also the OnRamp) serves a 1.6 lane and a 2.0 lane to the same dest;
+    // the dest has one OffRamp per version, and both accept the Router as their onRamp
+    const sourceChain = new MockChain(11155111)
+    const destChain = new MockChain(421614)
+    const onRamp = '0xDualRouter'
+    const OFFRAMP_V2 = `0x${'22'.repeat(20)}` // read from the 2.0 lane config: a real address
+    sourceChain.setV2OffRampForOnRamp(onRamp, OFFRAMP_V2)
+    sourceChain.setRouterForOnRamp(onRamp, onRamp)
+    sourceChain.setOffRampsForRouter(onRamp, ['0xSourceOffRamp'])
+    sourceChain.setOnRampForOffRamp('0xSourceOffRamp', '0xDestOnRamp')
+
+    destChain.setRouterForOnRamp('0xDestOnRamp', '0xDestRouter')
+    // the 2.0 OffRamp comes first: a version-blind discovery would return it for 1.6 too
+    destChain.setOffRampsForRouter('0xDestRouter', [OFFRAMP_V2, '0xOffRampV16'])
+    destChain.setOnRampForOffRamp(OFFRAMP_V2, onRamp)
+    destChain.setOnRampForOffRamp('0xOffRampV16', onRamp)
+    destChain.setTypeAndVersion(OFFRAMP_V2, 'OffRamp 2.0.0')
+    destChain.setTypeAndVersion('0xOffRampV16', 'OffRamp 1.6.0')
+
+    assert.equal(
+      await discoverOffRamp(sourceChain, destChain, { onRamp, version: CCIPVersion.V1_6 }),
+      '0xOffRampV16',
+    )
+    // same chains and onRamp: the memo key must include the version
+    assert.equal(
+      await discoverOffRamp(sourceChain, destChain, { onRamp, version: CCIPVersion.V2_0 }),
+      OFFRAMP_V2,
+    )
+  })
+
+  it('should not pick a 2.0 OffRamp for a 1.6 lane when only 2.0 OffRamps accept the onRamp', async () => {
+    const sourceChain = new MockChain(11155111)
+    const destChain = new MockChain(421614)
+    const onRamp = '0xV2OnlyRouter'
+    sourceChain.setRouterForOnRamp(onRamp, onRamp)
+    sourceChain.setOffRampsForRouter(onRamp, ['0xSourceOffRamp'])
+    sourceChain.setOnRampForOffRamp('0xSourceOffRamp', '0xDestOnRamp')
+    destChain.setRouterForOnRamp('0xDestOnRamp', '0xDestRouter')
+    destChain.setOffRampsForRouter('0xDestRouter', ['0xOnlyOffRampV2'])
+    destChain.setOnRampForOffRamp('0xOnlyOffRampV2', onRamp)
+    destChain.setTypeAndVersion('0xOnlyOffRampV2', 'OffRamp 2.0.0')
+
+    await assert.rejects(
+      discoverOffRamp(sourceChain, destChain, { onRamp, version: CCIPVersion.V1_6 }),
+      /No matching offRamp found/,
+    )
   })
 })

@@ -9,7 +9,7 @@ import { useResourceForDescribe } from '../../../../scripts/useResource.ts'
 import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
 import { networkInfo } from '../../index.ts'
-import { ExecutionState } from '../../types.ts'
+import { CCIPVersion, ExecutionState } from '../../types.ts'
 import {
   FUJI_TO_SOLANA,
   SOLANA_ESTIMATE_RECEIVER_MESSAGE,
@@ -93,6 +93,77 @@ const SEPOLIA_TO_SOLANA_V2_MESSAGE_ID =
   '0x329238fa05b478d834d73163ac36ffe8d0c1daf3af4b3c0c272c6995473a1bad'
 const SEPOLIA_TO_SOLANA_V2_EXEC_TX =
   '2mDZqfQPSwHBd5Mif2MJciweR6ybPCaAiFhaZrzRWGKZEKmXApEtjXhsHX6hw6vFV5L5uHWXhGLPr4Uz5uAnsSht'
+
+// A 2.0 router that keeps serving 1.6 lanes: `Ccip842` (also the onRamp) has `ccip_send` (1.6,
+// `dest_chain_state`) next to `ccip_send_v2` (2.0, `dest_chain_state_v2`), and allows a 1.6 and a
+// 2.0 offRamp per source chain. Sepolia likewise has one offRamp per version that accepts
+// `Ccip842`, so (source, onRamp, dest) no longer selects one offRamp: the lane version does.
+const DUAL_ROUTER = 'Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C'
+const DUAL_SOLANA_OFFRAMP_V1_6 = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
+const DUAL_SOLANA_OFFRAMP_V2 = 'off43sBHBsmWTU6VbfwKYCNwyJ4rSDhunYvz3QL7bF9'
+const DUAL_SEPOLIA_OFFRAMP_V1_6 = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
+const DUAL_SEPOLIA_OFFRAMP_V2 = '0xc6A246A9AcdAaE651708706494720F79C3E5d0A1'
+// Executed messages of each version, both directions, through the dual-version router
+const DUAL_LANE_CASES = [
+  {
+    name: 'Solana -> Sepolia 1.6 (ccip_send on the 2.0 router)',
+    from: 'solana',
+    tx: '62e2Fe4pDva23jRNMWaxpanvNDmPnpTHvvKpJGxGji24NpjfbTsioT6ysJw6vEPm2r4T3pseCbXxbpfTuvuy7JVQ',
+    messageId: '0xb5fc2c5719d408a9a7ec87a4dcb70d236824fb97ef2f308284bdb066dc44ce5d',
+    sequenceNumber: 3921n,
+    sender: 'GC5tk8LYtdUiEVyhfkF78uVmHnp3fFKsPFis14S5Wzpx',
+    receiver: '0x54081602645704EE2B76FEe30E8B4d4F2D82d4E0',
+    onRamp: DUAL_ROUTER,
+    version: CCIPVersion.V1_6,
+    offRamp: DUAL_SEPOLIA_OFFRAMP_V1_6,
+    execTx: '0xaa9ad537bfc28b6a786248bb0268600a4648952d459c9ac0c5044002a5e70951',
+    execBlock: 12070058,
+  },
+  {
+    name: 'Solana -> Sepolia 2.0 (ccip_send_v2)',
+    from: 'solana',
+    tx: 'F5ZjBTr5CGikVKP1HRS3oweDXw4Po6SazLDABuNf8v4fYxpGwceg4XKVGAWZMkp76auSfGyTaibMTwYdXhU477p',
+    messageId: '0xdeab00991abba759e76888e0d7546fd73f3c73d502be98b9384f739ab98c717e',
+    sequenceNumber: 1n,
+    sender: 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx',
+    receiver: '0x3aa5EbB10dC797Cac828524e59A333d0A371443d',
+    onRamp: DUAL_ROUTER,
+    version: CCIPVersion.V2_0,
+    offRamp: DUAL_SEPOLIA_OFFRAMP_V2,
+    execTx: '0x32791b4ccbf1e6122b230c13eb7393c288c49e075be24d620cd1fb87545278d6',
+    execBlock: 12064056,
+  },
+  {
+    name: 'Sepolia -> Solana 1.6 (offRamp allowed by the 2.0 router)',
+    from: 'sepolia',
+    tx: '0xa4f563e38378e42cfda316463d3ac14a3af6b5282a395c076b1f57902de3fb58',
+    messageId: '0x555715bd86c9536a757242b5e8761a5fdd95e622dab2af3a4b9ce552421d365e',
+    sequenceNumber: 12372n,
+    sender: '0x5c25312C82791e6cB76Dc9eFaBE2F5fa695D966b',
+    receiver: '11111111111111111111111111111111',
+    onRamp: '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE',
+    version: CCIPVersion.V1_6,
+    offRamp: DUAL_SOLANA_OFFRAMP_V1_6,
+    execTx:
+      '66G2cadQSuZuoBGuEhWYkKsFfnZE21gYkHHQVx5C98KJTeK8YZdVSiYYsNxA3gCt2Sq9MAM9hkkRYycMi32dosTE',
+    execBlock: 518998558,
+  },
+  {
+    name: 'Sepolia -> Solana 2.0 (offRamp allowed by the 2.0 router)',
+    from: 'sepolia',
+    tx: '0x88e7862523cbbe953c689d77cb8b880184c28433df03e9757e7c4fd9de26e967',
+    messageId: '0xbf83c59ad2b56fc4b9e8b6b1cb7bac700bf2416c3d2f411f9a936aec10913989',
+    sequenceNumber: 5n,
+    sender: '0x4aA1B21843b42bA0aB356707a84876DB0B671206',
+    receiver: 'CbYiUaBi9nx1m3XhADWTdPoN25zeg5qDFBpbEfWKmrCL',
+    onRamp: '0x8dcf17f298c881A547D91ca4aA3C2AD7568C6777',
+    version: CCIPVersion.V2_0,
+    offRamp: DUAL_SOLANA_OFFRAMP_V2,
+    execTx:
+      '3W1q9MTnvxK9hs1uNFRR3K2zs3mYzSYXfCvBDyf9t2RMwPFVRxPjKjbE6QCFMpSWWmJgY6tceJrYe4wNnhFRFr6G',
+    execBlock: 518706001,
+  },
+] as const
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 const VERBOSE = !!process.env.VERBOSE
@@ -505,7 +576,7 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
       assert.equal(request.lane.onRamp, 'CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm')
       assert.equal(request.lane.version, '2.0.0')
 
-      const offRamp = await discoverOffRamp(solanaChain, dest, request.lane.onRamp)
+      const offRamp = await discoverOffRamp(solanaChain, dest, request.lane)
       assert.equal(offRamp, SEPOLIA_V2_OFFRAMP)
     }
   })
@@ -545,6 +616,133 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
   })
 })
 
+describe('Solana Devnet 2.0 router serving 1.6 and 2.0 lanes', { skip, timeout: 300_000 }, () => {
+  useResourceForDescribe(['solana-devnet', 'sepolia'])
+  let solanaChain: SolanaChain
+  let sepoliaChain: EVMChain | undefined // undefined when `before` fails
+
+  before(async () => {
+    // race endpoints with a probe on each chain's oldest fixture, so a pruned one never wins
+    const [devnetRpc, sepoliaRpc] = await Promise.all([
+      raceRpcEndpoint('RPC_SOLANA_DEVNET', (url) =>
+        fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'getTransaction',
+            params: [
+              DUAL_LANE_CASES[1].tx,
+              { maxSupportedTransactionVersion: 1, commitment: 'confirmed' },
+            ],
+          }),
+          signal: AbortSignal.timeout(20_000),
+        })
+          .then((res) => res.json() as Promise<{ result?: unknown }>)
+          .then((json) => json.result != null),
+      ),
+      raceRpcEndpoint('RPC_SEPOLIA', (url) =>
+        fetch(url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'eth_getTransactionReceipt',
+            params: [DUAL_LANE_CASES[1].execTx],
+          }),
+          signal: AbortSignal.timeout(20_000),
+        })
+          .then((res) => res.json() as Promise<{ result?: unknown }>)
+          .then((json) => json.result != null),
+      ),
+    ])
+    solanaChain = await SolanaChain.fromUrl(devnetRpc, { apiClient: null, logger: testLogger })
+    sepoliaChain = await EVMChain.fromUrl(sepoliaRpc, { apiClient: null, logger: testLogger })
+  })
+
+  after(() => sepoliaChain?.provider.destroy())
+
+  it('reads the 1.6 and the 2.0 lane config of the router for the same dest', async () => {
+    const sepolia = networkInfo('ethereum-testnet-sepolia').chainSelector
+    const [v16, v2, byDefault] = (await Promise.all([
+      solanaChain.getOnRampConfig(DUAL_ROUTER, sepolia, { version: CCIPVersion.V1_6 }),
+      solanaChain.getOnRampConfig(DUAL_ROUTER, sepolia, { version: CCIPVersion.V2_0 }),
+      solanaChain.getOnRampConfig(DUAL_ROUTER, sepolia),
+    ])) as unknown as Record<string, unknown>[]
+    // both lanes live on the same 2.0 program
+    for (const config of [v16!, v2!]) {
+      assert.equal(config.router, DUAL_ROUTER)
+      assert.match(config.typeAndVersion as string, /^ccip-router 2\./)
+    }
+    // 1.6 lane (`dest_chain_state`): fees from the FeeQuoter, no offRamp in config
+    assert.ok(v16!.feeQuoterConfig, '1.6 lane config should carry the FeeQuoter dest config')
+    assert.equal(v16!.offramp ?? v16!.offRamp, undefined)
+    // 2.0 lane (`dest_chain_state_v2`): names its offRamp
+    assert.equal(v2!.offramp ?? v2!.offRamp, DUAL_SEPOLIA_OFFRAMP_V2)
+    // without a version, the router's own (2.0) lane config is read
+    assert.equal(byDefault!.offramp ?? byDefault!.offRamp, DUAL_SEPOLIA_OFFRAMP_V2)
+  })
+
+  it('finds the 1.6 and the 2.0 offRamp allowed by the router for a source chain', async () => {
+    const offRamps = await solanaChain.getOffRampsForRouter(
+      DUAL_ROUTER,
+      networkInfo('ethereum-testnet-sepolia').chainSelector,
+    )
+    assert.deepEqual(new Set(offRamps), new Set([DUAL_SOLANA_OFFRAMP_V1_6, DUAL_SOLANA_OFFRAMP_V2]))
+  })
+
+  for (const c of DUAL_LANE_CASES) {
+    it(`${c.name}: lane version, offRamp and receipt`, async () => {
+      assert.ok(sepoliaChain, 'Sepolia chain should be initialized')
+      const [source, dest] =
+        c.from === 'solana' ? [solanaChain, sepoliaChain] : [sepoliaChain, solanaChain]
+
+      const tx = await source.getTransaction(c.tx)
+      const requests = await source.getMessagesInTx(tx)
+      assert.equal(requests.length, 1)
+      const request = requests[0]!
+      assert.equal(request.message.messageId, c.messageId)
+      assert.equal(request.message.sequenceNumber, c.sequenceNumber)
+      assert.equal(request.message.sender, c.sender)
+      assert.equal(request.message.receiver, c.receiver)
+      assert.equal(request.lane.onRamp, c.onRamp)
+      // the version comes from the message, not the (2.0) contract that emitted it
+      assert.equal(request.lane.version, c.version)
+      if (c.version === CCIPVersion.V2_0) {
+        assert.ok('offRampAddress' in request.message)
+        assert.equal(request.message.offRampAddress, c.offRamp)
+      } else {
+        assert.ok(!('offRampAddress' in request.message))
+      }
+
+      // an offRamp of the other version also accepts this onRamp (on the Solana -> Sepolia
+      // side) or is allowed by the same router (on the Sepolia -> Solana side)
+      const offRamp = await discoverOffRamp(source, dest, request.lane, { logger: testLogger })
+      assert.equal(offRamp, c.offRamp)
+
+      const executions = []
+      for await (const execution of dest.getExecutionReceipts({
+        offRamp,
+        messageId: request.message.messageId,
+        sourceChainSelector: request.lane.sourceChainSelector,
+        sequenceNumber: request.message.sequenceNumber,
+        // start at the execution's block/slot: the 1.6 offRamps serve every source chain, and
+        // the scan stops at the first successful receipt
+        startBlock: c.execBlock,
+      })) {
+        executions.push(execution)
+      }
+      assert.equal(executions.length, 1)
+      assert.equal(executions[0]!.log.address, c.offRamp)
+      assert.equal(executions[0]!.log.transactionHash, c.execTx)
+      assert.equal(executions[0]!.receipt.messageId, c.messageId)
+      assert.equal(executions[0]!.receipt.state, ExecutionState.Success)
+    })
+  }
+})
+
 describe('Solana Devnet estimateReceiveExecution Tests', { skip }, () => {
   // The failed-message fixture is fuji -> solana devnet
   useResourceForDescribe(['solana-devnet', 'fuji'])
@@ -580,7 +778,7 @@ describe('Solana Devnet estimateReceiveExecution Tests', { skip }, () => {
     const request = requests[0]!
     assert.equal(request.message.messageId, ESTIMATE_MSG.messageId)
 
-    const offRamp = await discoverOffRamp(source, chain, request.lane.onRamp, source)
+    const offRamp = await discoverOffRamp(source, chain, request.lane, source)
     const estimated = await chain.estimateReceiveExecution({
       offRamp,
       message: {

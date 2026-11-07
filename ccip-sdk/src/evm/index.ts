@@ -1545,7 +1545,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       ) as unknown as TypedContract<typeof MultiTokenPool_2_1_ABI>
       address = (await contract.getRouter()) as string
       return this.getTokenAdminRegistryFor(address, destChainSelector)
-    } else if (type.includes('TokenPool')) {
+    } else if (type.includes('TokenPool') || type === 'CrossChainPoolToken') {
       address = (await this.getTokenPoolConfig(address)).router
       return this.getTokenAdminRegistryFor(address, destChainSelector)
     } else if (type === 'Router') {

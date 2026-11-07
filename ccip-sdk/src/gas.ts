@@ -16,7 +16,7 @@ import type { FinalityRequested } from './extra-args.ts'
 import { networkInfo } from './networks.ts'
 import { buildMessageForDest } from './requests.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
-import type { CCIPMessage, MessageInput, OffchainTokenData } from './types.ts'
+import type { CCIPMessage, CCIPVersion, MessageInput, OffchainTokenData } from './types.ts'
 import {
   getDataBytes,
   getSourceDecimalsFromExtraData,
@@ -72,6 +72,16 @@ export type EstimateMessageInput = Simplify<
       offchainTokenData?: readonly OffchainTokenData[]
     }
 >
+
+/**
+ * OffRamp of the OnRamp's default lane, for a message not sent yet (no message shape to give the
+ * lane version): the OnRamp's own version, e.g. 2.0 for a Solana 2.0 Router that also serves 1.6
+ * lanes, which is the lane its sends prefer.
+ */
+async function discoverDefaultOffRamp(source: Chain, dest: Chain, onRamp: string) {
+  const [, version] = await source.typeAndVersion(onRamp)
+  return discoverOffRamp(source, dest, { onRamp, version: version as CCIPVersion }, source)
+}
 
 /**
  * Options for {@link estimateReceiveExecution} function.
@@ -298,7 +308,7 @@ export async function estimateReceiveExecution({
       if (!type.includes('OnRamp'))
         onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
       else onRamp = routerOrRamp
-      offRamp ||= await discoverOffRamp(source, dest, onRamp, source)
+      offRamp ||= await discoverDefaultOffRamp(source, dest, onRamp)
     } catch (sourceErr) {
       try {
         const [type, , tnv] = await dest.typeAndVersion(routerOrRamp)
@@ -431,6 +441,9 @@ export async function getRequiredCCVs({
   routerOrRamp,
   message,
 }: EstimateReceiveExecutionOpts): Promise<GetRequiredCCVsResult> {
+  // before any RPC work: a destination family without the view can never answer
+  if (!dest.getRequiredCCVs)
+    throw new CCIPMethodUnsupportedError(dest.constructor.name, 'getRequiredCCVs')
   let onRamp: string, offRamp: string
   if (message.onRampAddress) onRamp = message.onRampAddress
   if (message.offRampAddress) offRamp = message.offRampAddress
@@ -440,7 +453,7 @@ export async function getRequiredCCVs({
       if (!type.includes('OnRamp'))
         onRamp = await source.getOnRampForRouter(routerOrRamp, dest.network.chainSelector)
       else onRamp = routerOrRamp
-      offRamp ||= await discoverOffRamp(source, dest, onRamp, source)
+      offRamp ||= await discoverDefaultOffRamp(source, dest, onRamp)
     } catch (sourceErr) {
       try {
         const [type, , tnv] = await dest.typeAndVersion(routerOrRamp)
@@ -460,9 +473,6 @@ export async function getRequiredCCVs({
       getDestTokenAmount({ source, dest, onRamp, offRamp, tokenAmount }),
     ),
   )
-
-  if (!dest.getRequiredCCVs)
-    throw new CCIPMethodUnsupportedError(dest.constructor.name, 'getRequiredCCVs')
 
   return dest.getRequiredCCVs({
     offRamp,
