@@ -53,6 +53,32 @@ The `typeAndVersion` string identifies the pool type (BurnMint, LockRelease, USD
 
 On v2.0+ pools, `getTokenPoolConfig` also returns `finalityDepth` (`undefined` on pre-v2.0 pools, `0` when Faster-Than-Finality is not enabled, `>0` when enabled) and `finalitySafe` (`true` when FCR/safe finality is supported). See [Faster-Than-Finality](/sdk/guides/ftf) for the full FTF workflow.
 
+### Multi-token pools
+
+A multi-token pool (for example `BurnMintMultiTokenPool`) serves many tokens. A separate PoolConfigManager holds the configuration of each token. The pool address alone does not select one token, so pass the local token in the `token` option:
+
+```typescript
+const poolConfig = await chain.getTokenPoolConfig(poolAddress, { token: tokenAddress })
+console.log('PoolConfigManager:', poolConfig.poolConfigManager)
+// the stores that hold the records and emit the configuration events
+console.log(
+  'Stores:',
+  poolConfig.connectionPolicyStore,
+  poolConfig.feePolicyStore,
+  poolConfig.securityPolicyStore,
+)
+
+const remotes = await chain.getTokenPoolRemotes(poolAddress, undefined, { token: tokenAddress })
+for (const [chainName, remote] of Object.entries(remotes)) {
+  // 'ok', 'paused' (with scope and direction) or 'incomplete' (with the missing record types)
+  console.log(chainName, remote.outboundStatus, remote.inboundStatus)
+}
+```
+
+Single-token pools ignore the `token` option. Without it, a multi-token pool read throws `CCIPLocalTokenRequiredError`. The SDK's own preflights and estimates pass the token for you.
+
+Each remote of a multi-token pool also has an `outboundStatus` and an `inboundStatus`. A status is `paused` when a global, chain or token pause stops transfers in that direction. It is `incomplete` when the lane lacks a config record that the transfer needs (`connection`, `remotePool`, `rateLimit`, `fee`, `destOverhead` or `security`; inbound transfers do not need the two fee records). A multi-token pool has no FeeQuoter fallback: a send on a lane without fee records reverts with `LaneFeeNotFound`. `getFee`, `getTotalFeesEstimate` and the send methods throw `CCIPTokenTransferPausedError` or `CCIPLaneConfigIncompleteError` before the send. The send methods also simulate the source pool's `lockOrBurn` with the sender, so a pool hook or blocklist rejects the send before it is signed (`CCIPSourcePoolRevertError`). `getLaneFeatures` with a `token` returns the outbound status as `LANE_STATUS`.
+
 ## Remote chain configuration
 
 `getTokenPoolRemotes` returns how the pool connects to other chains: remote token addresses, remote pool addresses, and rate limiter state.
@@ -238,8 +264,8 @@ await inspectTokenPool(
 |--------|----------|---------|
 | `getTokenAdminRegistryFor(address)` | Chain | Resolve TokenAdminRegistry from Router/OnRamp/OffRamp |
 | `getRegistryTokenConfig(registry, token)` | Chain | Get token's registry entry (pool address, admin) |
-| `getTokenPoolConfig(pool)` | Chain | Pool config: token, router, typeAndVersion, finalityDepth, finalitySafe |
-| `getTokenPoolRemotes(pool, chainSelector?)` | Chain | Remote chain config: remote token, pools, rate limits |
+| `getTokenPoolConfig(pool, { token? })` | Chain | Pool config: token, router, typeAndVersion, finalityDepth, finalitySafe; `token` is required for multi-token pools |
+| `getTokenPoolRemotes(pool, chainSelector?, { token? })` | Chain | Remote chain config: remote token, pools, rate limits; `token` is required for multi-token pools |
 | `getSupportedTokens(registry)` | Chain | List all tokens in the registry |
 | `getTokenInfo(token)` | Chain | Token metadata (symbol, decimals, name) |
 

@@ -39,12 +39,16 @@ import {
   type BlockInfo,
   type ChainContext,
   type GetBalanceOpts,
+  type LaneRecordType,
+  type LaneStatus,
   type LogFilter,
   type RateLimiterState,
   type TokenPoolConfig,
+  type TokenPoolConfigOpts,
   type TokenPoolRemote,
+  type TokenPoolRemotesOpts,
   type TokenPrice,
-  type TokenTransferFeeOpts,
+  type TokenTransferFeeConfig,
   type TotalFeesEstimate,
   Chain,
 } from '../chain.ts'
@@ -63,6 +67,8 @@ import {
   CCIPFinalityNotAllowedError,
   CCIPHasherVersionUnsupportedError,
   CCIPInsufficientBalanceError,
+  CCIPLaneConfigIncompleteError,
+  CCIPLocalTokenRequiredError,
   CCIPLogDataInvalidError,
   CCIPRateLimitExceededError,
   CCIPSourceChainUnsupportedError,
@@ -130,6 +136,7 @@ import type FeeQuoter_1_6_ABI from './abi/FeeQuoter_1_6.ts'
 import type FeeQuoter_2_0_ABI from './abi/FeeQuoter_2_0.ts'
 import type TokenPool_1_5_ABI from './abi/LockReleaseTokenPool_1_5.ts'
 import type TokenPool_ABI from './abi/LockReleaseTokenPool_1_6_1.ts'
+import type MultiTokenPool_2_1_ABI from './abi/MultiTokenPool_2_1.ts'
 import EVM2EVMOffRamp_1_2_ABI from './abi/OffRamp_1_2.ts'
 import EVM2EVMOffRamp_1_5_ABI from './abi/OffRamp_1_5.ts'
 import OffRamp_1_6_ABI from './abi/OffRamp_1_6.ts'
@@ -138,6 +145,7 @@ import EVM2EVMOnRamp_1_2_ABI from './abi/OnRamp_1_2.ts'
 import EVM2EVMOnRamp_1_5_ABI from './abi/OnRamp_1_5.ts'
 import OnRamp_1_6_ABI from './abi/OnRamp_1_6.ts'
 import OnRamp_2_0_ABI from './abi/OnRamp_2_0.ts'
+import type PoolConfigManager_2_1_ABI from './abi/PoolConfigManager_2_1.ts'
 import type PriceRegistry_1_2 from './abi/PriceRegistry_1_2.ts'
 import type RMNProxy_ABI from './abi/RMNProxy.ts'
 import type Router_ABI from './abi/Router.ts'
@@ -237,6 +245,62 @@ type RateLimiterBucket = { tokens: bigint; isEnabled: boolean; capacity: bigint;
 /** Converts an on-chain bucket to the public RateLimiterState, stripping `isEnabled`. */
 function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
   return b.isEnabled ? { tokens: b.tokens, capacity: b.capacity, rate: b.rate } : null
+}
+
+/**
+ * Whether a pool type serves multiple tokens and keeps their configuration in a PoolConfigManager
+ * (e.g. `BurnMintMultiTokenPool`); these pools need the local token for every config read.
+ */
+function isMultiTokenPoolType(type: string): boolean {
+  return type.includes('MultiTokenPool')
+}
+
+/**
+ * The record types of `PoolConfigManager.getLaneRecordLevelBatch`, in the order of its outputs;
+ * a lane level of 0 (`RecordLevel.None`) means the record is missing.
+ */
+const LANE_RECORD_TYPES = [
+  'connection',
+  'remotePool',
+  'rateLimit',
+  'fee',
+  'destOverhead',
+  'security',
+] as const satisfies readonly LaneRecordType[]
+/** Record types that an inbound transfer does not need. */
+const OUTBOUND_ONLY_RECORD_TYPES: ReadonlySet<LaneRecordType> = new Set(['fee', 'destOverhead'])
+
+/** Pause flags of a `PoolConfigManager.LaneConnection`. */
+type LanePauseFlags = {
+  isGloballyPaused: boolean
+  isTokenOutboundPaused: boolean
+  isTokenInboundPaused: boolean
+  isChainOutboundPaused: boolean
+  isChainInboundPaused: boolean
+}
+
+/**
+ * The {@link LaneStatus} of a multi-token pool lane in one direction: the broadest pause first
+ * (global, then chain, then token), then the records that a transfer in that direction needs.
+ * @param pauses - The lane's pause flags from `getLaneConnectionBatch`.
+ * @param recordLevels - The lane's `RecordLevel` per {@link LANE_RECORD_TYPES} entry.
+ * @param direction - The transfer direction.
+ */
+function toMultiTokenLaneStatus(
+  pauses: LanePauseFlags,
+  recordLevels: readonly bigint[],
+  direction: 'outbound' | 'inbound',
+): LaneStatus {
+  const outbound = direction === 'outbound'
+  if (pauses.isGloballyPaused) return { status: 'paused', scope: 'global', direction }
+  if (outbound ? pauses.isChainOutboundPaused : pauses.isChainInboundPaused)
+    return { status: 'paused', scope: 'chain', direction }
+  if (outbound ? pauses.isTokenOutboundPaused : pauses.isTokenInboundPaused)
+    return { status: 'paused', scope: 'token', direction }
+  const missing = LANE_RECORD_TYPES.filter(
+    (type, i) => !recordLevels[i] && (outbound || !OUTBOUND_ONLY_RECORD_TYPES.has(type)),
+  )
+  return missing.length ? { status: 'incomplete', missing } : { status: 'ok' }
 }
 
 // remote/alien addresses encoding for EVM
@@ -1472,6 +1536,15 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     const [type, version] = await this.typeAndVersion(address)
     if (type === 'TokenAdminRegistry') {
       return address
+    } else if (isMultiTokenPoolType(type)) {
+      // a multi-token pool needs a token for its config, but not for its router
+      const contract = new Contract(
+        address,
+        interfaces.MultiTokenPool_v2_1,
+        this.provider,
+      ) as unknown as TypedContract<typeof MultiTokenPool_2_1_ABI>
+      address = (await contract.getRouter()) as string
+      return this.getTokenAdminRegistryFor(address, destChainSelector)
     } else if (type.includes('TokenPool') || type === 'CrossChainPoolToken') {
       address = (await this.getTokenPoolConfig(address)).router
       return this.getTokenAdminRegistryFor(address, destChainSelector)
@@ -1568,15 +1641,34 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       interfaces.Router,
       this.provider,
     ) as unknown as TypedContract<typeof Router_ABI>
-    return contract.getFee(destChainSelector, {
-      receiver: encodeAddressToEvm(populatedMessage.receiver),
-      data: hexlify(populatedMessage.data ?? '0x'),
-      tokenAmounts: populatedMessage.tokenAmounts ?? [],
-      feeToken: populatedMessage.feeToken || ZeroAddress,
-      extraArgs: hexlify(
-        (this.constructor as typeof EVMChain).encodeExtraArgs(populatedMessage.extraArgs),
-      ),
-    })
+    return contract
+      .getFee(destChainSelector, {
+        receiver: encodeAddressToEvm(populatedMessage.receiver),
+        data: hexlify(populatedMessage.data ?? '0x'),
+        tokenAmounts: populatedMessage.tokenAmounts ?? [],
+        feeToken: populatedMessage.feeToken || ZeroAddress,
+        extraArgs: hexlify(
+          (this.constructor as typeof EVMChain).encodeExtraArgs(populatedMessage.extraArgs),
+        ),
+      })
+      .catch((err: unknown) => {
+        // a multi-token pool has no FeeQuoter fallback: its getFee reverts when the lane lacks
+        // fee records. The preflight above reports this first; this covers a change in between.
+        const revert = getErrorData(err)
+        const parsed = revert ? parseWithFragment(revert) : undefined
+        if (parsed?.[0].name === 'LaneFeeNotFound' && parsed[2]) {
+          throw new CCIPLaneConfigIncompleteError(
+            ['fee', 'destOverhead'],
+            {
+              token: getAddress(parsed[2][0] as string),
+              sourceChainSelector: this.network.chainSelector,
+              destChainSelector,
+            },
+            { cause: err instanceof Error ? err : undefined, context: { revert } },
+          )
+        }
+        throw err
+      })
   }
 
   /**
@@ -1769,6 +1861,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
 
     const ccipFee = await this.getFee(opts)
     const { tokenTransferFeeConfig } = await this.getTokenPoolConfig(poolAddress, {
+      token,
       destChainSelector: opts.destChainSelector,
       finality,
       tokenArgs,
@@ -1844,10 +1937,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       opts.message,
       networkInfo(destChainSelector).family,
     )
-    const message = {
-      ...populatedMessage,
-      fee: opts.message.fee ?? (await this.getFee({ ...opts, message: populatedMessage })),
-    }
+    // getFee runs checkSendMessage with these opts, `sender` included, so the source pools'
+    // lockOrBurn simulation runs too; a given fee skips getFee, so run the check directly
+    let fee = opts.message.fee
+    if (fee == null) fee = await this.getFee({ ...opts, message: populatedMessage })
+    else await this.checkSendMessage({ ...opts, message: populatedMessage })
+    const message = { ...populatedMessage, fee }
     if (this.network.name.startsWith('hedera-') && (message.feeToken || '').match(/^(0x)?0*$/i))
       message.fee *= BigInt(10) ** BigInt(10) // hedera's tinybar to weibar for msg.value native fee
 
@@ -2264,27 +2359,38 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Fetches the token pool configuration for an EVM token pool contract.
    *
    * @param tokenPool - Token pool contract address.
-   * @param feeOpts - Optional parameters to also fetch token transfer fee config:
-   *   - `destChainSelector` — destination chain selector.
-   *   - `finality` — requested finality ('finalized', 'safe', or block depth number).
-   *   - `tokenArgs` — hex-encoded bytes passed to the pool contract.
+   * @param opts - Optional parameters:
+   *   - `token` — the local token; required for multi-token pools, ignored by others.
+   *   - `destChainSelector` — destination chain selector, to also fetch token transfer fee config.
+   *   - `finality` — requested finality ('finalized', 'safe', or block depth number); default
+   *     'finalized'.
+   *   - `tokenArgs` — hex-encoded bytes passed to the pool contract; default '0x'.
    * @returns Token pool config containing token, router, typeAndVersion, and optionally
    *          finalityDepth, finalitySafe, tokenTransferFeeConfig, and `decimals` (v1.5.1+).
-   *          LockReleaseV2 TPs also return its `lockBox` address
+   *          LockReleaseV2 TPs also return its `lockBox` address; multi-token pools their
+   *          `poolConfigManager`, and its `connectionPolicyStore`, `feePolicyStore` and
+   *          `securityPolicyStore`
+   * @throws {@link CCIPLocalTokenRequiredError} if the pool serves multiple tokens and
+   *   `opts.token` is not given
+   * @throws {@link CCIPTokenNotConfiguredError} if a multi-token pool's PoolConfigManager does
+   *   not register `opts.token`
    *
    * @remarks
    * For pools with version \>= 2.0, also returns `finalityDepth` and `finalitySafe` for
    * Faster-Than-Finality (FTF) and FCR support. Pre-2.0 pools omit these fields.
-   * When `feeOpts` is provided and the pool is v2.0+, also fetches token transfer fee config.
+   * When `opts.destChainSelector` is provided and the pool is v2.0+, also fetches token transfer
+   * fee config.
    * v1.5.1+ pools also return `decimals` — the decimals the pool declares for its token
    * (`getTokenDecimals()`); v1.5.0 pools predate it and fall back to the token's own
    * (optional) `decimals()` view, so they stay readable without it.
+   * Multi-token pools read the token's resolved configuration from their PoolConfigManager.
    */
   async getTokenPoolConfig(
     tokenPool: string,
-    feeOpts?: TokenTransferFeeOpts,
+    opts?: TokenPoolConfigOpts,
   ): Promise<SetRequired<TokenPoolConfig, 'typeAndVersion'>> {
     const [type, version, typeAndVersion] = await this.typeAndVersion(tokenPool)
+    if (isMultiTokenPoolType(type)) return this.getMultiTokenPoolConfig(tokenPool, opts)
 
     let token,
       router,
@@ -2357,28 +2463,14 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         if (isError(err, 'CALL_EXCEPTION')) return 0
         throw CCIPError.from(err)
       })
-      if (feeOpts) {
+      if (opts?.destChainSelector != null) {
+        const feeOpts = { ...opts, destChainSelector: opts.destChainSelector }
         tokenTransferFeeConfig = token.then((tokenAddr) =>
-          contract
-            .getTokenTransferFeeConfig(
-              tokenAddr as string,
-              feeOpts.destChainSelector,
-              toBeHex(encodeFinality(feeOpts.finality), 4),
-              feeOpts.tokenArgs,
-            )
-            .then((result) => ({
-              destGasOverhead: Number(result.destGasOverhead),
-              destBytesOverhead: Number(result.destBytesOverhead),
-              finalityFeeUSDCents: Number(result.finalityFeeUSDCents),
-              fastFinalityFeeUSDCents: Number(result.fastFinalityFeeUSDCents),
-              finalityTransferFeeBps: Number(result.finalityTransferFeeBps),
-              fastFinalityTransferFeeBps: Number(result.fastFinalityTransferFeeBps),
-              isEnabled: result.isEnabled,
-            }))
-            .catch((err) => {
-              if (isError(err, 'CALL_EXCEPTION')) return undefined
-              throw CCIPError.from(err, 'UNKNOWN')
-            }),
+          this.getPoolTokenTransferFeeConfig(
+            previousPool ?? tokenPool,
+            tokenAddr as string,
+            feeOpts,
+          ),
         )
       }
     }
@@ -2424,10 +2516,121 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads a v2.0+ pool's `getTokenTransferFeeConfig` for one token and destination.
+   * @returns The fee config, or `undefined` when the pool reverts (no fee config).
+   */
+  private async getPoolTokenTransferFeeConfig(
+    tokenPool: string,
+    token: string,
+    {
+      destChainSelector,
+      finality = 'finalized',
+      tokenArgs = '0x',
+    }: Pick<TokenPoolConfigOpts, 'finality' | 'tokenArgs'> & { destChainSelector: bigint },
+  ): Promise<TokenTransferFeeConfig | undefined> {
+    // the multi-token pool keeps TokenPool 2.0's getTokenTransferFeeConfig signature
+    const contract = new Contract(
+      tokenPool,
+      interfaces.TokenPool_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof TokenPool_2_0_ABI>
+    return contract
+      .getTokenTransferFeeConfig(
+        token,
+        destChainSelector,
+        toBeHex(encodeFinality(finality), 4),
+        tokenArgs,
+      )
+      .then((result) => ({
+        destGasOverhead: Number(result.destGasOverhead),
+        destBytesOverhead: Number(result.destBytesOverhead),
+        finalityFeeUSDCents: Number(result.finalityFeeUSDCents),
+        fastFinalityFeeUSDCents: Number(result.fastFinalityFeeUSDCents),
+        finalityTransferFeeBps: Number(result.finalityTransferFeeBps),
+        fastFinalityTransferFeeBps: Number(result.fastFinalityTransferFeeBps),
+        isEnabled: result.isEnabled,
+      }))
+      .catch((err) => {
+        if (isError(err, 'CALL_EXCEPTION')) return undefined
+        throw CCIPError.from(err, 'UNKNOWN')
+      })
+  }
+
+  /**
+   * Reads a multi-token pool's PoolConfigManager and its resolved config for one token.
+   * @throws {@link CCIPLocalTokenRequiredError} if `token` is not given
+   * @throws {@link CCIPTokenNotConfiguredError} if the PoolConfigManager does not register `token`
+   */
+  private async getMultiTokenPoolTokenConfig(tokenPool: string, token: string | undefined) {
+    if (!token)
+      throw new CCIPLocalTokenRequiredError(tokenPool, (await this.typeAndVersion(tokenPool))[2])
+    const pool = new Contract(
+      tokenPool,
+      interfaces.MultiTokenPool_v2_1,
+      this.provider,
+    ) as unknown as TypedContract<typeof MultiTokenPool_2_1_ABI>
+    const poolConfigManager = (await pool.getPoolConfigManager()) as string
+    const pcm = new Contract(
+      poolConfigManager,
+      interfaces.PoolConfigManager_v2_1,
+      this.provider,
+    ) as unknown as TypedContract<typeof PoolConfigManager_2_1_ABI>
+    const [tokenConfig] = await resultToObject(pcm.getTokenConfigBatch([token]))
+    if (!tokenConfig?.isRegistered) throw new CCIPTokenNotConfiguredError(token, poolConfigManager)
+    return { pool, pcm, poolConfigManager, tokenConfig }
+  }
+
+  /** {@link EVMChain.getTokenPoolConfig} for multi-token pools, read through the PoolConfigManager. */
+  private async getMultiTokenPoolConfig(
+    tokenPool: string,
+    opts: TokenPoolConfigOpts | undefined,
+  ): Promise<SetRequired<TokenPoolConfig, 'typeAndVersion'>> {
+    const { pool, pcm, poolConfigManager, tokenConfig } = await this.getMultiTokenPoolTokenConfig(
+      tokenPool,
+      opts?.token,
+    )
+    const token = getAddress(opts!.token!)
+    const [router, typeAndVersion, stores, tokenTransferFeeConfig] = await Promise.all([
+      pool.getRouter() as Promise<string>,
+      this.typeAndVersion(tokenPool).then(([, , typeAndVersion]) => typeAndVersion),
+      // best-effort: getStaticConfig is not part of IPoolConfigManager, so a PCM without it
+      // stays readable, only without its stores; anything else (transport) propagates
+      pcm.getStaticConfig().then(
+        ([, connectionStore, feeStore, securityStore]) => ({
+          connectionPolicyStore: connectionStore as string,
+          feePolicyStore: feeStore as string,
+          securityPolicyStore: securityStore as string,
+        }),
+        (err) => {
+          if (isError(err, 'CALL_EXCEPTION')) return undefined
+          throw CCIPError.from(err)
+        },
+      ),
+      opts?.destChainSelector != null
+        ? this.getPoolTokenTransferFeeConfig(tokenPool, token, {
+            ...opts,
+            destChainSelector: opts.destChainSelector,
+          })
+        : undefined,
+    ])
+    return {
+      token,
+      router,
+      typeAndVersion,
+      decimals: Number(tokenConfig.localDecimals),
+      poolConfigManager,
+      ...stores,
+      ...decodeFinalityAllowed(tokenConfig.allowedFinalityConfig),
+      ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
+    }
+  }
+
+  /**
    * Fetches remote chain configurations for an EVM token pool contract.
    *
    * @param tokenPool - Token pool address on the current chain.
    * @param remoteChainSelector - Optional chain selector to filter results to a single destination.
+   * @param opts - Optional `token`: the local token; required for multi-token pools, ignored by others.
    * @returns Record mapping chain names to {@link TokenPoolRemote} configs.
    *
    * @remarks
@@ -2436,14 +2639,22 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * - v1.6: multiple remote pools via `getRemotePools`, standard rate limiters.
    * - v2.0+: multiple remote pools plus FTF (Faster-Than-Finality) rate limiters
    *   (`fastOutboundRateLimiterState` / `fastInboundRateLimiterState`).
+   * Multi-token pools read the token's resolved lanes from their PoolConfigManager.
    *
    * @throws {@link CCIPTokenPoolChainConfigNotFoundError} if remote token is not configured for a chain.
+   * @throws {@link CCIPLocalTokenRequiredError} if the pool serves multiple tokens and
+   *   `opts.token` is not given
    */
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
+    opts?: TokenPoolRemotesOpts,
   ): Promise<Record<string, TokenPoolRemote>> {
-    const { typeAndVersion, previousPool } = await this.getTokenPoolConfig(tokenPool)
+    const [poolType] = await this.typeAndVersion(tokenPool)
+    if (isMultiTokenPoolType(poolType))
+      return this.getMultiTokenPoolRemotes(tokenPool, remoteChainSelector, opts?.token)
+
+    const { typeAndVersion, previousPool } = await this.getTokenPoolConfig(tokenPool, opts)
     const [type, version] = parseTypeAndVersion(typeAndVersion)
 
     // all versions share the same getSupportedChains() interface (except CCTPv2 Proxy), and >=v1.5 getRemoteToken
@@ -2703,6 +2914,62 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
             ] as const
           }),
         ),
+    )
+  }
+
+  /**
+   * {@link EVMChain.getTokenPoolRemotes} for multi-token pools: the token's resolved lanes, rate
+   * limiter buckets and record levels, read in one batch each from the PoolConfigManager. Each
+   * remote also has the lane's {@link TokenPoolRemote.outboundStatus} and
+   * {@link TokenPoolRemote.inboundStatus}.
+   */
+  private async getMultiTokenPoolRemotes(
+    tokenPool: string,
+    remoteChainSelector: bigint | undefined,
+    token: string | undefined,
+  ): Promise<Record<string, TokenPoolRemote>> {
+    const { pcm, tokenConfig } = await this.getMultiTokenPoolTokenConfig(tokenPool, token)
+    const chains = (
+      remoteChainSelector != null ? [remoteChainSelector] : tokenConfig.supportedChains
+    ).map(networkInfo)
+    if (!chains.length) return {}
+    const lanes = chains.map((chain) => ({
+      localToken: token!,
+      remoteChainSelector: chain.chainSelector,
+    }))
+    const [connections, rateLimits, recordLevels] = await Promise.all([
+      resultToObject(pcm.getLaneConnectionBatch(lanes)),
+      resultToObject(pcm.getCurrentRateLimiterStateBatch(lanes)),
+      pcm.getLaneRecordLevelBatch(lanes).then((levels) => levels.map((l) => [...l] as bigint[])),
+    ])
+    return Object.fromEntries(
+      chains.map((chain, i) => {
+        const connection = connections[i]!
+        const buckets = rateLimits[i]!
+        if (
+          !connection.hasConnection ||
+          !connection.remoteToken ||
+          connection.remoteToken.match(/^(0x)?0*$/)
+        )
+          throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, chain.name)
+        const levels = recordLevels.map((byType) => byType[i] ?? 0n)
+        return [
+          chain.name,
+          {
+            remoteToken: decodeAddress(connection.remoteToken, chain.family),
+            remotePools: connection.remotePools
+              .map(({ remotePoolAddress }) => remotePoolAddress)
+              .filter((pool) => !pool.match(/^(0x)?0*$/))
+              .map((pool) => decodeAddress(pool, chain.family)),
+            outboundRateLimiterState: toRateLimiterState(buckets.outbound),
+            inboundRateLimiterState: toRateLimiterState(buckets.inbound),
+            fastOutboundRateLimiterState: toRateLimiterState(buckets.fastFinalityOutbound),
+            fastInboundRateLimiterState: toRateLimiterState(buckets.fastFinalityInbound),
+            outboundStatus: toMultiTokenLaneStatus(connection, levels, 'outbound'),
+            inboundStatus: toMultiTokenLaneStatus(connection, levels, 'inbound'),
+          },
+        ] as const
+      }),
     )
   }
 
@@ -3017,6 +3284,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
           ? ta.extraData
           : undefined
       if (sourcePoolData === undefined) {
+        // A multi-token pool checks the source token and the token identity metadata that only
+        // the source pool's real pool data carries (the base checks above already read its
+        // pauses, records and inbound bucket): a synthesized payload would false-block. Skip its
+        // simulation; a verdict deferred for this token stands
+        if (poolTypeAndVersion && isMultiTokenPoolType(poolTypeAndVersion[0])) continue
         // the dest token's own (optional) view, else the pool's declared decimals, else the
         // family default — see resolveTokenDecimals
         const decimals = await resolveTokenDecimals(this, token, tokenPool!)
@@ -3066,8 +3338,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       } else {
         let remotePools: readonly string[] | undefined
         try {
-          remotePools = (await this.getTokenPoolRemote(tokenPool, message.sourceChainSelector))
-            .remotePools
+          remotePools = (
+            await this.getTokenPoolRemote(tokenPool, message.sourceChainSelector, { token })
+          ).remotePools
         } catch (err) {
           // typed SDK errors (e.g. CCIPTokenPoolChainConfigNotFoundError — a definitive config
           // absence) are verdicts of their own, never transient transport failures

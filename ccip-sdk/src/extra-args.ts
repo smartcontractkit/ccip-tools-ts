@@ -291,6 +291,23 @@ export function decodeFinalityRequested(finality: number | BytesLike): FinalityR
 }
 
 /**
+ * Whether an allowed finality config accepts a requested finality, as the on-chain
+ * `FinalityCodec._ensureRequestedFinalityAllowed` decides: `'finalized'` is always allowed,
+ * `'safe'` needs the safe flag, and a block depth needs an allowed depth that is not zero and not
+ * above the requested one.
+ * @param requested - The requested finality.
+ * @param allowed - The allowed finality config (e.g. a token pool's `finalityDepth`/`finalitySafe`).
+ * @returns Whether the request is allowed.
+ */
+export function isFinalityAllowed(requested: FinalityRequested, allowed: FinalityAllowed): boolean {
+  if (requested === 'finalized') return true
+  if (requested === 'safe') return !!allowed.finalitySafe
+  const depth = Number(requested)
+  if (!depth) return true
+  return allowed.finalityDepth > 0 && depth >= allowed.finalityDepth
+}
+
+/**
  * Encodes finality allowed or requested into a uint32 format for on-chain use.
  */
 export function encodeFinality(finality: FinalityAllowed | FinalityRequested | bigint): number {

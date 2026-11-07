@@ -123,6 +123,12 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Confirm the pool is initialized for this mint on this cluster; for a custom pool, verify poolProgramAddress is the program that owns it.',
   TOKEN_POOL_INFO_NOT_FOUND:
     'Check that the token pool is deployed and configured for this lane. Verify supported tokens: https://docs.chain.link/ccip/directory',
+  LOCAL_TOKEN_REQUIRED:
+    'This pool serves multiple tokens. Pass the local token in the `token` option of the pool read (e.g. `getTokenPoolConfig(pool, { token })`).',
+  TOKEN_TRANSFER_PAUSED:
+    'The token pool paused this transfer (see context.scope and context.direction). Wait until its pause admins unpause it; check again with getLaneFeatures (LANE_STATUS).',
+  LANE_CONFIG_INCOMPLETE:
+    'The token pool lacks a config record that this transfer requires (see context.missing). The pool operator must add it; until then the transfer reverts.',
   TOKEN_ACCOUNT_NOT_FOUND:
     'The token account does not exist for this holder. The holder has never held this token. You may treat this as zero balance.',
   LEGACY_TOKEN_POOLS_UNSUPPORTED:
