@@ -2,12 +2,14 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { Keypair, PublicKey, TransactionInstruction } from '@solana/web3.js'
+import { memoize } from 'micro-memoize'
 
 import { CCIPWalletInvalidError } from '../../errors/index.ts'
 import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { SolanaOperation } from './operation.ts'
+import { SolanaQuery } from './query.ts'
 
 class TestOperation extends SolanaOperation<{ value: string }> {
   readonly name = 'testOperation'
@@ -61,17 +63,19 @@ class ParsedTestOperation extends SolanaOperation<
   }
 }
 
+const mockConnection = {
+  getLatestBlockhash: async () => ({
+    blockhash: PublicKey.default.toBase58(),
+    lastValidBlockHeight: 1,
+  }),
+  simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
+  sendTransaction: async () => 'signature',
+  confirmTransaction: async () => ({ value: { err: null } }),
+}
+
 const chain = {
   logger: console,
-  connection: {
-    getLatestBlockhash: async () => ({
-      blockhash: PublicKey.default.toBase58(),
-      lastValidBlockHeight: 1,
-    }),
-    simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
-    sendTransaction: async () => 'signature',
-    confirmTransaction: async () => ({ value: { err: null } }),
-  },
+  connection: mockConnection,
 } as unknown as SolanaChain
 
 describe('SolanaOperation', () => {
@@ -152,5 +156,82 @@ describe('SolanaOperation', () => {
     )
     assert.equal(op.validated, undefined)
     assert.equal(op.captured, undefined)
+  })
+})
+
+describe('CCT account state freshness', () => {
+  const account = new PublicKey(Keypair.generate().publicKey)
+
+  /** A chain whose getAccountInfo is memoized the way SolanaChain's is, over a mutable account. */
+  function chainWithMemoizedAccount() {
+    const state = { data: 'before' }
+    const getAccountInfo = memoize(async (_address: PublicKey) => ({ data: state.data }), {
+      async: true,
+      expires: 5e3,
+      transformKey: ([address]: [PublicKey]) => [address.toBase58()],
+    })
+    const memoChain = {
+      logger: console,
+      connection: { ...mockConnection, getAccountInfo },
+    } as unknown as SolanaChain
+    return { state, memoChain }
+  }
+
+  /** Records the account data each build saw. */
+  class ReadingOperation extends SolanaOperation<{ value: string }> {
+    readonly name = 'readingOperation'
+    readonly seen: string[] = []
+
+    protected async buildUnsigned(c: SolanaChain): Promise<UnsignedSolanaTx> {
+      this.seen.push((await c.connection.getAccountInfo(account))!.data as unknown as string)
+      return {
+        family: ChainFamily.Solana,
+        instructions: [new TransactionInstruction({ keys: [], programId: PublicKey.default })],
+      }
+    }
+  }
+
+  class ReadingQuery extends SolanaQuery<object, string> {
+    readonly name = 'readingQuery'
+
+    protected prepare(params: object) {
+      return params
+    }
+
+    protected async read(c: SolanaChain): Promise<string> {
+      return (await c.connection.getAccountInfo(account))!.data as unknown as string
+    }
+  }
+
+  const params = { payer: PublicKey.default.toBase58(), value: 'x' }
+  const wallet = {
+    publicKey: Keypair.generate().publicKey,
+    signTransaction: async <T>(tx: T) => tx,
+  }
+
+  it('generates against state written since the previous read', async () => {
+    const { state, memoChain } = chainWithMemoizedAccount()
+    const op = new ReadingOperation()
+    await op.generate(memoChain, params)
+    state.data = 'after' // e.g. a transaction a Squads vault signed in between
+    await op.generate(memoChain, params)
+    assert.deepEqual(op.seen, ['before', 'after'])
+  })
+
+  it('executes against state written since the previous read', async () => {
+    const { state, memoChain } = chainWithMemoizedAccount()
+    const op = new ReadingOperation()
+    await op.execute(memoChain, { value: 'x', wallet })
+    state.data = 'after'
+    await op.execute(memoChain, { value: 'x', wallet })
+    assert.deepEqual(op.seen, ['before', 'after'])
+  })
+
+  it('queries state written since the previous read', async () => {
+    const { state, memoChain } = chainWithMemoizedAccount()
+    const query = new ReadingQuery()
+    assert.equal(await query.query(memoChain, {}), 'before')
+    state.data = 'after'
+    assert.equal(await query.query(memoChain, {}), 'after')
   })
 })

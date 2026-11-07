@@ -111,7 +111,7 @@ export class SetRebalancer extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteSetRebalancerParams,
   ): Promise<ExecuteSetRebalancerResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

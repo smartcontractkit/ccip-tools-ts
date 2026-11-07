@@ -156,7 +156,7 @@ export class InitChainRemoteConfig extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteInitChainRemoteConfigParams,
   ): Promise<ExecuteInitChainRemoteConfigResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

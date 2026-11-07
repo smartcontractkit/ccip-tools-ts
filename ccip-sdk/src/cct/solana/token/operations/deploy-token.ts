@@ -355,7 +355,7 @@ export class DeployToken extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteDeployTokenParams,
   ): Promise<ExecuteDeployTokenResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
     const externalSigner = getExternalMintAuthoritySigner(parsed, parsed.payer)
 
     if (externalSigner) {

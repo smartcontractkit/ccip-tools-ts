@@ -237,7 +237,7 @@ export class RegisterAdmin extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteRegisterAdminParams,
   ): Promise<ExecuteRegisterAdminResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(
