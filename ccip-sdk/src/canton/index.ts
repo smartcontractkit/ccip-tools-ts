@@ -805,6 +805,64 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   }
 
   /**
+   * Enumerate active contracts of one or more templates matching a predicate, in
+   * one ACS query. Deduplicates by contract ID; each result carries
+   * `createdEventBlob`/`synchronizerId` for disclosure.
+   *
+   * @param templateId - Full template ID (`#<pkg>:<Module>:<Entity>`), or several.
+   * @param parties - Parties whose ACS visibility to query.
+   * @param match - Predicate over the decoded `createArgument`.
+   * @returns All matching active contracts (may be empty).
+   */
+  async findActiveContractsByTemplate(
+    templateId: string | readonly string[],
+    parties: string[],
+    match: (createArgument: unknown) => boolean = () => true,
+  ): Promise<CantonActiveContract[]> {
+    const queryParties = parties.filter((p) => typeof p === 'string' && p.length > 0)
+    if (queryParties.length === 0) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        'CantonChain.findActiveContractsByTemplate: at least one query party is required',
+      )
+    }
+    const templateIds = typeof templateId === 'string' ? [templateId] : templateId
+    if (templateIds.length === 0) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        'CantonChain.findActiveContractsByTemplate: at least one template ID is required',
+      )
+    }
+    // Contracts are read from the ACS under the chain's active party (the
+    // provider's visibility), matching findActiveContractByInstanceAddress.
+    const contracts = await listActiveContractsByTemplateId(
+      this.logger,
+      this.ledgerApiClient,
+      this.activeParty,
+      templateIds.map((id) => CantonIdentifier.fromString(id)),
+    )
+    const seen = new Set<string>()
+    const out: CantonActiveContract[] = []
+    for (const contract of contracts) {
+      const created = contract.createdEvent
+      if (seen.has(created.contractId)) continue
+      seen.add(created.contractId)
+      const active: CantonActiveContract = {
+        contractId: created.contractId,
+        templateId: typeof created.templateId === 'string' ? created.templateId : templateIds[0]!,
+        createdEventBlob: created.createdEventBlob ?? '',
+        synchronizerId: contract.synchronizerId,
+        signatories: created.signatories,
+        createArgument: created.createArgument,
+      }
+      if (match(active.createArgument)) {
+        out.push(active)
+      }
+    }
+    return out
+  }
+
+  /**
    * Returns the CCIP fee for sending a message.
    *
    * Canton has no scalar upfront CCIP fee — the cost is computed inside the

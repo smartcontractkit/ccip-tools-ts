@@ -239,6 +239,7 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
       inboundRateLimiter: '',
       inboundCustomBlockConfirmationsRateLimiter: '',
       outboundRateLimiter: '',
+      finalityConfig: { type: 'WaitForFinality' },
     })
     assert.deepEqual(result.remoteChainConfigs[1], {
       remoteChainSelector: '16015286601757825753',
@@ -249,6 +250,7 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
       inboundRateLimiter: '',
       inboundCustomBlockConfirmationsRateLimiter: '',
       outboundRateLimiter: '',
+      finalityConfig: { type: 'WaitForFinality' },
     })
   })
 
@@ -289,6 +291,7 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
       inboundRateLimiter: '',
       inboundCustomBlockConfirmationsRateLimiter: '',
       outboundRateLimiter: '',
+      finalityConfig: { type: 'WaitForFinality' },
     })
   })
 

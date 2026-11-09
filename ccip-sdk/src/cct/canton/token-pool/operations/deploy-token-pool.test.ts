@@ -60,7 +60,13 @@ function mockChain(
   return Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton, chainId },
     ccipParty: CCIP_OWNER,
+    activeParty: POOL_OWNER,
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    // ledger reads used by the preapproval lookup (template-filtered ACS query)
+    ledgerApiClient: {
+      getLedgerEnd: async () => ({ offset: 1 }),
+      getActiveContracts: async () => [],
+    },
     // stubbed failure (not undefined) forces the ACS-fallback branch of resolveTar
     edsClientProvider: {
       globalClientFor: () => ({
@@ -211,6 +217,84 @@ describe('deployTokenPool command building', () => {
     assert.equal(choiceArgument.tokenAdminRegistryCid, TAR_CID)
     assert.equal(choiceArgument.admin, POOL_OWNER)
     assert.equal(choiceArgument.existingTokenConfigCid, null)
+  })
+
+  it('includes poolReceiveMetadata only for lock-release pools', async () => {
+    const burnMint = await op.generate(mockChain('canton:TestNet'), baseParams())
+    assert.equal(createAndExercise(burnMint).createArguments.poolReceiveMetadata, undefined)
+
+    const lockRelease = await op.generate(
+      mockChain('canton:TestNet'),
+      baseParams({ poolType: 'lockRelease', poolReceiveMetadata: { origin: 'test' } }),
+    )
+    const cmd = createAndExercise(lockRelease)
+    assert.match(cmd.templateId, /lock-release/)
+    assert.deepEqual(cmd.createArguments.poolReceiveMetadata, { values: { origin: 'test' } })
+  })
+
+  it('defaults lock-release poolReceiveMetadata to the standard CCIP label', async () => {
+    const lockRelease = await op.generate(
+      mockChain('canton:TestNet'),
+      baseParams({ poolType: 'lockRelease' }),
+    )
+    assert.deepEqual(createAndExercise(lockRelease).createArguments.poolReceiveMetadata, {
+      values: { 'cip-112/receiver.id': 'ccip-public' },
+    })
+
+    // explicit empty map = opt out of labels
+    const unlabeled = await op.generate(
+      mockChain('canton:TestNet'),
+      baseParams({ poolType: 'lockRelease', poolReceiveMetadata: {} }),
+    )
+    assert.deepEqual(createAndExercise(unlabeled).createArguments.poolReceiveMetadata, {
+      values: {},
+    })
+  })
+
+  it('auto-wires a transfer preapproval into lock-release poolReceiveContext', async () => {
+    const chain = mockChain('canton:TestNet', {
+      ledgerApiClient: {
+        getLedgerEnd: async () => ({ offset: 1 }),
+        getActiveContracts: async () => [
+          {
+            contractEntry: {
+              JsActiveContract: {
+                synchronizerId: 'sync-1',
+                createdEvent: {
+                  contractId: 'preapproval-cid-1',
+                  templateId:
+                    '2293eb12abc:Utility.Registry.App.V0.Model.TransferPreapproval:TransferPreapproval',
+                  signatories: [POOL_OWNER],
+                  offset: 1,
+                  createArgument: {
+                    receiver: POOL_OWNER,
+                    instrumentAdmin: POOL_OWNER,
+                    instrumentAllowances: [], // empty = all instruments of the admin
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    })
+    const tx = await op.generate(chain, baseParams({ poolType: 'lockRelease' }))
+    assert.deepEqual(createAndExercise(tx).createArguments.poolReceiveContext, {
+      values: { 'transfer-preapproval': { tag: 'AV_ContractId', value: 'preapproval-cid-1' } },
+    })
+  })
+
+  it('leaves poolReceiveContext untouched for burn-mint', async () => {
+    const chain = mockChain('canton:TestNet', {
+      ledgerApiClient: {
+        getLedgerEnd: async () => ({ offset: 1 }),
+        getActiveContracts: async () => {
+          throw new Error('should not be called for burn-mint')
+        },
+      },
+    })
+    const tx = await op.generate(chain, baseParams())
+    assert.deepEqual(createAndExercise(tx).createArguments.poolReceiveContext, { values: {} })
   })
 
   it('deduplicates actAs when poolOwner and admin are the same party', async () => {

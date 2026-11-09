@@ -88,6 +88,7 @@ import {
   type ApplyChainUpdatesParams,
   type ApplyTokenTransferFeeConfigUpdatesParams,
   type ConfigureSiloedLockboxesParams,
+  type DeployCrossChainPoolTokenParams,
   type DeployTokenPoolParams,
   type GetAdvancedPoolHooksParams,
   type GetAdvancedPoolHooksResult,
@@ -146,6 +147,7 @@ import {
   ApplyChainUpdates,
   ApplyTokenTransferFeeConfigUpdates,
   ConfigureSiloedLockboxes,
+  DeployCrossChainPoolToken,
   DeployTokenPool,
   GetAdvancedPoolHooks,
   GetAllSiloedLockboxConfigs,
@@ -270,6 +272,7 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   // Token pool operations
   readonly #deployTokenPool = new DeployTokenPool()
+  readonly #deployCrossChainPoolToken = new DeployCrossChainPoolToken()
   readonly #transferPoolOwnership = new TransferPoolOwnership()
   readonly #acceptPoolOwnership = new AcceptPoolOwnership()
   readonly #getTokenPoolState = new GetTokenPoolState()
@@ -987,12 +990,12 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
 
   /**
    * Builds an unsigned v2.0.0 `setCCIPAdmin` tx (for multisig / offline signing). The current
-   * default admin sets the separate CCIP admin (including zero to clear it), which
-   * TokenAdminRegistry can use through
-   * `registerAdminViaGetCCIPAdmin`.
+   * default admin (owner, on a CrossChainPoolToken) sets the separate CCIP admin (including zero to
+   * clear it), which TokenAdminRegistry can use through `registerAdminViaGetCCIPAdmin`.
    *
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
-   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken or
+   * CrossChainPoolToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if an address is invalid or `sender` is not the current
    * default admin
    *
@@ -1011,16 +1014,17 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
-   * Sets a v2.0.0 CrossChainToken CCIP admin, signing + submitting with `opts.wallet` (the current
-   * default admin).
+   * Sets a v2.0.0 token's CCIP admin, signing + submitting with `opts.wallet` (the current default
+   * admin, or owner on a CrossChainPoolToken).
    *
    * @remarks `sender` defaults to the wallet address, so the default-admin gate runs before
    * broadcast.
    *
    * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
    * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
-   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken
-   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unknown token version
+   * @throws {@link CCTContractTypeInvalidError} if `tokenAddress` is not a CrossChainToken or
+   * CrossChainPoolToken
+   * @throws {@link CCTContractVersionUnsupportedError} if it reports an unsupported version
    * @throws {@link CCTParamsInvalidError} if any param is invalid, `sender` differs from the
    * wallet, or the wallet is not the current default admin
    * @throws {@link CCIPExecTxRevertedError} if the tx reverts on-chain
@@ -3590,6 +3594,63 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
    */
   deployTokenPool(opts: EVMExecuteParams<DeployTokenPoolParams>): Promise<DeployResult> {
     return this.#deployTokenPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned `CrossChainPoolToken` (v2.0.0) deployment tx (for multisig / offline
+   * signing): an ERC20 that is its own token pool. The deployed address is only known once mined,
+   * so it is NOT returned here: use {@link deployCrossChainPoolToken} to receive
+   * `{ hash, contractAddress, verification }`.
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @example
+   * ```typescript
+   * const unsigned = await cct.generateUnsignedDeployCrossChainPoolToken({
+   *   name: 'My Token',
+   *   symbol: 'MTK',
+   *   decimals: 18,
+   *   maxSupply: 0n, // 0 = unlimited
+   *   rmnProxy: '0xRmnProxy...',
+   *   router: '0xRouter...',
+   *   sender: '0xDeployer...', // becomes the owner and, unless `ccipAdmin` is set, the CCIP admin
+   * })
+   * ```
+   */
+  generateUnsignedDeployCrossChainPoolToken(
+    opts: DeployCrossChainPoolTokenParams,
+  ): Promise<UnsignedEVMTx> {
+    return this.#deployCrossChainPoolToken.generate(this.chain, opts)
+  }
+
+  /**
+   * Deploys a `CrossChainPoolToken` (v2.0.0), an ERC20 that is its own token pool, signing +
+   * submitting with `opts.wallet`; resolves to the tx hash, the newly deployed address (token and
+   * pool alike), and a `verification` ({@link ExplorerVerificationInput}) for verifying the source
+   * on a block explorer.
+   * @remarks The deployer becomes the owner, and the CCIP admin unless `ccipAdmin` is set; there
+   * are no mint/burn roles to grant. Then {@link registerAdmin} → {@link acceptAdmin} →
+   * {@link setPool} (token and pool both `contractAddress`) → {@link applyChainUpdates}.
+   * @throws {@link CCIPWalletInvalidError} if `wallet` is not a valid signer
+   * @throws {@link CCIPWalletChainMismatchError} if `wallet` is connected to a different chain
+   * @throws {@link CCTParamsInvalidError} if any param is invalid
+   * @throws {@link CCTTxFailedError} if the tx reverts, fails, or mines with no, invalid, or unexpected contract address
+   *
+   * @example
+   * ```typescript
+   * const { hash, contractAddress, verification } = await cct.deployCrossChainPoolToken({
+   *   name: 'My Token',
+   *   symbol: 'MTK',
+   *   decimals: 18,
+   *   maxSupply: 0n,
+   *   rmnProxy: '0xRmnProxy...',
+   *   router: '0xRouter...',
+   *   wallet,
+   * })
+   * ```
+   */
+  deployCrossChainPoolToken(
+    opts: EVMExecuteParams<DeployCrossChainPoolTokenParams>,
+  ): Promise<DeployResult> {
+    return this.#deployCrossChainPoolToken.execute(this.chain, opts)
   }
 
   /**

@@ -680,6 +680,29 @@ describe('CCIPAPIClient', () => {
       assert.equal(result.lane.version, '1.7.0')
     })
 
+    it('should use V1_6 for a 1.6 message (null encodedMessage) from a 2.0 OnRamp', async () => {
+      // a Solana 2.0 Router keeps its 1.6 entrypoint: the API reports the OnRamp version (2.0.0),
+      // but only 2.0 messages have an encodedMessage
+      for (const [encodedMessage, expected] of [
+        [null, CCIPVersion.V1_6],
+        ['0x01', CCIPVersion.V2_0],
+      ] as const) {
+        const response = { ...mockMessageResponse, version: '2.0.0', encodedMessage }
+        const customFetch = mock.fn(() =>
+          Promise.resolve({
+            ok: true,
+            text: () => Promise.resolve(JSON.stringify(response)),
+          }),
+        )
+        const client = new CCIPAPIClient(undefined, { fetch: customFetch as any })
+        const result = await client.getMessageById(
+          '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+        )
+
+        assert.equal(result.lane.version, expected, `encodedMessage=${encodedMessage}`)
+      }
+    })
+
     it('should default to V1_6 when version is null or undefined', async () => {
       for (const version of [null, undefined]) {
         const response = { ...mockMessageResponse, version }

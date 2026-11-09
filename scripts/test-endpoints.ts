@@ -70,7 +70,9 @@ export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
     // (CUJO AI on Charter, observed 2026-10): every TLS client sees EPROTO
     // "wrong version number". Locally, override via RPC_OPTIMISM_SEPOLIA.
     'https://gateway.tenderly.co/public/optimism-sepolia,https://sepolia.optimism.io',
-  RPC_FUJI: 'https://api.avax-test.network/ext/bc/C/rpc',
+  // Forks issue many storage reads; the official gateway can ban those bursts (Cloudflare 1015).
+  RPC_FUJI:
+    'https://avalanche-fuji-c-chain-rpc.publicnode.com,https://api.avax-test.network/ext/bc/C/rpc',
   RPC_BSC_TESTNET: [
     // NodeReal's public demo endpoint is the only one found that serves a full
     // ~10k-block eth_getLogs here; BNB Chain's own data seeds answer

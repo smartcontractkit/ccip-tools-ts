@@ -84,7 +84,7 @@ If the transaction contains multiple CCIP messages, select the one you want by i
 ```typescript
 import { discoverOffRamp, ExecutionState } from '@chainlink/ccip-sdk'
 
-const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+const offRamp = await discoverOffRamp(source, dest, request.lane)
 
 for await (const execution of dest.getExecutionReceipts({
   offRamp,
@@ -190,7 +190,7 @@ async function executeByTxHash(
   console.log('Message ID:', request.message.messageId)
 
   // 2. Discover OffRamp (memoized)
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+  const offRamp = await discoverOffRamp(source, dest, request.lane)
 
   // 3. Check if already executed
   for await (const execution of dest.getExecutionReceipts({
@@ -383,7 +383,7 @@ The CLI auto-detects whether the argument is a message ID, transaction hash, or 
 | `getExecutionInput({ request, verifications })` | **Source** | RPC | Build Merkle proof + fetch off-chain token data |
 | `getVerifications({ offRamp, request })` | Destination | RPC | Get commit report or verifier results |
 | `getExecutionReceipts({ offRamp, messageId })` | Destination | RPC | Check current execution state |
-| `discoverOffRamp(source, dest, onRamp)` | — | RPC | Find OffRamp address (memoized) |
+| `discoverOffRamp(source, dest, lane)` | — | RPC | Find OffRamp address (memoized) |
 
 ## Errors
 

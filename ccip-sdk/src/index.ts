@@ -81,7 +81,7 @@ export {
   simulateReleaseOrMint,
 } from './evm/simulate.ts'
 export { CCTP_FINALITY_FAST, CCTP_FINALITY_STANDARD, getOffchainTokenData } from './offchain.ts'
-export { decodeMessage, getMessagesInRange } from './requests.ts'
+export { decodeMessage, getMessageVersion, getMessagesInRange } from './requests.ts'
 export {
   type CCIPExecution,
   type CCIPMessage,

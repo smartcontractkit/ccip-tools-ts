@@ -13,12 +13,9 @@ import {
 import { getCantonNetworkConfig } from '../../../canton/networks.ts'
 import { hashedUtf8Hex } from '../../../shared/codec.ts'
 import { CCTParamsInvalidError } from '../../errors.ts'
-
-/** TAR template ID (`#<package>:<Module>:<Entity>`). */
-export const TAR_TEMPLATE_ID = '#ccip-core-v2:CCIP.CoreV2.TokenAdminRegistry:TokenAdminRegistry'
-
-/** TokenConfig template ID (the per-instrument config contract the TAR manages). */
-export const TOKEN_CONFIG_TEMPLATE_ID = '#ccip-core-v2:CCIP.CoreV2.TokenAdminRegistry:TokenConfig'
+// Template IDs live in ../constants.ts (single home for Canton constants).
+import { TAR_TEMPLATE_ID } from '../constants.ts'
+export { TAR_TEMPLATE_ID, TOKEN_CONFIG_TEMPLATE_ID } from '../constants.ts'
 
 /**
  * Derive a TokenConfig's raw instance address (`"instanceId@registryOwner"`)

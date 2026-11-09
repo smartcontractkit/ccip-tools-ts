@@ -7,7 +7,8 @@
  * instances — one per CCT operation.
  *
  * Operations:
- *   - Writes: `deployTokenPool` (atomic create + Initialize), `applyChainUpdates`
+ *   - Writes: `deployTokenPool` (atomic create + Initialize), `applyChainUpdates`,
+ *     plus one-off pool config ops (`setRateLimitConfig`, `setObservers`)
  *   - Reads: `getTokenPoolState`, `getRateLimiterState`, `getTokenAdminRegistry`
  *
  * @packageDocumentation
@@ -31,21 +32,42 @@ import {
   type ExecuteApplyChainUpdatesResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type ExecuteSetObserversParams,
+  type ExecuteSetObserversResult,
+  type ExecuteSetRateLimitConfigParams,
+  type ExecuteSetRateLimitConfigResult,
   type GenerateApplyChainUpdatesParams,
   type GenerateApplyChainUpdatesResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GenerateSetObserversParams,
+  type GenerateSetObserversResult,
+  type GenerateSetRateLimitConfigParams,
+  type GenerateSetRateLimitConfigResult,
   type GetRateLimiterStateParams,
   type GetRateLimiterStateResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
   type PoolType,
+  type SetObserversParams,
+  type SetRateLimitConfigParams,
   ApplyChainUpdates,
   DeployTokenPool,
   GetRateLimiterState,
   GetTokenPoolState,
+  SetObservers,
+  SetRateLimitConfig,
 } from './token-pool/operations/index.ts'
+export {
+  TRANSFER_PREAPPROVAL_CONTEXT_KEY,
+  TRANSFER_PREAPPROVAL_TEMPLATE_ID,
+  resolveTransferPreapprovalCid,
+} from './token-pool/preapproval.ts'
+export { CCIP_PUBLIC_LABEL, CIP112_RECEIVER_ID_META_KEY } from './token-pool/shared.ts'
+export { decodeDamlRecord, extractFieldValue, extractRecordField } from '../../canton/daml-parse.ts'
+export type { CantonActiveContract } from '../../canton/types.ts'
 import { normalizeRemoteAddress } from './token-pool/shared.ts'
+export { POOL_TEMPLATE_IDS } from './token-pool/shared.ts'
 
 /**
  * Canton CCT manager. Holds a {@link CantonChain} and exposes the CCT admin
@@ -59,6 +81,8 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   // Write operations (one instance each, reused across calls).
   readonly #deployTokenPool = new DeployTokenPool()
   readonly #applyChainUpdates = new ApplyChainUpdates()
+  readonly #setRateLimitConfig = new SetRateLimitConfig()
+  readonly #setObservers = new SetObservers()
 
   // Read operations.
   readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
@@ -125,6 +149,42 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
     return this.#applyChainUpdates.execute(this.chain, opts)
   }
 
+  // ─── Pool: one-off config ops ───────────────────────────────────────────
+  // Each `generateUnsigned<Op>` builds the unsigned exercise command; `<op>`
+  // signs and submits. All return the new contract ID (the pool's, or the
+  // rate limiter's for `setRateLimitConfig`).
+
+  /** Builds unsigned `setRateLimitConfig` commands. */
+  async generateUnsignedSetRateLimitConfig(
+    opts: GenerateSetRateLimitConfigParams,
+  ): Promise<GenerateSetRateLimitConfigResult> {
+    return this.#setRateLimitConfig.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets one lane rate limiter's `isEnabled`/`capacity`/`rate`. Callable by the
+   * pool owner or the pool's `rateLimitAdmin`. Note: `isEnabled: false` means
+   * unlimited throughput (and requires zero capacity/rate); to block a
+   * direction, set `isEnabled: true, capacity: 0n, rate: 0n`.
+   */
+  async setRateLimitConfig(
+    opts: ExecuteSetRateLimitConfigParams,
+  ): Promise<ExecuteSetRateLimitConfigResult> {
+    return this.#setRateLimitConfig.execute(this.chain, opts)
+  }
+
+  /** Builds unsigned `setObservers` commands. */
+  async generateUnsignedSetObservers(
+    opts: GenerateSetObserversParams,
+  ): Promise<GenerateSetObserversResult> {
+    return this.#setObservers.generate(this.chain, opts)
+  }
+
+  /** Updates a pool's EDS observer parties. */
+  async setObservers(opts: ExecuteSetObserversParams): Promise<ExecuteSetObserversResult> {
+    return this.#setObservers.execute(this.chain, opts)
+  }
+
   // ─── TAR: reads ─────────────────────────────────────────────────────────
 
   /** Reads the TAR state for an instrument (admin, pendingAdmin, pool, factory wiring). */
@@ -154,6 +214,8 @@ export {
   GetRateLimiterState,
   GetTokenAdminRegistry,
   GetTokenPoolState,
+  SetObservers,
+  SetRateLimitConfig,
 }
 export type {
   ApplyChainUpdatesParams,
@@ -165,6 +227,8 @@ export type {
   GetTokenAdminRegistryResult,
   GetTokenPoolStateParams,
   GetTokenPoolStateResult,
+  SetObserversParams,
+  SetRateLimitConfigParams,
 }
 
 // Network constants + address helpers used to compose deploy/lane params.
