@@ -700,7 +700,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds unsigned Solana pool lookup table instructions.
    *
-   * Defaults to create+extend. Pass `poolProgramAddress` only for a custom pool program.
+   * Defaults to create+extend. Pass `poolProgramAddress` for a non-canonical pool program.
    * Use `mode: 'createEmpty'` to create an empty ALT, e.g. with an EOA payer and vault authority,
    * then populate it later through the authority. If `authority` is omitted, it defaults to `payer`.
    *
@@ -753,8 +753,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Builds an unsigned instruction to append addresses to a token pool allowlist and toggle
    * enforcement. Every call overwrites enforcement; pass `add: []` to toggle it without appending
    * an address. Addresses in `add` must be unique; existing allowlist entries are rejected by the
-   * program. The pool must be initialized first. Pass `poolProgramAddress` only for a custom pool
-   * program; `authority` defaults to `payer`.
+   * program. The pool must be initialized first. Pass `poolProgramAddress` for a non-canonical
+   * pool program; `authority` defaults to `payer`.
    *
    * @see {@link configureAllowlist}
    * @see {@link generateUnsignedDeployTokenPool}
@@ -817,7 +817,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks
    * This only builds the pool `initialize` instruction for the canonical `burn-mint` and
-   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. `authority`
+   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. Pass
+   * `poolProgramAddress` where that program is deployed at a non-canonical address. `authority`
    * must be allowed to initialize the pool.
    *
    * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
@@ -864,7 +865,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks
    * This only sends the pool `initialize` instruction for the canonical `burn-mint` and
-   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. The signer
+   * `lock-release` programs selected by `poolType`; custom pool deployment is unsupported. Pass
+   * `poolProgramAddress` where that program is deployed at a non-canonical address. The signer
    * must be allowed to initialize the pool.
    *
    * **Important:** The pool requires a `pool_token_account` (the pool signer PDA's associated token
@@ -989,7 +991,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that appends remote pool addresses to an initialized Solana
-   * token pool remote-chain config. Pass `poolProgramAddress` only for a custom pool program;
+   * token pool remote-chain config. Pass `poolProgramAddress` for a non-canonical pool program;
    * `authority` defaults to `payer`.
    *
    * @remarks `remotePoolAddresses` must be non-empty and contain no duplicates. Existing addresses
@@ -1057,7 +1059,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that initializes a Solana token pool remote-chain config for a
-   * previously unconfigured selector. Pass `poolProgramAddress` only for a custom pool program;
+   * previously unconfigured selector. Pass `poolProgramAddress` for a non-canonical pool program;
    * `authority` defaults to `payer`.
    *
    * @remarks This creates the chain-config PDA once and fails if it already exists. Configure
@@ -1124,7 +1126,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that closes a Solana token pool remote-chain config. Pass
-   * `poolProgramAddress` only for a custom pool program; `authority` defaults to `payer`.
+   * `poolProgramAddress` for a non-canonical pool program; `authority` defaults to `payer`.
    *
    * @remarks
    * Destructive: this closes the remote-chain config account and returns its rent to `authority`.
@@ -1191,7 +1193,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that assigns the rate-limit admin for an initialized Solana
-   * token pool. Pass `poolProgramAddress` only for a custom pool program; `authority`
+   * token pool. Pass `poolProgramAddress` for a non-canonical pool program; `authority`
    * defaults to `payer`.
    *
    * @remarks On-chain execution requires `authority` to be the pool owner. This assignment takes
@@ -1546,7 +1548,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that proposes a new owner for an initialized Solana token pool.
-   * Pass `poolProgramAddress` only for a custom pool program; `authority` defaults to `payer`.
+   * Pass `poolProgramAddress` for a non-canonical pool program; `authority` defaults to `payer`.
    * The operation reads pool state and rejects the current owner or default public key. The proposed
    * owner must accept ownership separately before the transfer takes effect.
    *
@@ -1605,7 +1607,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that accepts pending ownership of an initialized Solana token
-   * pool. Pass `poolProgramAddress` only for a custom pool program; `authority` defaults to
+   * pool. Pass `poolProgramAddress` for a non-canonical pool program; `authority` defaults to
    * `payer`. The operation reads pool state and requires it to be the proposed owner.
    *
    * @see {@link acceptPoolOwnership}
@@ -1661,7 +1663,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction that sets inbound and outbound rate limits for an initialized
-   * Solana token pool remote-chain config. Pass `poolProgramAddress` only for a custom pool
+   * Solana token pool remote-chain config. Pass `poolProgramAddress` for a non-canonical pool
    * program; `authority` defaults to `payer`.
    *
    * @remarks On-chain execution requires `authority` to be the pool owner or rate-limit admin.
@@ -1728,7 +1730,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * Builds an unsigned instruction that replaces an initialized Solana token pool remote-chain
    * config. Initialize the config first with `generateUnsignedInitChainRemoteConfig`. Each call
    * replaces the remote token address, pool addresses, and decimals. Pass `poolProgramAddress`
-   * only for a custom pool program; `authority` defaults to `payer`.
+   * for a non-canonical pool program; `authority` defaults to `payer`.
    *
    * @see {@link editChainRemoteConfig}
    * @see {@link generateUnsignedInitChainRemoteConfig}
@@ -1792,7 +1794,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Builds unsigned Solana lookup table extend instructions.
    *
-   * Pass `tokenAddress` (plus `poolProgramAddress` for a custom pool program) to append the
+   * Pass `tokenAddress` (plus `poolProgramAddress` for a non-canonical pool program) to append the
    * standard CCIP pool addresses; pass `additionalAddresses` to append manual addresses. `authority`
    * defaults to `payer`.
    *
@@ -1822,7 +1824,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Extends a Solana lookup table.
    *
-   * Pass `tokenAddress` (plus `poolProgramAddress` for a custom pool program) to append the
+   * Pass `tokenAddress` (plus `poolProgramAddress` for a non-canonical pool program) to append the
    * standard CCIP pool addresses.
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
@@ -2048,7 +2050,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
 
   /**
    * Builds an unsigned instruction to remove addresses from a token pool allowlist. The pool must
-   * be initialized first. Pass `poolProgramAddress` only for a custom pool program;
+   * be initialized first. Pass `poolProgramAddress` for a non-canonical pool program;
    * `authority` defaults to `payer`. Every removed address must already be allowlisted or the
    * transaction reverts.
    *
