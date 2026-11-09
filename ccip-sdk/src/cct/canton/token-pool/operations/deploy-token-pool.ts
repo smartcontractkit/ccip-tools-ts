@@ -246,7 +246,7 @@ export class DeployTokenPool extends CantonOperation<
       admin: p.admin ?? instrumentId.admin,
       // Detach caller-owned nested params: validation runs in prepare while
       // encoding happens after ledger reads — a retained reference could be
-      // mutated in between (audit: mutable transferTimeout bypass).
+      // mutated in between.
       transferTimeout: p.transferTimeout ? { ...p.transferTimeout } : undefined,
       poolReceiveMetadata: p.poolReceiveMetadata ? { ...p.poolReceiveMetadata } : undefined,
       // oxlint-disable-next-line typescript/no-unnecessary-condition

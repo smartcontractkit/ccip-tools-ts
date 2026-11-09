@@ -175,9 +175,8 @@ describe('deployTokenPool validation', () => {
   })
 
   it('detaches caller-owned transferTimeout after validation', () => {
-    // Audit (mutable transferTimeout bypass): validation runs in prepare while
-    // encoding happens after ledger reads — the prepared params must not retain
-    // the caller's nested object.
+    // Validation runs in prepare while encoding happens after ledger reads —
+    // the prepared params must not retain the caller's nested object.
     const params = baseParams({ transferTimeout: { type: 'RelativeHours', hours: 24 } })
     const prepared = (op as unknown as { prepare(p: unknown): typeof params }).prepare(params)
     const callerTimeout = params.transferTimeout as { type: 'RelativeHours'; hours: number }
