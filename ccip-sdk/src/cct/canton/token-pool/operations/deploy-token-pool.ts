@@ -244,6 +244,11 @@ export class DeployTokenPool extends CantonOperation<
       instrumentId,
       poolOwner: instrumentId.admin,
       admin: p.admin ?? instrumentId.admin,
+      // Detach caller-owned nested params: validation runs in prepare while
+      // encoding happens after ledger reads — a retained reference could be
+      // mutated in between.
+      transferTimeout: p.transferTimeout ? { ...p.transferTimeout } : undefined,
+      poolReceiveMetadata: p.poolReceiveMetadata ? { ...p.poolReceiveMetadata } : undefined,
       // oxlint-disable-next-line typescript/no-unnecessary-condition
       lanes: (p.lanes ?? []).map((l, i) => parseLaneRemoteAddresses(this.name, `lanes[${i}]`, l)),
     }
