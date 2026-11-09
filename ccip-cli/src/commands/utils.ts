@@ -8,6 +8,8 @@ import {
   type Chain,
   type ChainStatic,
   type Lane,
+  type TokenInfo,
+  type TokenUIMultiplier,
   CCIPError,
   CCIPErrorCode,
   CCIPInteractiveRequiredError,
@@ -21,6 +23,7 @@ import {
   networkInfo,
   resolveTokenDecimals,
   supportedChains,
+  toUIAmount,
 } from '@chainlink/ccip-sdk/src/index.ts'
 import { select } from '@inquirer/prompts'
 import {
@@ -261,8 +264,7 @@ export async function formatToken(
     }
   }
   try {
-    const { symbol, decimals } = await source.getTokenInfo(token)
-    return `${formatUnits(ta.amount, decimals)} ${symbol}`
+    return formatTokenAmount(ta.amount, await source.getTokenInfo(token))
   } catch (err) {
     // tokens without the optional ERC-20 decimals() view (or unreachable metadata) still
     // display: raw units with the address, so a successful send is never unprintable
@@ -313,6 +315,33 @@ function formatData(name: string, data: string): Record<string, string> {
 
 function formatDate(timestamp: number) {
   return new Date(timestamp * 1e3).toISOString().substring(0, 19).replace('T', ' ')
+}
+
+/**
+ * Formats an ERC-8056 UI multiplier for display, e.g. `2x`, with a scheduled change, e.g.
+ * `2x (3x from 2026-12-07 14:30:00)`.
+ * @param multiplier - The token's UI multiplier.
+ * @returns The formatted multiplier.
+ */
+export function formatUIMultiplier({ uiMultiplier, next }: TokenUIMultiplier): string {
+  const times = (m: bigint) => `${formatUnits(m, 18).replace(/\.0$/, '')}x`
+  return next
+    ? `${times(uiMultiplier)} (${times(next.uiMultiplier)} from ${formatDate(next.effectiveAt)})`
+    : times(uiMultiplier)
+}
+
+/**
+ * Formats a raw token amount with its symbol and, for an ERC-8056 token, its UI amount at the
+ * current multiplier, e.g. `1.5 TSLA (3 UI @ 2x)`.
+ * @param amount - Raw amount.
+ * @param info - The token's info.
+ * @returns The formatted amount.
+ */
+export function formatTokenAmount(amount: bigint, info: TokenInfo): string {
+  const formatted = `${formatUnits(amount, info.decimals)} ${info.symbol}`
+  if (!info.uiMultiplier) return formatted
+  const uiAmount = toUIAmount(amount, info.uiMultiplier.uiMultiplier)
+  return `${formatted} (${formatUnits(uiAmount, info.decimals)} UI @ ${formatUIMultiplier({ uiMultiplier: info.uiMultiplier.uiMultiplier })})`
 }
 
 /**

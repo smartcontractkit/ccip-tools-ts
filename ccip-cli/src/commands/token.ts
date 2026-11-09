@@ -3,14 +3,26 @@
  * Queries native or token balance for an address.
  */
 
-import { type ChainStatic, jsonStringify, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
+import {
+  type ChainStatic,
+  jsonStringify,
+  networkInfo,
+  toUIAmount,
+} from '@chainlink/ccip-sdk/src/index.ts'
 import { formatUnits } from 'ethers'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
 import { fetchChainsFromRpcs } from '../providers/index.ts'
 import { type Ctx, Format } from './types.ts'
-import { formatDisplayAddress, getCtx, logParsedError, prettyTable } from './utils.ts'
+import {
+  formatDisplayAddress,
+  formatTokenAmount,
+  formatUIMultiplier,
+  getCtx,
+  logParsedError,
+  prettyTable,
+} from './utils.ts'
 
 export const command = 'token'
 export const describe = 'Query token balance for an address'
@@ -90,6 +102,13 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
     balance,
     tokenInfo ? tokenInfo.decimals : (chain.constructor as ChainStatic).decimals,
   )
+  // ERC-8056 tokens: the balance in UI units (e.g. shares) at the current multiplier
+  const uiBalance =
+    tokenInfo?.uiMultiplier && toUIAmount(balance, tokenInfo.uiMultiplier.uiMultiplier)
+  const ui = uiBalance != null && {
+    uiBalance,
+    uiFormatted: formatUnits(uiBalance, tokenInfo!.decimals),
+  }
 
   switch (argv.format) {
     case Format.json:
@@ -101,6 +120,7 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
             token: tokenLabel,
             balance: balance.toString(),
             formatted,
+            ...(ui && { uiBalance: ui.uiBalance.toString(), uiFormatted: ui.uiFormatted }),
             ...tokenInfo,
           },
           2,
@@ -114,7 +134,7 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
         ':',
         balance,
         `=`,
-        tokenInfo ? `${formatted} ${tokenLabel}` : formatted,
+        tokenInfo ? formatTokenAmount(balance, tokenInfo) : formatted,
       )
       return
     case Format.pretty:
@@ -125,7 +145,11 @@ async function queryTokenBalance(ctx: Ctx, argv: Parameters<typeof handler>[0]) 
         token: argv.token ? formatDisplayAddress(argv.token, network.family) : tokenLabel,
         balance,
         formatted,
+        ...ui,
         ...tokenInfo,
+        ...(tokenInfo?.uiMultiplier && {
+          uiMultiplier: formatUIMultiplier(tokenInfo.uiMultiplier),
+        }),
       })
       return
   }

@@ -17,6 +17,7 @@ import assert from 'node:assert/strict'
 import { execSync } from 'node:child_process'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
+import { inspect } from 'node:util'
 
 import { Contract, JsonRpcProvider, solidityPackedKeccak256, toBeHex, zeroPadValue } from 'ethers'
 import { Instance } from 'prool'
@@ -29,6 +30,7 @@ import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPDestExecutionRevertError } from '../errors/index.ts'
 import { interfaces } from './const.ts'
 import { getErrorData, parseWithFragment } from './errors.ts'
+import { rejectionOf, withForkRetry } from './fork-retry.test.helpers.ts'
 import { findBalancesSlot } from './gas.ts'
 import { isTransientReleaseOrMintRevert, simulateReleaseOrMint } from './simulate.ts'
 import { EVMChain } from './index.ts'
@@ -156,6 +158,15 @@ describe(
       it('MINTER_ROLE revoked on the fork => classified as authority, checkExecute throws', async () => {
         assert.ok(fujiChain)
         const provider = fujiChain.provider as JsonRpcProvider
+        const checkExecute = () =>
+          fujiChain!.checkExecute({
+            offRamp: V2_LANE.destOffRamp,
+            message: {
+              sourceChainSelector: SEPOLIA_SELECTOR,
+              receiver,
+              tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
+            },
+          })
         // revoke the pool's MINTER_ROLE on the fork to reproduce a missing-role misconfiguration
         await provider.send('anvil_impersonateAccount', [V2_LANE.operator])
         await provider.send('anvil_setBalance', [V2_LANE.operator, '0x1000000000000000000'])
@@ -163,83 +174,59 @@ describe(
           V2_LANE.destToken,
           [
             'function revokeRole(bytes32 role, address account)',
+            'function grantRole(bytes32 role, address account)',
             'function hasRole(bytes32, address) view returns (bool)',
           ],
           await provider.getSigner(V2_LANE.operator),
         )
-        await (
-          (await token.getFunction('revokeRole')(MINTER_ROLE, V2_LANE.destPool)) as {
-            wait: () => Promise<unknown>
-          }
-        ).wait()
-        assert.equal(await token.getFunction('hasRole')(MINTER_ROLE, V2_LANE.destPool), false)
+        const send = async (method: 'revokeRole' | 'grantRole') =>
+          (
+            (await token.getFunction(method)(MINTER_ROLE, V2_LANE.destPool)) as {
+              wait: () => Promise<unknown>
+            }
+          ).wait()
+        await send('revokeRole')
+        try {
+          assert.equal(await token.getFunction('hasRole')(MINTER_ROLE, V2_LANE.destPool), false)
 
-        // the primitive throws the raw revert; the SDK's standard parse names it
-        let revertData: string | undefined
-        await assert.rejects(
-          () =>
-            simulateReleaseOrMint({
-              provider: fujiChain!.provider,
-              pool: V2_LANE.destPool,
-              offRamp: V2_LANE.destOffRamp,
-              input,
-            }),
-          (err) => {
-            revertData = getErrorData(err)
-            return true
-          },
-        )
-        assert.ok(revertData, 'revert data extracted')
-        assert.equal(parseWithFragment(revertData)?.[0].name, 'AccessControlUnauthorizedAccount')
-        // a mint-authority failure needs a role grant, so it must NOT be flagged transient
-        assert.equal(isTransientReleaseOrMintRevert(revertData), false)
+          // the primitive throws the raw revert; the SDK's standard parse names it
+          const simErr = await withForkRetry(() =>
+            rejectionOf(
+              simulateReleaseOrMint({
+                provider: fujiChain!.provider,
+                pool: V2_LANE.destPool,
+                offRamp: V2_LANE.destOffRamp,
+                input,
+              }),
+              'releaseOrMint simulation should revert without MINTER_ROLE',
+            ),
+          )
+          const revertData = getErrorData(simErr)
+          assert.ok(revertData, `revert data extracted from ${inspect(simErr)}`)
+          assert.equal(parseWithFragment(revertData)?.[0].name, 'AccessControlUnauthorizedAccount')
+          // a mint-authority failure needs a role grant, so it must NOT be flagged transient
+          assert.equal(isTransientReleaseOrMintRevert(revertData), false)
 
-        // and checkExecute BLOCKS the send with the generic revert error, carrying the raw revert
-        await assert.rejects(
-          () =>
-            fujiChain!.checkExecute({
-              offRamp: V2_LANE.destOffRamp,
-              message: {
-                sourceChainSelector: SEPOLIA_SELECTOR,
-                receiver,
-                tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
-              },
-            }),
-          (err: CCIPDestExecutionRevertError) => {
-            assert.ok(err instanceof CCIPDestExecutionRevertError)
-            assert.equal(
-              parseWithFragment(String(err.context['revert']))?.[0].name,
-              'AccessControlUnauthorizedAccount',
-            )
-            assert.equal(err.isTransient, false)
-            return true
-          },
-        )
-        // restore for any later test
-        const signer = await provider.getSigner(V2_LANE.operator)
-        const tokenAdmin = new Contract(
-          V2_LANE.destToken,
-          ['function grantRole(bytes32 role, address account)'],
-          signer,
-        )
-        await (
-          (await tokenAdmin.getFunction('grantRole')(MINTER_ROLE, V2_LANE.destPool)) as {
-            wait: () => Promise<unknown>
-          }
-        ).wait()
-        await provider.send('anvil_stopImpersonatingAccount', [V2_LANE.operator])
+          // and checkExecute BLOCKS the send with the generic revert error, carrying the raw revert
+          const err = await withForkRetry(() =>
+            rejectionOf(checkExecute(), 'checkExecute should block the send without MINTER_ROLE'),
+          )
+          assert.ok(
+            err instanceof CCIPDestExecutionRevertError,
+            `expected CCIPDestExecutionRevertError, got ${inspect(err)}`,
+          )
+          assert.equal(
+            parseWithFragment(String(err.context['revert']))?.[0].name,
+            'AccessControlUnauthorizedAccount',
+          )
+          assert.equal(err.isTransient, false)
+        } finally {
+          // restore for the recovery check and any later test, even when an assertion fails
+          await send('grantRole')
+          await provider.send('anvil_stopImpersonatingAccount', [V2_LANE.operator])
+        }
         // recovery: once the role is granted back, the same checkExecute passes again
-        assert.equal(
-          await fujiChain.checkExecute({
-            offRamp: V2_LANE.destOffRamp,
-            message: {
-              sourceChainSelector: SEPOLIA_SELECTOR,
-              receiver,
-              tokenAmounts: [{ token: V2_LANE.destToken, amount: 10n ** 18n }],
-            },
-          }),
-          true,
-        )
+        assert.equal(await withForkRetry(checkExecute), true)
       })
 
       it('LockRelease dest drained on the fork => typed transient block (heuristic deferred, sim decides)', async () => {

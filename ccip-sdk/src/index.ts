@@ -46,6 +46,7 @@ export type {
   TokenTransferFee,
   TokenTransferFeeConfig,
   TokenTransferFeeOpts,
+  TokenUIMultiplier,
   TotalFeesEstimate,
   VerificationSourcesOpts,
 } from './chain.ts'
@@ -117,8 +118,11 @@ export {
   readVerifier,
 } from './verifiers/index.ts'
 export {
+  MAX_UI_MULTIPLIER,
+  UI_MULTIPLIER_ONE,
   bytesToBuffer,
   decodeAddress,
+  fromUIAmount,
   getDataBytes,
   getSourceTokenFromExtraData,
   isSupportedTxHash,
@@ -127,6 +131,7 @@ export {
   linkAbortSignals,
   resolveTokenDecimals,
   signalToPromise,
+  toUIAmount,
   withRetry,
 } from './utils.ts'
 export {

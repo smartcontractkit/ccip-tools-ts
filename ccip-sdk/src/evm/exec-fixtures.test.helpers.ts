@@ -7,13 +7,9 @@
  * failed messages from the staging CCIP API follow it.
  */
 import type { CCIPAPIClient } from '../api/index.ts'
-import {
-  CCIPError,
-  CCIPErrorCode,
-  CCIPMessageIdNotFoundError,
-  shouldRetry,
-} from '../errors/index.ts'
+import { CCIPError, CCIPErrorCode, CCIPMessageIdNotFoundError } from '../errors/index.ts'
 import { type CCIPVersion, MessageStatus } from '../types.ts'
+import { withForkRetry } from './fork-retry.test.helpers.ts'
 
 /** An executable failed-message fixture: message id plus its source tx hash. */
 export type ExecFixture = { messageId: string; txHash?: string }
@@ -75,26 +71,11 @@ export async function rankExecFixtures(opts: {
 }
 
 /**
- * Upstream trouble seen through the forks: SDK transient errors, 429s, the empty
- * revert an anvil fork reports when its upstream rate-limits it, and the
- * `Fork Error: Transport(...)` it reports when its upstream RPC drops a connection.
- */
-const isTransient = (err: unknown) =>
-  shouldRetry(err) ||
-  /\b429\b|missing revert data|fork error|connection reset|econnreset|socket hang up/i.test(
-    (err as Error | null)?.message ?? '',
-  )
-
-/** Retries for a transient failure, per fixture; each waits `RETRY_DELAY_MS` longer. */
-const MAX_RETRIES = 2
-const RETRY_DELAY_MS = 2_000
-
-/**
  * Runs `attempt` on each fixture not in `usedIds` until one succeeds. Each tried id
  * joins `usedIds`: a message executed (or found unusable) by one test is not tried
- * again by the next. A transient failure is retried up to `MAX_RETRIES` times, with
- * a growing delay; an assertion failure rethrows at once. When no fixture executes,
- * fails with every fixture's error.
+ * again by the next. A transient fork error is retried (`withForkRetry`); an
+ * assertion failure rethrows at once. When no fixture executes, fails with every
+ * fixture's error.
  */
 export async function tryExecFixtures(
   fixtures: readonly ExecFixture[],
@@ -105,18 +86,11 @@ export async function tryExecFixtures(
   for (const fixture of fixtures) {
     if (usedIds.has(fixture.messageId)) continue
     usedIds.add(fixture.messageId)
-    for (let retry = 0; ; retry++) {
-      try {
-        return await attempt(fixture)
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AssertionError') throw err
-        if (retry < MAX_RETRIES && isTransient(err)) {
-          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * (retry + 1)))
-          continue
-        }
-        errors.push(`${fixture.messageId}: ${err instanceof Error ? err.message : String(err)}`)
-        break
-      }
+    try {
+      return await withForkRetry(() => attempt(fixture))
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AssertionError') throw err
+      errors.push(`${fixture.messageId}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
   throw new CCIPError(

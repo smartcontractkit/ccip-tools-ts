@@ -43,6 +43,7 @@ import {
   type LaneStatus,
   type LogFilter,
   type RateLimiterState,
+  type TokenInfo,
   type TokenPoolConfig,
   type TokenPoolConfigOpts,
   type TokenPoolRemote,
@@ -78,6 +79,7 @@ import {
   CCIPTokenNotInRegistryError,
   CCIPTokenPoolChainConfigNotFoundError,
   CCIPTransactionNotFoundError,
+  CCIPUIMultiplierInvalidError,
   CCIPVersionRequiresLaneError,
   CCIPVersionUnsupportedError,
   CCIPWalletInvalidError,
@@ -118,6 +120,7 @@ import {
   CCIPVersion,
 } from '../types.ts'
 import {
+  MAX_UI_MULTIPLIER,
   decodeAddress,
   decodeOnRampAddress,
   encodeAddressToAny,
@@ -155,6 +158,9 @@ import type USDCTokenPoolProxy_2_0_ABI from './abi/USDCTokenPoolProxy_2_0.ts'
 import type VersionedVerifierResolver_2_0_ABI from './abi/VersionedVerifierResolver_2_0.ts'
 import {
   type TokenPoolAndProxyABI,
+  SCALED_UI_AMOUNT_INTERFACE_ID,
+  SCALED_UI_AMOUNT_PENDING_INTERFACE_ID,
+  ScaledUIAmountABI,
   VersionedContractABI,
   commitsFragments,
   defaultAbiCoder,
@@ -400,6 +406,9 @@ function destroyOnAbort(abort: AbortSignal, provider: JsonRpcApiProvider): void 
   abort.addEventListener('abort', () => ref.deref()?.destroy(), { once: true })
 }
 
+/** Whether an ERC-8056 UI multiplier is usable: above zero and at most {@link MAX_UI_MULTIPLIER}. */
+const isValidUIMultiplier = (value: bigint): boolean => value > 0n && value <= MAX_UI_MULTIPLIER
+
 /**
  * EVM chain implementation supporting Ethereum-compatible networks.
  *
@@ -558,7 +567,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       maxSize: 10,
       expires: 600e3,
     })
-    this.getTokenInfo = memoize(this.getTokenInfo.bind(this), {
+    // only the token's constants are cached: getTokenInfo reads an ERC-8056 multiplier fresh
+    this.getTokenMetadata = memoize(this.getTokenMetadata.bind(this), {
       async: true,
       maxArgs: 1,
       maxSize: 100,
@@ -1436,32 +1446,112 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     }
   }
 
-  /** {@inheritDoc Chain.getTokenInfo} */
-  async getTokenInfo(token: string): Promise<{ decimals: number; symbol: string; name: string }> {
+  /**
+   * {@inheritDoc Chain.getTokenInfo}
+   *
+   * @remarks
+   * The token's constants (symbol, decimals, name and ERC-8056 support) are cached; an ERC-8056
+   * token's UI multiplier is read on every call. A scheduled change is best-effort: `next` is
+   * omitted when the token does not declare the pending-multiplier extension, when its views
+   * revert, or when the scheduled value is out of range.
+   * @throws {@link CCIPTokenDecimalsUnavailableError} if the token does not implement `decimals()`
+   * @throws {@link CCIPUIMultiplierInvalidError} if the current ERC-8056 multiplier is zero or
+   *   above 1e24
+   */
+  async getTokenInfo(token: string): Promise<TokenInfo & { name: string }> {
+    const { isScaledUI, hasPendingUIMultiplier, ...info } = await this.getTokenMetadata(token)
+    if (!isScaledUI) return info
+    const contract = new Contract(
+      token,
+      ScaledUIAmountABI,
+      this.provider,
+    ) as unknown as TypedContract<typeof ScaledUIAmountABI>
+    const [current, next] = await Promise.all([
+      contract.uiMultiplier(),
+      hasPendingUIMultiplier
+        ? Promise.all([contract.newUIMultiplier(), contract.effectiveAt()]).then(
+            ([uiMultiplier, effectiveAt]) =>
+              isValidUIMultiplier(uiMultiplier)
+                ? { uiMultiplier, effectiveAt: Number(effectiveAt) }
+                : undefined,
+            // a reverting or unusable schedule must not hide the current multiplier
+            (err: unknown) => {
+              if (isError(err, 'CALL_EXCEPTION') || isError(err, 'BAD_DATA')) return undefined
+              throw err
+            },
+          )
+        : undefined,
+    ])
+    if (!isValidUIMultiplier(current))
+      throw new CCIPUIMultiplierInvalidError(token, current, {
+        context: { network: this.network.name },
+      })
+    // `uiMultiplier()` already resolves the scheduled value once it is due, so a different
+    // `newUIMultiplier()` is a change that has not taken effect yet — no clock comparison needed
+    return {
+      ...info,
+      uiMultiplier: {
+        uiMultiplier: current,
+        ...(next && next.uiMultiplier !== current && { next }),
+      },
+    }
+  }
+
+  /**
+   * The token's constants, cached: symbol, decimals, name, and its ERC-8056 interfaces.
+   * @param token - Token address.
+   * @returns The token's symbol, decimals, name (empty when absent), `isScaledUI` (ERC-8056), and
+   *   `hasPendingUIMultiplier` (its pending-multiplier extension).
+   * @throws {@link CCIPTokenDecimalsUnavailableError} if the token does not implement `decimals()`
+   */
+  protected async getTokenMetadata(token: string): Promise<{
+    symbol: string
+    decimals: number
+    name: string
+    isScaledUI: boolean
+    hasPendingUIMultiplier: boolean
+  }> {
     const contract = new Contract(
       token,
       interfaces.Token,
       this.provider,
     ) as unknown as TypedContract<typeof Token_ABI>
-    const symbol = await contract.symbol()
-    // `decimals()` is OPTIONAL in ERC-20: a CALL_EXCEPTION revert means the token doesn't
-    // implement it, and a BAD_DATA result means it answered something unusable as the
-    // expected return — both are recognized unavailable cases and surface as the typed
-    // error. Anything else (TIMEOUT, NETWORK_ERROR, ... transport) propagates as-is, so
-    // retry/transient handling still sees it. `name()` stays best-effort for the same
-    // optional-view reason.
-    let decimals: bigint
-    try {
-      decimals = await contract.decimals()
-    } catch (err) {
-      if (!isError(err, 'CALL_EXCEPTION') && !isError(err, 'BAD_DATA')) throw err
-      throw new CCIPTokenDecimalsUnavailableError(token, {
-        cause: err,
-        context: { network: this.network.name },
+    const scaled = new Contract(
+      token,
+      ScaledUIAmountABI,
+      this.provider,
+    ) as unknown as TypedContract<typeof ScaledUIAmountABI>
+    // ERC-165 detection; a token without supportsInterface (CALL_EXCEPTION) or with an unusable
+    // answer (BAD_DATA) does not support the interface, while transport errors propagate
+    const supports = (interfaceId: string) =>
+      scaled.supportsInterface(interfaceId).catch((err: unknown) => {
+        if (isError(err, 'CALL_EXCEPTION') || isError(err, 'BAD_DATA')) return false
+        throw err
       })
-    }
-    const name = await contract.name().catch(() => '')
-    return { symbol, decimals: Number(decimals), name }
+    // one Promise.all, so that a rejection after the first one is never left unhandled
+    const [symbol, decimals, name, isScaledUI] = await Promise.all([
+      contract.symbol(),
+      // `decimals()` is OPTIONAL in ERC-20: a CALL_EXCEPTION revert means the token doesn't
+      // implement it, and a BAD_DATA result means it answered something unusable as the
+      // expected return — both are recognized unavailable cases and surface as the typed
+      // error. Anything else (TIMEOUT, NETWORK_ERROR, ... transport) propagates as-is, so
+      // retry/transient handling still sees it.
+      contract.decimals().catch((err: unknown) => {
+        if (!isError(err, 'CALL_EXCEPTION') && !isError(err, 'BAD_DATA')) throw err
+        throw new CCIPTokenDecimalsUnavailableError(token, {
+          cause: err,
+          context: { network: this.network.name },
+        })
+      }),
+      // `name()` stays best-effort for the same optional-view reason
+      contract.name().catch(() => ''),
+      supports(SCALED_UI_AMOUNT_INTERFACE_ID),
+    ])
+    // probed only for ERC-8056 tokens, and cached: getTokenInfo skips the schedule views of a
+    // token that does not declare them
+    const hasPendingUIMultiplier =
+      isScaledUI && (await supports(SCALED_UI_AMOUNT_PENDING_INTERFACE_ID))
+    return { symbol, decimals: Number(decimals), name, isScaledUI, hasPendingUIMultiplier }
   }
 
   /** {@inheritDoc Chain.getBalance} */
@@ -1817,7 +1907,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       blockTag != null
         ? await contract.getTokenPrice.staticCall(token, { blockTag })
         : await contract.getTokenPrice(token)
-    const { decimals } = await this.getTokenInfo(token)
+    const { decimals } = await this.getTokenMetadata(token)
 
     const rawPrice = BigInt(result.value)
     return { price: Number(rawPrice) * 10 ** (decimals - 36) }

@@ -2732,6 +2732,37 @@ export class CCIPLocalTokenRequiredError extends CCIPError {
   }
 }
 
+/**
+ * Thrown when an ERC-8056 token reports a current UI multiplier that is zero or
+ * above {@link MAX_UI_MULTIPLIER} (1e24, 1,000,000x); converting amounts with it would be wrong.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getTokenInfo(token)
+ * } catch (error) {
+ *   if (error instanceof CCIPUIMultiplierInvalidError) {
+ *     console.log(`Invalid multiplier ${error.context.value} on ${error.context.token}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPUIMultiplierInvalidError extends CCIPError {
+  override readonly name = 'CCIPUIMultiplierInvalidError'
+  /** Creates a UI multiplier invalid error. */
+  constructor(token: string, value: bigint, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.UI_MULTIPLIER_INVALID,
+      `Token ${token} reports an invalid ERC-8056 UI multiplier: ${value}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, token, value },
+      },
+    )
+  }
+}
+
 /** The lane of a token transfer, in the context of the lane status errors. */
 type TokenTransferLane = {
   /** The token on the chain that checks the lane: the source token outbound, the destination token inbound. */

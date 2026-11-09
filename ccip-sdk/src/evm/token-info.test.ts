@@ -9,16 +9,21 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { type JsonRpcApiProvider, makeError } from 'ethers'
+import { type JsonRpcApiProvider, Interface, makeError } from 'ethers'
 
-import { CCIPTokenDecimalsUnavailableError } from '../errors/index.ts'
+import { CCIPTokenDecimalsUnavailableError, CCIPUIMultiplierInvalidError } from '../errors/index.ts'
 import { networkInfo } from '../networks.ts'
-import { interfaces } from './const.ts'
+import {
+  SCALED_UI_AMOUNT_INTERFACE_ID,
+  SCALED_UI_AMOUNT_PENDING_INTERFACE_ID,
+  ScaledUIAmountABI,
+  interfaces,
+} from './const.ts'
 import { EVMChain } from './index.ts'
 
 const TOKEN = '0x8FE4D867DB59E38E7bA7D98DC14ac1826c79CF9f'
 
-/** `eth_call` responder: answers from `data` by selector, or reverts. */
+/** `eth_call` responder: answers from `data` by full calldata, else by selector, or reverts. */
 function stubProvider(
   answers: Record<string, string | Error>,
 ): JsonRpcApiProvider & { selectors: string[] } {
@@ -28,7 +33,7 @@ function stubProvider(
     call: async (tx: { to?: string; data?: string }) => {
       const selector = (tx.data ?? '').slice(0, 10)
       selectors.push(selector)
-      const answer = answers[selector]
+      const answer = answers[tx.data ?? ''] ?? answers[selector]
       if (answer === undefined)
         throw makeError('execution reverted', 'CALL_EXCEPTION', {
           action: 'call',
@@ -188,5 +193,143 @@ describe('EVMChain.getTokenPoolConfig decimals', () => {
       chain.getTokenPoolConfig('0x' + '33'.repeat(20)),
       (err: unknown) => err === timeout,
     )
+  })
+})
+
+describe('EVMChain.getTokenInfo ERC-8056 UI multiplier', () => {
+  const scaled = new Interface(ScaledUIAmountABI)
+  const SUPPORTS_SEL = scaled.getFunction('supportsInterface')!.selector
+  const UI_SEL = scaled.getFunction('uiMultiplier')!.selector
+  const NEW_UI_SEL = scaled.getFunction('newUIMultiplier')!.selector
+  const EFFECTIVE_AT_SEL = scaled.getFunction('effectiveAt')!.selector
+  const ONE = 10n ** 18n
+  const supportsCall = (interfaceId: string) =>
+    scaled.encodeFunctionData('supportsInterface', [interfaceId])
+  const supportsResult = (yes: boolean) => scaled.encodeFunctionResult('supportsInterface', [yes])
+  const scaledToken = (
+    current: bigint,
+    scheduled = current,
+    effectiveAt = 0n,
+    { pending = true, pendingViews = true } = {},
+  ) =>
+    stubProvider({
+      [SYMBOL_SEL]: symbolResult,
+      [DECIMALS_SEL]: decimalsResult,
+      [NAME_SEL]: nameResult,
+      [supportsCall(SCALED_UI_AMOUNT_INTERFACE_ID)]: supportsResult(true),
+      [supportsCall(SCALED_UI_AMOUNT_PENDING_INTERFACE_ID)]: supportsResult(pending),
+      [UI_SEL]: scaled.encodeFunctionResult('uiMultiplier', [current]),
+      // without pendingViews, the schedule views revert
+      ...(pendingViews && {
+        [NEW_UI_SEL]: scaled.encodeFunctionResult('newUIMultiplier', [scheduled]),
+        [EFFECTIVE_AT_SEL]: scaled.encodeFunctionResult('effectiveAt', [effectiveAt]),
+      }),
+    })
+
+  it('omits uiMultiplier and caches everything for a token without ERC-8056', async () => {
+    const provider = stubProvider({
+      [SYMBOL_SEL]: symbolResult,
+      [DECIMALS_SEL]: decimalsResult,
+      [NAME_SEL]: nameResult,
+    })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    const info = await chain.getTokenInfo(TOKEN)
+    assert.ok(!('uiMultiplier' in info))
+    const calls = provider.selectors.length
+    await chain.getTokenInfo(TOKEN)
+    assert.equal(provider.selectors.length, calls)
+  })
+
+  it('reads the multiplier fresh on every call, and the constants once', async () => {
+    const provider = scaledToken(2n * ONE)
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    assert.deepEqual(await chain.getTokenInfo(TOKEN), {
+      symbol: 'NDT',
+      decimals: 18,
+      name: 'No Decimals Test Token',
+      uiMultiplier: { uiMultiplier: 2n * ONE },
+    })
+    const before = provider.selectors.length
+    await chain.getTokenInfo(TOKEN)
+    const again = provider.selectors.slice(before).sort()
+    assert.deepEqual(again, [EFFECTIVE_AT_SEL, NEW_UI_SEL, UI_SEL].sort())
+  })
+
+  it('reports a scheduled change that has not taken effect', async () => {
+    const chain = new EVMChain(
+      scaledToken(ONE, 3n * ONE, 1_900_000_000n),
+      networkInfo('ethereum-testnet-sepolia'),
+    )
+    assert.deepEqual((await chain.getTokenInfo(TOKEN)).uiMultiplier, {
+      uiMultiplier: ONE,
+      next: { uiMultiplier: 3n * ONE, effectiveAt: 1_900_000_000 },
+    })
+  })
+
+  it('skips the schedule views of a token without the pending-multiplier extension', async () => {
+    const provider = scaledToken(2n * ONE, 3n * ONE, 1_900_000_000n, { pending: false })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    assert.deepEqual((await chain.getTokenInfo(TOKEN)).uiMultiplier, { uiMultiplier: 2n * ONE })
+    const before = provider.selectors.length
+    await chain.getTokenInfo(TOKEN)
+    assert.deepEqual(provider.selectors.slice(before), [UI_SEL])
+    assert.ok(!provider.selectors.includes(NEW_UI_SEL))
+    assert.ok(!provider.selectors.includes(EFFECTIVE_AT_SEL))
+  })
+
+  it('omits next when the schedule views revert or the scheduled value is invalid', async () => {
+    for (const provider of [
+      scaledToken(2n * ONE, 3n * ONE, 1_900_000_000n, { pendingViews: false }),
+      scaledToken(2n * ONE, 0n, 1_900_000_000n),
+      scaledToken(2n * ONE, 10n ** 24n + 1n, 1_900_000_000n),
+    ]) {
+      const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+      assert.deepEqual((await chain.getTokenInfo(TOKEN)).uiMultiplier, { uiMultiplier: 2n * ONE })
+    }
+  })
+
+  it('throws CCIPUIMultiplierInvalidError for a zero or out-of-range current multiplier', async () => {
+    for (const current of [0n, 10n ** 24n + 1n]) {
+      const chain = new EVMChain(scaledToken(current, ONE), networkInfo('ethereum-testnet-sepolia'))
+      await assert.rejects(chain.getTokenInfo(TOKEN), (err: unknown) => {
+        assert.ok(err instanceof CCIPUIMultiplierInvalidError)
+        assert.equal(err.code, 'UI_MULTIPLIER_INVALID')
+        assert.equal(err.context.token, TOKEN)
+        return true
+      })
+    }
+  })
+
+  it('leaves no unhandled rejection when symbol() and the detection both fail', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const timeout = makeError('timeout', 'TIMEOUT', { operation: 'call', reason: 'timeout' })
+      const chain = new EVMChain(
+        stubProvider({
+          [SYMBOL_SEL]: timeout,
+          [DECIMALS_SEL]: decimalsResult,
+          [SUPPORTS_SEL]: timeout,
+        }),
+        networkInfo('ethereum-testnet-sepolia'),
+      )
+      await assert.rejects(chain.getTokenInfo(TOKEN), (err: unknown) => err === timeout)
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.deepEqual(unhandled, [])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+
+  it('propagates a transport failure of the ERC-165 detection', async () => {
+    const timeout = makeError('timeout', 'TIMEOUT', { operation: 'call', reason: 'timeout' })
+    const provider = stubProvider({
+      [SYMBOL_SEL]: symbolResult,
+      [DECIMALS_SEL]: decimalsResult,
+      [SUPPORTS_SEL]: timeout,
+    })
+    const chain = new EVMChain(provider, networkInfo('ethereum-testnet-sepolia'))
+    await assert.rejects(chain.getTokenInfo(TOKEN), (err: unknown) => err === timeout)
   })
 })

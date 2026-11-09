@@ -462,6 +462,34 @@ export type TokenInfo = {
   readonly decimals: number
   /** Optional human-readable token name. */
   readonly name?: string
+  /**
+   * The token's UI multiplier, present only when the token supports ERC-8056 (Scaled UI Amount,
+   * e.g. tokenized equities after a stock split). Read fresh on every call. Convert amounts with
+   * {@link toUIAmount} and {@link fromUIAmount}; transfers, fees and rate limits stay in raw units.
+   * CCIP does not synchronize multipliers between chains: convert an amount with the multiplier
+   * of the token on the chain that holds it (e.g. the destination token for a received amount).
+   */
+  readonly uiMultiplier?: TokenUIMultiplier
+}
+
+/**
+ * An ERC-8056 token's UI multiplier, with 18 decimals (`10n ** 18n` is 1x): the UI amount is
+ * `raw * uiMultiplier / 1e18`.
+ */
+export type TokenUIMultiplier = {
+  /** The multiplier in effect now. */
+  readonly uiMultiplier: bigint
+  /**
+   * A scheduled change that has not taken effect yet. After `effectiveAt`, `uiMultiplier` is the
+   * new value: read the token info again then. Best-effort: absent when the token does not
+   * implement ERC-8056's pending-multiplier extension, or when the scheduled value is invalid.
+   */
+  readonly next?: {
+    /** The scheduled multiplier. */
+    readonly uiMultiplier: bigint
+    /** When it takes effect, in unix seconds. */
+    readonly effectiveAt: number
+  }
 }
 
 /**

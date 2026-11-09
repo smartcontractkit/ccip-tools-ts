@@ -125,6 +125,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Check that the token pool is deployed and configured for this lane. Verify supported tokens: https://docs.chain.link/ccip/directory',
   LOCAL_TOKEN_REQUIRED:
     'This pool serves multiple tokens. Pass the local token in the `token` option of the pool read (e.g. `getTokenPoolConfig(pool, { token })`).',
+  UI_MULTIPLIER_INVALID:
+    'The token reports an ERC-8056 UI multiplier that is zero or above 1e24 (1,000,000x). Do not convert amounts with it; contact the token issuer.',
   TOKEN_TRANSFER_PAUSED:
     'The token pool paused this transfer (see context.scope and context.direction). Wait until its pause admins unpause it; check again with getLaneFeatures (LANE_STATUS).',
   LANE_CONFIG_INCOMPLETE:

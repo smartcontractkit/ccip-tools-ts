@@ -423,6 +423,34 @@ export function scaleDecimals(amount: bigint, fromDecimals: number, toDecimals: 
   return (amount * BigInt(10) ** BigInt(toDecimals)) / BigInt(10) ** BigInt(fromDecimals)
 }
 
+/** An ERC-8056 UI multiplier of 1x: multipliers have 18 decimals. */
+export const UI_MULTIPLIER_ONE = BigInt(10) ** BigInt(18)
+/** The largest ERC-8056 UI multiplier the SDK accepts: 1e24 (1,000,000x). */
+export const MAX_UI_MULTIPLIER = BigInt(10) ** BigInt(24)
+
+/**
+ * Converts a raw token amount to its ERC-8056 UI amount (e.g. shares), rounding down.
+ * Both amounts are in the token's base units.
+ * @param amount - Raw amount, as the token transfers it.
+ * @param uiMultiplier - The token's UI multiplier ({@link TokenUIMultiplier.uiMultiplier}).
+ * @returns The UI amount: `amount * uiMultiplier / 1e18`.
+ */
+export function toUIAmount(amount: bigint, uiMultiplier: bigint): bigint {
+  return (amount * uiMultiplier) / UI_MULTIPLIER_ONE
+}
+
+/**
+ * Converts an ERC-8056 UI amount (e.g. shares) to the raw amount to transfer, rounding down, so
+ * the result never exceeds a raw balance that shows this UI amount. Both amounts are in the
+ * token's base units.
+ * @param uiAmount - UI amount.
+ * @param uiMultiplier - The token's UI multiplier ({@link TokenUIMultiplier.uiMultiplier}).
+ * @returns The raw amount: `uiAmount * 1e18 / uiMultiplier`.
+ */
+export function fromUIAmount(uiAmount: bigint, uiMultiplier: bigint): bigint {
+  return (uiAmount * UI_MULTIPLIER_ONE) / uiMultiplier
+}
+
 /**
  * Converts bytes to a Node.js Buffer.
  * @param bytes - Bytes to convert (hex string, Uint8Array, Base64, etc).
