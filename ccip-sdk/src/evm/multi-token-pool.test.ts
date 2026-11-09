@@ -88,16 +88,18 @@ const bucket = (tokens: bigint, isEnabled = true) => ({
 function tokenConfigResult({
   isRegistered = true,
   supportedChains = [DEST.chainSelector, OTHER_DEST.chainSelector],
+  lockOrBurnFlavor = 0n,
+  lockOrBurnAddress = '0x' + '00'.repeat(20),
 } = {}) {
   return pcm.encodeFunctionResult('getTokenConfigBatch', [
     [
       {
         isRegistered,
         localDecimals: isRegistered ? 6n : 0n,
-        lockOrBurnFlavor: 0n,
+        lockOrBurnFlavor,
         // finalitySafe flag + 5 block confirmations for FTF
         allowedFinalityConfig: '0x00010005',
-        lockOrBurnAddress: '0x' + '00'.repeat(20),
+        lockOrBurnAddress,
         additionalPoolDataProvider: '0x' + '00'.repeat(20),
         supportedChains,
         connectionPolicyName: '0x' + '00'.repeat(32),
@@ -284,6 +286,29 @@ describe('EVMChain multi-token pool reads', () => {
       finalityDepth: 5,
       finalitySafe: true,
     })
+  })
+
+  it("getTokenPoolConfig returns a Lock-flavor token's lock box", async () => {
+    const LOCK_BOX = '0x' + '12'.repeat(20)
+    const provider = mttpProvider({
+      [sel(pcm, 'getTokenConfigBatch')]: tokenConfigResult({
+        lockOrBurnFlavor: 4n,
+        lockOrBurnAddress: LOCK_BOX,
+      }),
+    })
+    const chain = new EVMChain(provider, SOURCE)
+    assert.equal((await chain.getTokenPoolConfig(POOL, { token: TOKEN })).lockBox, LOCK_BOX)
+    // a burn flavor's address (e.g. BurnToAddress) is not a lock box
+    const burn = new EVMChain(
+      mttpProvider({
+        [sel(pcm, 'getTokenConfigBatch')]: tokenConfigResult({
+          lockOrBurnFlavor: 3n,
+          lockOrBurnAddress: LOCK_BOX,
+        }),
+      }),
+      SOURCE,
+    )
+    assert.ok(!('lockBox' in (await burn.getTokenPoolConfig(POOL, { token: TOKEN }))))
   })
 
   it('getTokenPoolConfig omits the stores when the PCM has no getStaticConfig', async () => {

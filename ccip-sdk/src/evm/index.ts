@@ -247,6 +247,9 @@ function toRateLimiterState(b: RateLimiterBucket): RateLimiterState {
   return b.isEnabled ? { tokens: b.tokens, capacity: b.capacity, rate: b.rate } : null
 }
 
+/** `IPoolConfigManager.LockOrBurnFlavor.Lock`: the pool locks the token on send, in its lock box. */
+const MULTI_TOKEN_POOL_LOCK_FLAVOR = 4
+
 /**
  * Whether a pool type serves multiple tokens and keeps their configuration in a PoolConfigManager
  * (e.g. `BurnMintMultiTokenPool`); these pools need the local token for every config read.
@@ -2620,6 +2623,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       decimals: Number(tokenConfig.localDecimals),
       poolConfigManager,
       ...stores,
+      // a token with the Lock flavor keeps its liquidity in its own lock box
+      ...(Number(tokenConfig.lockOrBurnFlavor) === MULTI_TOKEN_POOL_LOCK_FLAVOR &&
+        !tokenConfig.lockOrBurnAddress.match(/^(0x)?0*$/) && {
+          lockBox: tokenConfig.lockOrBurnAddress,
+        }),
       ...decodeFinalityAllowed(tokenConfig.allowedFinalityConfig),
       ...(tokenTransferFeeConfig != null && { tokenTransferFeeConfig }),
     }

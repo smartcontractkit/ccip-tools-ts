@@ -839,7 +839,8 @@ export type TokenPoolConfig = {
    */
   previousPoolTypeAndVersion?: string
   /**
-   * For LockReleaseTokenPool v2+, the address of the associated LockBox contract.
+   * For LockReleaseTokenPool v2+, the address of the associated LockBox contract; for a multi-token
+   * pool, the lock box of a token with the Lock flavor.
    */
   lockBox?: string
   /**
@@ -1838,7 +1839,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
       // `typeAndVersion` is the raw string from getTokenPoolConfig and may be kebab-case
       // (e.g. Solana's `foo-lock-release 1.5.0`); normalize via parseTypeAndVersion first.
       const [poolType, poolVersion] = typeAndVersion ? parseTypeAndVersion(typeAndVersion) : []
-      const isLockRelease = Boolean(poolType?.includes('LockRelease'))
+      // a lock box also marks a multi-token pool's token with the Lock flavor
+      const isLockRelease = Boolean(poolType?.includes('LockRelease') || lockBox)
       const sourceDecimals = getSourceDecimalsFromExtraData(ta.extraData)
       // dest decimals, read only when a conversion or liquidity comparison needs them: the
       // token's own (optional) view, else the pool's declared decimals, else the family
