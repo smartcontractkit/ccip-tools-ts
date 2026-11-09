@@ -1,16 +1,21 @@
 /**
  * Error-only fragments of the specialized pool/token contracts, used exclusively by
  * `parseWithFragment` to decode preflight-simulation reverts (no functions/events are ever
- * encoded against these contracts). Trimmed from the full generated ABIs (each contract's
- * gobinding under smartcontractkit/chainlink-ccip chains/evm/gobindings/generated, tags
- * contracts-ccip-v1.6.0..v1.6.4 and contracts-ccip-v2.0.0 per each fragment set's version
- * comment below) to keep the broadly-imported const.ts bundle small — the full ABIs were ~17k
- * lines for error decoding only. Regenerate by fetching the contract's gobinding ABI (see the
- * fetch recipe in any sibling abi/ module) and filtering entries to `type === 'error'`.
+ * encoded against these contracts). Each set is generated from the contract's gobinding under
+ * smartcontractkit/chainlink-ccip chains/evm/gobindings/generated (`npm run generate`), filtered to
+ * `type === 'error'` to keep the broadly-imported const.ts bundle small: the full ABIs would be
+ * ~17k lines for error decoding only.
  */
 
 /** AdvancedPoolHooks 2.0.0 */
 export const AdvancedPoolHooks_2_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v2_0_0/advanced_pool_hooks/advanced_pool_hooks.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'AllowListNotEnabled', inputs: [] },
   { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
   {
@@ -49,10 +54,18 @@ export const AdvancedPoolHooks_2_0_errors = [
     inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
   },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
 ] as const
 
 /** BurnWithFromMintRebasingTokenPool 1.5.0 */
 export const BurnWithFromMintRebasingTokenPool_1_5_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v1_5_0/burn_with_from_mint_rebasing_token_pool/burn_with_from_mint_rebasing_token_pool.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   {
     inputs: [
       { internalType: 'uint256', name: 'capacity', type: 'uint256' },
@@ -217,10 +230,18 @@ export const BurnWithFromMintRebasingTokenPool_1_5_0_errors = [
     type: 'error',
   },
   { inputs: [], name: 'ZeroAddressNotAllowed', type: 'error' },
+  // generate:end
 ] as const
 
 /** CCTPThroughCCVTokenPool 2.0.0 */
 export const CCTPThroughCCVTokenPool_2_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v2_0_0/cctp_through_ccv_token_pool/cctp_through_ccv_token_pool.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'BucketOverfilled', inputs: [] },
   {
     type: 'error',
@@ -475,10 +496,18 @@ export const CCTPThroughCCVTokenPool_2_0_errors = [
   { type: 'error', name: 'ZeroAddressInvalid', inputs: [] },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
 ] as const
 
 /** CrossChainPoolToken 2.0.0 */
 export const CrossChainPoolToken_2_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v2_0_0/cross_chain_pool_token/cross_chain_pool_token.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'BucketOverfilled', inputs: [] },
   {
     type: 'error',
@@ -785,10 +814,18 @@ export const CrossChainPoolToken_2_0_errors = [
   },
   { type: 'error', name: 'ZeroAddressInvalid', inputs: [] },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
 ] as const
 
 /** CrossChainToken 2.0.0 */
 export const CrossChainToken_2_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v2_0_0/cross_chain_token/cross_chain_token.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'AccessControlBadConfirmation', inputs: [] },
   {
     type: 'error',
@@ -891,10 +928,18 @@ export const CrossChainToken_2_0_errors = [
       { name: 'value', type: 'uint256', internalType: 'uint256' },
     ],
   },
+  // generate:end
 ] as const
 
 /** ERC20LockBox 2.0.0 */
 export const ERC20LockBox_2_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v2_0_0/erc20_lock_box/erc20_lock_box.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
   {
     type: 'error',
@@ -925,10 +970,18 @@ export const ERC20LockBox_2_0_errors = [
     inputs: [{ name: 'token', type: 'address', internalType: 'address' }],
   },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
 ] as const
 
 /** FactoryBurnMintERC20 1.5.1 */
 export const FactoryBurnMintERC20_1_5_1_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v1_5_1/factory_burn_mint_erc20/factory_burn_mint_erc20.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
   {
     type: 'error',
@@ -954,10 +1007,18 @@ export const FactoryBurnMintERC20_1_5_1_errors = [
     name: 'SenderNotMinter',
     inputs: [{ name: 'sender', type: 'address', internalType: 'address' }],
   },
+  // generate:end
 ] as const
 
 /** BurnMintFastTransferTokenPool 1.6.0 */
 export const FastTransferTokenPool_1_6_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v1_6_0/fast_transfer_token_pool/fast_transfer_token_pool.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'AllowListNotEnabled', inputs: [] },
   {
     type: 'error',
@@ -1223,10 +1284,18 @@ export const FastTransferTokenPool_1_6_0_errors = [
     inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
   },
   { type: 'error', name: 'ZeroAddressInvalid', inputs: [] },
+  // generate:end
 ] as const
 
 /** LombardTokenPool 2.0.0 */
 export const LombardTokenPool_2_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v2_0_0/lombard_token_pool/lombard_token_pool.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'BucketOverfilled', inputs: [] },
   {
     type: 'error',
@@ -1532,10 +1601,18 @@ export const LombardTokenPool_2_0_errors = [
   { type: 'error', name: 'ZeroBridge', inputs: [] },
   { type: 'error', name: 'ZeroLombardChainId', inputs: [] },
   { type: 'error', name: 'ZeroVerifierNotAllowed', inputs: [] },
+  // generate:end
 ] as const
 
 /** SiloedLockReleaseTokenPool 1.6.0 */
 export const SiloedLockReleaseTokenPool_1_6_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v1_6_0/siloed_lock_release_token_pool/siloed_lock_release_token_pool.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   {
     type: 'error',
     name: 'AggregateValueMaxCapacityExceeded',
@@ -1791,10 +1868,18 @@ export const SiloedLockReleaseTokenPool_1_6_0_errors = [
     inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
   },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
 ] as const
 
 /** SiloedLockReleaseTokenPool 2.0.0 */
 export const SiloedLockReleaseTokenPool_2_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v2_0_0/siloed_lock_release_token_pool/siloed_lock_release_token_pool.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'BucketOverfilled', inputs: [] },
   {
     type: 'error',
@@ -2048,10 +2133,18 @@ export const SiloedLockReleaseTokenPool_2_0_errors = [
   },
   { type: 'error', name: 'ZeroAddressInvalid', inputs: [] },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
 ] as const
 
 /** SiloedUSDCTokenPool 2.0.0 */
 export const SiloedUSDCTokenPool_2_0_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v2_0_0/siloed_usdc_token_pool/siloed_usdc_token_pool.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   { type: 'error', name: 'BucketOverfilled', inputs: [] },
   {
     type: 'error',
@@ -2359,10 +2452,18 @@ export const SiloedUSDCTokenPool_2_0_errors = [
   { type: 'error', name: 'ZeroAddressInvalid', inputs: [] },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
 ] as const
 
 /** USDCTokenPool 1.5.1 */
 export const USDCTokenPool_1_5_1_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/refs/tags/contracts-ccip-v2.0.0/chains/evm/gobindings/generated/v1_5_1/usdc_token_pool/usdc_token_pool.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
   {
     type: 'error',
     name: 'AggregateValueMaxCapacityExceeded',
@@ -2654,4 +2755,1196 @@ export const USDCTokenPool_1_5_1_errors = [
   },
   { type: 'error', name: 'UnlockingUSDCFailed', inputs: [] },
   { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
+] as const
+
+/** ConnectionPolicyStore 2.1.0-dev: reverts through the PoolConfigManager and the multi-token pool */
+export const ConnectionPolicyStore_2_1_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/3b1b61e07b69f3a888b8023e0aea15912f645c04/chains/evm/gobindings/generated/latest/connection_policy_store/connection_policy_store.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
+  { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
+  {
+    type: 'error',
+    name: 'ChainIsPaused',
+    inputs: [
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'direction',
+        type: 'uint8',
+        internalType: 'enum ConnectionPolicyStore.PauseDirection',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'ConnectionRecordNotFound',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  { type: 'error', name: 'GloballyPaused', inputs: [] },
+  {
+    type: 'error',
+    name: 'InlineRecordNotFound',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidAdditionalPoolData',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'additionalPoolData',
+        type: 'bytes',
+        internalType: 'bytes',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidDecimalArgs',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      { name: 'expected', type: 'uint8', internalType: 'uint8' },
+      { name: 'actual', type: 'uint8', internalType: 'uint8' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidLockOrBurnAddress',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'lockOrBurnFlavor',
+        type: 'uint8',
+        internalType: 'enum IPoolConfigManager.LockOrBurnFlavor',
+      },
+      {
+        name: 'lockOrBurnAddress',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidRemoteToken',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidRequestedFinality',
+    inputs: [
+      {
+        name: 'requestedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+      {
+        name: 'allowedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidSourcePoolAddress',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'sourcePoolAddress',
+        type: 'bytes',
+        internalType: 'bytes',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidSourcePoolData',
+    inputs: [{ name: 'sourcePoolData', type: 'bytes', internalType: 'bytes' }],
+  },
+  {
+    type: 'error',
+    name: 'LegacyPoolDataNotAllowed',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'LegacyRemotePoolRecord',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'LocalTokenNotRegistered',
+    inputs: [{ name: 'localToken', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'MustBeProposedOwner', inputs: [] },
+  { type: 'error', name: 'OnlyCallableByOwner', inputs: [] },
+  {
+    type: 'error',
+    name: 'OverflowDetected',
+    inputs: [
+      { name: 'remoteDecimals', type: 'uint8', internalType: 'uint8' },
+      { name: 'localDecimals', type: 'uint8', internalType: 'uint8' },
+      {
+        name: 'remoteAmount',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+    ],
+  },
+  { type: 'error', name: 'OwnerCannotBeZero', inputs: [] },
+  {
+    type: 'error',
+    name: 'PolicyHasNoTokens',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyHasRecords',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyInUse',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyNotFound',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyRecordHasNoPools',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'PolicyRecordNotFound',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'PolicyRemoteTokenMismatch',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'ProviderHasNoCode',
+    inputs: [{ name: 'provider', type: 'address', internalType: 'address' }],
+  },
+  {
+    type: 'error',
+    name: 'RemotePoolAlreadyAdded',
+    inputs: [
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'remotePoolAddress',
+        type: 'bytes',
+        internalType: 'bytes',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'RemotePoolRecordNotFound',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'RequestedFinalityCanOnlyHaveOneMode',
+    inputs: [
+      {
+        name: 'encodedFinality',
+        type: 'bytes4',
+        internalType: 'bytes4',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'SourceTokenMismatch',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'expectedSourceToken',
+        type: 'bytes',
+        internalType: 'bytes',
+      },
+      {
+        name: 'actualSourceToken',
+        type: 'bytes',
+        internalType: 'bytes',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'SubsetTokenAlreadyAdded',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      { name: 'localToken', type: 'address', internalType: 'address' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'SubsetTokenNotFound',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      { name: 'localToken', type: 'address', internalType: 'address' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'TokenHasConfig',
+    inputs: [{ name: 'localToken', type: 'address', internalType: 'address' }],
+  },
+  {
+    type: 'error',
+    name: 'TokenIsPaused',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'direction',
+        type: 'uint8',
+        internalType: 'enum ConnectionPolicyStore.PauseDirection',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'TokenNotInPolicy',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'UnauthorizedCaller',
+    inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'ZeroAddressInvalid', inputs: [] },
+  { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  { type: 'error', name: 'ZeroChainSelectorNotAllowed', inputs: [] },
+  { type: 'error', name: 'ZeroPolicyNameNotAllowed', inputs: [] },
+  // generate:end
+] as const
+
+/** FeePolicyStore 2.1.0-dev: reverts through the PoolConfigManager and the multi-token pool */
+export const FeePolicyStore_2_1_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/3b1b61e07b69f3a888b8023e0aea15912f645c04/chains/evm/gobindings/generated/latest/fee_policy_store/fee_policy_store.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
+  { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
+  {
+    type: 'error',
+    name: 'DestOverheadRecordNotFound',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'FeeRecordNotFound',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InlineRecordNotFound',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidDestOverheadPolicyConfig',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'destOverheadConfig',
+        type: 'tuple',
+        internalType: 'struct FeePolicyStore.DestOverheadConfig',
+        components: [
+          {
+            name: 'destGasOverhead',
+            type: 'uint32',
+            internalType: 'uint32',
+          },
+          {
+            name: 'destBytesOverhead',
+            type: 'uint32',
+            internalType: 'uint32',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidFeePolicyConfig',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'feeConfig',
+        type: 'tuple',
+        internalType: 'struct FeePolicyStore.FeeConfig',
+        components: [
+          {
+            name: 'finalityFeeUSDCents',
+            type: 'uint32',
+            internalType: 'uint32',
+          },
+          {
+            name: 'fastFinalityFeeUSDCents',
+            type: 'uint32',
+            internalType: 'uint32',
+          },
+          {
+            name: 'finalityTransferFeeBps',
+            type: 'uint16',
+            internalType: 'uint16',
+          },
+          {
+            name: 'fastFinalityTransferFeeBps',
+            type: 'uint16',
+            internalType: 'uint16',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidInlineDestOverheadConfig',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'destOverheadConfig',
+        type: 'tuple',
+        internalType: 'struct FeePolicyStore.DestOverheadConfig',
+        components: [
+          {
+            name: 'destGasOverhead',
+            type: 'uint32',
+            internalType: 'uint32',
+          },
+          {
+            name: 'destBytesOverhead',
+            type: 'uint32',
+            internalType: 'uint32',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidInlineFeeConfig',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'feeConfig',
+        type: 'tuple',
+        internalType: 'struct FeePolicyStore.FeeConfig',
+        components: [
+          {
+            name: 'finalityFeeUSDCents',
+            type: 'uint32',
+            internalType: 'uint32',
+          },
+          {
+            name: 'fastFinalityFeeUSDCents',
+            type: 'uint32',
+            internalType: 'uint32',
+          },
+          {
+            name: 'finalityTransferFeeBps',
+            type: 'uint16',
+            internalType: 'uint16',
+          },
+          {
+            name: 'fastFinalityTransferFeeBps',
+            type: 'uint16',
+            internalType: 'uint16',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'LocalTokenNotRegistered',
+    inputs: [{ name: 'localToken', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'MustBeProposedOwner', inputs: [] },
+  { type: 'error', name: 'OnlyCallableByOwner', inputs: [] },
+  { type: 'error', name: 'OwnerCannotBeZero', inputs: [] },
+  {
+    type: 'error',
+    name: 'PolicyHasNoTokens',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyHasRecords',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyInUse',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyNotFound',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyRecordNotFound',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'PoolDataTooLarge',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'destPoolDataLength',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+      {
+        name: 'destBytesOverhead',
+        type: 'uint32',
+        internalType: 'uint32',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'TokenHasConfig',
+    inputs: [{ name: 'localToken', type: 'address', internalType: 'address' }],
+  },
+  {
+    type: 'error',
+    name: 'UnauthorizedCaller',
+    inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'ZeroAddressInvalid', inputs: [] },
+  { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  { type: 'error', name: 'ZeroChainSelectorNotAllowed', inputs: [] },
+  { type: 'error', name: 'ZeroPolicyNameNotAllowed', inputs: [] },
+  // generate:end
+] as const
+
+/** SecurityPolicyStore 2.1.0-dev: reverts through the PoolConfigManager and the multi-token pool */
+export const SecurityPolicyStore_2_1_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/3b1b61e07b69f3a888b8023e0aea15912f645c04/chains/evm/gobindings/generated/latest/security_policy_store/security_policy_store.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
+  { type: 'error', name: 'BucketOverfilled', inputs: [] },
+  { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
+  {
+    type: 'error',
+    name: 'DisabledNonZeroRateLimit',
+    inputs: [
+      {
+        name: 'config',
+        type: 'tuple',
+        internalType: 'struct RateLimiter.Config',
+        components: [
+          { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+          {
+            name: 'capacity',
+            type: 'uint128',
+            internalType: 'uint128',
+          },
+          { name: 'rate', type: 'uint128', internalType: 'uint128' },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'DuplicateCCVNotAllowed',
+    inputs: [{ name: 'ccvAddress', type: 'address', internalType: 'address' }],
+  },
+  {
+    type: 'error',
+    name: 'InlineRecordNotFound',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidDecimalArgs',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      { name: 'expected', type: 'uint8', internalType: 'uint8' },
+      { name: 'actual', type: 'uint8', internalType: 'uint8' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidInlineRateLimitBucketConfig',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'direction',
+        type: 'uint8',
+        internalType: 'enum IPoolV2.MessageDirection',
+      },
+      { name: 'fastFinality', type: 'bool', internalType: 'bool' },
+      {
+        name: 'config',
+        type: 'tuple',
+        internalType: 'struct RateLimiter.Config',
+        components: [
+          { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+          {
+            name: 'capacity',
+            type: 'uint128',
+            internalType: 'uint128',
+          },
+          { name: 'rate', type: 'uint128', internalType: 'uint128' },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidInlineRateLimitConfig',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'rateLimitConfig',
+        type: 'tuple',
+        internalType: 'struct SecurityPolicyStore.RateLimitConfig',
+        components: [
+          {
+            name: 'outbound',
+            type: 'tuple',
+            internalType: 'struct RateLimiter.Config',
+            components: [
+              { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+              {
+                name: 'capacity',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+              {
+                name: 'rate',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+            ],
+          },
+          {
+            name: 'inbound',
+            type: 'tuple',
+            internalType: 'struct RateLimiter.Config',
+            components: [
+              { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+              {
+                name: 'capacity',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+              {
+                name: 'rate',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+            ],
+          },
+          {
+            name: 'fastFinalityOutbound',
+            type: 'tuple',
+            internalType: 'struct RateLimiter.Config',
+            components: [
+              { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+              {
+                name: 'capacity',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+              {
+                name: 'rate',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+            ],
+          },
+          {
+            name: 'fastFinalityInbound',
+            type: 'tuple',
+            internalType: 'struct RateLimiter.Config',
+            components: [
+              { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+              {
+                name: 'capacity',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+              {
+                name: 'rate',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidRateLimitPolicyBucketConfig',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'direction',
+        type: 'uint8',
+        internalType: 'enum IPoolV2.MessageDirection',
+      },
+      { name: 'fastFinality', type: 'bool', internalType: 'bool' },
+      {
+        name: 'config',
+        type: 'tuple',
+        internalType: 'struct RateLimiter.Config',
+        components: [
+          { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+          {
+            name: 'capacity',
+            type: 'uint128',
+            internalType: 'uint128',
+          },
+          { name: 'rate', type: 'uint128', internalType: 'uint128' },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidRateLimitPolicyConfig',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+      {
+        name: 'rateLimitConfig',
+        type: 'tuple',
+        internalType: 'struct SecurityPolicyStore.RateLimitConfig',
+        components: [
+          {
+            name: 'outbound',
+            type: 'tuple',
+            internalType: 'struct RateLimiter.Config',
+            components: [
+              { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+              {
+                name: 'capacity',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+              {
+                name: 'rate',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+            ],
+          },
+          {
+            name: 'inbound',
+            type: 'tuple',
+            internalType: 'struct RateLimiter.Config',
+            components: [
+              { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+              {
+                name: 'capacity',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+              {
+                name: 'rate',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+            ],
+          },
+          {
+            name: 'fastFinalityOutbound',
+            type: 'tuple',
+            internalType: 'struct RateLimiter.Config',
+            components: [
+              { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+              {
+                name: 'capacity',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+              {
+                name: 'rate',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+            ],
+          },
+          {
+            name: 'fastFinalityInbound',
+            type: 'tuple',
+            internalType: 'struct RateLimiter.Config',
+            components: [
+              { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+              {
+                name: 'capacity',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+              {
+                name: 'rate',
+                type: 'uint128',
+                internalType: 'uint128',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidRateLimitPolicyDecimals',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      { name: 'expected', type: 'uint8', internalType: 'uint8' },
+      { name: 'actual', type: 'uint8', internalType: 'uint8' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'InvalidRateLimitRate',
+    inputs: [
+      {
+        name: 'rateLimiterConfig',
+        type: 'tuple',
+        internalType: 'struct RateLimiter.Config',
+        components: [
+          { name: 'isEnabled', type: 'bool', internalType: 'bool' },
+          {
+            name: 'capacity',
+            type: 'uint128',
+            internalType: 'uint128',
+          },
+          { name: 'rate', type: 'uint128', internalType: 'uint128' },
+        ],
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'LocalTokenNotRegistered',
+    inputs: [{ name: 'localToken', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'MustBeProposedOwner', inputs: [] },
+  { type: 'error', name: 'OnlyCallableByOwner', inputs: [] },
+  { type: 'error', name: 'OwnerCannotBeZero', inputs: [] },
+  {
+    type: 'error',
+    name: 'PolicyHasNoTokens',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyHasRecords',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyInUse',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyNotFound',
+    inputs: [{ name: 'policyName', type: 'bytes32', internalType: 'bytes32' }],
+  },
+  {
+    type: 'error',
+    name: 'PolicyRecordNotFound',
+    inputs: [
+      { name: 'policyName', type: 'bytes32', internalType: 'bytes32' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'RateLimitRecordNotFound',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'SecurityRecordNotFound',
+    inputs: [
+      { name: 'localToken', type: 'address', internalType: 'address' },
+      {
+        name: 'remoteChainSelector',
+        type: 'uint64',
+        internalType: 'uint64',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'TokenHasConfig',
+    inputs: [{ name: 'localToken', type: 'address', internalType: 'address' }],
+  },
+  {
+    type: 'error',
+    name: 'TokenMaxCapacityExceeded',
+    inputs: [
+      { name: 'capacity', type: 'uint256', internalType: 'uint256' },
+      { name: 'requested', type: 'uint256', internalType: 'uint256' },
+      {
+        name: 'tokenAddress',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'TokenRateLimitReached',
+    inputs: [
+      {
+        name: 'minWaitInSeconds',
+        type: 'uint256',
+        internalType: 'uint256',
+      },
+      { name: 'available', type: 'uint256', internalType: 'uint256' },
+      {
+        name: 'tokenAddress',
+        type: 'address',
+        internalType: 'address',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'UnauthorizedCaller',
+    inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'ZeroAddressInvalid', inputs: [] },
+  { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  { type: 'error', name: 'ZeroChainSelectorNotAllowed', inputs: [] },
+  { type: 'error', name: 'ZeroPolicyNameNotAllowed', inputs: [] },
+  // generate:end
+] as const
+
+/** MultiTokenPoolHooks 2.1.0-dev: reverts through the PoolConfigManager and the multi-token pool */
+export const MultiTokenPoolHooks_2_1_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/3b1b61e07b69f3a888b8023e0aea15912f645c04/chains/evm/gobindings/generated/latest/multi_token_pool_hooks/multi_token_pool_hooks.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
+  { type: 'error', name: 'AllowListNotEnabled', inputs: [] },
+  { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
+  { type: 'error', name: 'MustBeProposedOwner', inputs: [] },
+  { type: 'error', name: 'OnlyCallableByOwner', inputs: [] },
+  { type: 'error', name: 'OwnerCannotBeZero', inputs: [] },
+  {
+    type: 'error',
+    name: 'PolicyEngineDetachReverted',
+    inputs: [
+      {
+        name: 'oldPolicyEngine',
+        type: 'address',
+        internalType: 'contract IPolicyEngine',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'SenderNotAllowed',
+    inputs: [{ name: 'sender', type: 'address', internalType: 'address' }],
+  },
+  {
+    type: 'error',
+    name: 'UnauthorizedCaller',
+    inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
+] as const
+
+/** MultiTokenPoolHooksExternalBlocklist 2.1.0-dev: reverts through the PoolConfigManager and the multi-token pool */
+export const MultiTokenPoolHooksExternalBlocklist_2_1_errors = [
+  // generate:
+  // fetch('https://github.com/smartcontractkit/chainlink-ccip/raw/3b1b61e07b69f3a888b8023e0aea15912f645c04/chains/evm/gobindings/generated/latest/multi_token_pool_hooks_external_blocklist/multi_token_pool_hooks_external_blocklist.go')
+  //   .then((res) => res.text())
+  //   .then((body) => body.match(/^\s*ABI: "(.*?)",$/m)?.[1])
+  //   .then((abi) => JSON.parse(abi.replace(/\\"/g, '"')))
+  //   .then((abi) => abi.filter((f) => f.type === 'error'))
+  //   .then((obj) => require('util').inspect(obj, {depth:99}).split('\n').slice(1, -1))
+  { type: 'error', name: 'AllowListNotEnabled', inputs: [] },
+  { type: 'error', name: 'CannotTransferToSelf', inputs: [] },
+  {
+    type: 'error',
+    name: 'InvalidBlocklist',
+    inputs: [
+      {
+        name: 'blocklist',
+        type: 'address',
+        internalType: 'contract IAddressBlocklist',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'LocalAddressBlocked',
+    inputs: [
+      {
+        name: 'blocklist',
+        type: 'address',
+        internalType: 'contract IAddressBlocklist',
+      },
+      { name: 'account', type: 'address', internalType: 'address' },
+    ],
+  },
+  { type: 'error', name: 'MustBeProposedOwner', inputs: [] },
+  { type: 'error', name: 'OnlyCallableByOwner', inputs: [] },
+  { type: 'error', name: 'OwnerCannotBeZero', inputs: [] },
+  {
+    type: 'error',
+    name: 'PolicyEngineDetachReverted',
+    inputs: [
+      {
+        name: 'oldPolicyEngine',
+        type: 'address',
+        internalType: 'contract IPolicyEngine',
+      },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'RemoteAddressBlocked',
+    inputs: [
+      {
+        name: 'blocklist',
+        type: 'address',
+        internalType: 'contract IAddressBlocklist',
+      },
+      { name: 'account', type: 'bytes', internalType: 'bytes' },
+    ],
+  },
+  {
+    type: 'error',
+    name: 'SenderNotAllowed',
+    inputs: [{ name: 'sender', type: 'address', internalType: 'address' }],
+  },
+  {
+    type: 'error',
+    name: 'UnauthorizedCaller',
+    inputs: [{ name: 'caller', type: 'address', internalType: 'address' }],
+  },
+  { type: 'error', name: 'ZeroAddressNotAllowed', inputs: [] },
+  // generate:end
 ] as const
