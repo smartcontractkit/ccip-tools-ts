@@ -42,3 +42,23 @@ export {
   type GetRateLimiterStateResult,
   GetRateLimiterState,
 } from './get-rate-limiter-state.ts'
+
+export type { ExecutePoolChoiceResult } from './pool-choice-operation.ts'
+
+export {
+  type ExecuteSetRateLimitConfigParams,
+  type ExecuteSetRateLimitConfigResult,
+  type GenerateSetRateLimitConfigParams,
+  type GenerateSetRateLimitConfigResult,
+  type SetRateLimitConfigParams,
+  SetRateLimitConfig,
+} from './set-rate-limit-config.ts'
+
+export {
+  type ExecuteSetObserversParams,
+  type ExecuteSetObserversResult,
+  type GenerateSetObserversParams,
+  type GenerateSetObserversResult,
+  type SetObserversParams,
+  SetObservers,
+} from './set-observers.ts'

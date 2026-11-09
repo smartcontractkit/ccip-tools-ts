@@ -4,8 +4,10 @@ import {
   type BigNumberish,
   type BytesLike,
   type Numeric,
+  AbiCoder,
   decodeBase64,
   getBytes,
+  hexlify,
   isBytesLike,
   toBeArray,
   toBigInt,
@@ -295,12 +297,54 @@ export function getDataBytes(data: BytesLike | readonly number[]): Uint8Array {
   }
 }
 
+/** The long pool data of multi-token pools: source decimals, source token and additional data. */
+const LONG_POOL_DATA_TYPES = ['uint256', 'bytes', 'bytes'] as const
+/** Smallest long pool data: 3 head words, then the 2 length words and the 1-word EVM token. */
+const LONG_POOL_DATA_MIN_LENGTH = 6 * 32
+
+/**
+ * Decodes the long pool data of multi-token pools, only when it re-encodes to the exact same bytes.
+ * @returns The source decimals and the encoded source token, or `undefined` for any other payload.
+ */
+function decodeLongPoolData(
+  bytes: Uint8Array,
+): { decimals: bigint; sourceToken: string } | undefined {
+  if (bytes.length < LONG_POOL_DATA_MIN_LENGTH || bytes.length % 32 !== 0) return undefined
+  const coder = AbiCoder.defaultAbiCoder()
+  const decoded = coder.decode(LONG_POOL_DATA_TYPES, bytes)
+  if (coder.encode(LONG_POOL_DATA_TYPES, decoded) !== hexlify(bytes)) return undefined
+  return { decimals: decoded[0] as bigint, sourceToken: decoded[1] as string }
+}
+
+/**
+ * Reads the source token a multi-token pool sends in its `destPoolData`/`extraData`
+ * (`abi.encode(uint256 decimals, bytes sourceToken, bytes additionalPoolData)`). Single-token pools
+ * send no source token: their 0- or 32-byte payloads give `undefined`, as do other pools' payloads.
+ * @param extraData - The transfer's `extraData`/`destPoolData`.
+ * @param family - The source chain's family, to decode the source token address.
+ * @returns The source token address, or `undefined` when the pool data does not carry one.
+ */
+export function getSourceTokenFromExtraData(
+  extraData: string | undefined,
+  family: ChainFamily,
+): string | undefined {
+  if (!extraData) return undefined
+  try {
+    const sourceToken = decodeLongPoolData(getDataBytes(extraData))?.sourceToken
+    return sourceToken ? decodeAddress(sourceToken, family) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * Reads the source decimals a source pool declares in its `destPoolData`/`extraData`.
  * Deliberately narrower than `TokenPool._parseRemoteDecimals`, which reverts on a non-empty
  * non-32-byte payload and accepts any `uint8`: pools that override it (USDC/CCTP, Lombard) put
  * their own payloads here, so only a 32-byte word in the plausible `0..36` range is read as a
- * declaration.
+ * declaration. Multi-token pools send a longer
+ * `abi.encode(uint256 decimals, bytes sourceToken, bytes additionalPoolData)`; it is read only
+ * when it decodes and re-encodes to the exact same bytes.
  * @param extraData - The transfer's `extraData`/`destPoolData`.
  * @returns Declared source decimals, or `undefined` when the amount is already in local decimals.
  */
@@ -308,8 +352,8 @@ export function getSourceDecimalsFromExtraData(extraData?: string): number | und
   if (!extraData) return undefined
   try {
     const bytes = getDataBytes(extraData)
-    if (bytes.length !== 32) return undefined
-    const decimals = toBigInt(bytes)
+    const decimals = bytes.length === 32 ? toBigInt(bytes) : decodeLongPoolData(bytes)?.decimals
+    if (decimals == null) return undefined
     // 0 is a legal declaration — 0-decimal tokens exist
     return 0n <= decimals && decimals <= 36n ? Number(decimals) : undefined
   } catch {
@@ -354,7 +398,7 @@ export async function resolveTokenDecimals(
     // exactly these
     const pool = typeof tokenPool === 'function' ? await tokenPool() : tokenPool
     if (pool) {
-      const { decimals } = await chain.getTokenPoolConfig(pool)
+      const { decimals } = await chain.getTokenPoolConfig(pool, { token })
       if (decimals != null) return decimals
     }
     // the family's static default (e.g. 18 on EVM) — its native token's, which most tokens

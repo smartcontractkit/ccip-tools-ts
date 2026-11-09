@@ -972,6 +972,7 @@ describe('ApplyChainUpdates (cct/evm)', () => {
         family: 'SiloedLockRelease',
         versions: [V1_6_0, V1_6_1, V2_0_0],
       },
+      { type: 'CrossChainPoolToken', family: 'BurnMint', versions: [V2_0_0] },
     ] as const satisfies ReadonlyArray<{
       type: string
       family: TokenPoolFamily

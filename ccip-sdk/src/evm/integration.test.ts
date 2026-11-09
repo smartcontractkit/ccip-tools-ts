@@ -626,7 +626,7 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
         const seen: ExecutionState[] = []
         try {
           const request = await apiClient.getMessageById(messageId)
-          const offRamp = await discoverOffRamp(baseSepChain, opSepChain, request.lane.onRamp, {
+          const offRamp = await discoverOffRamp(baseSepChain, opSepChain, request.lane, {
             logger: testLogger,
           })
           for await (const exec of opSepChain.getExecutionReceipts({
@@ -838,7 +838,8 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
 
     // Second chain / second pool flavour: OP Sepolia's v2.0 lane to Base Sepolia is
     // served by a USDCTokenPoolProxy 2.0.0, which reports FTF but delegates its rate
-    // limits to CCTP — so both rate-limit keys are present but null.
+    // limits to CCTP: RATE_LIMITS is null (disabled), and FAST_RATE_LIMITS is omitted, since a
+    // disabled fast bucket falls back to the default one.
     it('should report FTF with null rate limits for a v2.0 USDC proxy pool (OP Sepolia)', async () => {
       assert.ok(opSepChain, 'op-sepolia chain should be initialized')
 
@@ -856,9 +857,10 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
       )
 
       assert.ok(LaneFeature.RATE_LIMITS in features, 'v2.0 pool should have RATE_LIMITS')
+      assert.equal(features[LaneFeature.RATE_LIMITS], null, 'CCTP-delegated limits are disabled')
       assert.ok(
-        LaneFeature.FAST_RATE_LIMITS in features,
-        'FTF-reporting pool should have FAST_RATE_LIMITS',
+        !(LaneFeature.FAST_RATE_LIMITS in features),
+        'a disabled fast bucket should omit FAST_RATE_LIMITS (the default bucket applies)',
       )
     })
   })

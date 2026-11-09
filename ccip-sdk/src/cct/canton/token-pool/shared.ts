@@ -17,6 +17,7 @@ import type {
   BurnMintTokenPoolArg,
   InitializeArg,
   LaneDeploySpecArg,
+  LockReleaseTokenPoolArg,
   RateLimiterDeploySpecArg,
 } from '../daml-types.ts'
 import {
@@ -34,33 +35,25 @@ import {
  */
 export type PoolReceiveContext = { values: Record<string, unknown> }
 
-/** CCIPFactory template ID. */
-export const FACTORY_TEMPLATE_ID = '#ccip-factory-v2:CCIP.FactoryV2:CCIPFactory'
-
-/**
- * BurnMintTokenPool template ID — the registry-pools family
- * (`CCIP.Registry.BurnMintTokenPoolV2`, package `ccip-registry-burn-mint-token-pool`).
- * This is the ONLY BurnMintTokenPool family the SDK targets: it adds the
- * mandatory `observers` field (EDS auto-detection) and the atomic
- * `Initialize` choice the production-pools family (`CCIP.BurnMintTokenPoolV2`,
- * pre-registry) lacks. Nothing in this SDK should reference the production
- * package.
- */
-export const BURN_MINT_POOL_TEMPLATE_ID =
-  '#ccip-registry-burn-mint-token-pool:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
-
-/** LockReleaseTokenPool template ID — registry-pools family (see {@link BURN_MINT_POOL_TEMPLATE_ID}). */
-export const LOCK_RELEASE_POOL_TEMPLATE_ID =
-  '#ccip-registry-lock-release-token-pool:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
-
-/** Pool type: which registry-pools template a pool is. */
-export type PoolType = 'burnMint' | 'lockRelease'
-
-/** Symbolic template ID per {@link PoolType}. */
-export const POOL_TEMPLATE_IDS: Readonly<Record<PoolType, string>> = {
-  burnMint: BURN_MINT_POOL_TEMPLATE_ID,
-  lockRelease: LOCK_RELEASE_POOL_TEMPLATE_ID,
-}
+// Template IDs / labels live in ../constants.ts (single home for Canton constants).
+import {
+  type PoolType,
+  CCIP_PUBLIC_LABEL,
+  CIP112_RECEIVER_ID_META_KEY,
+  FACTORY_TEMPLATE_ID,
+  POOL_TEMPLATE_IDS,
+  RATE_LIMITER_TEMPLATE_ID,
+} from '../constants.ts'
+export {
+  type PoolType,
+  BURN_MINT_POOL_TEMPLATE_ID,
+  CCIP_PUBLIC_LABEL,
+  CIP112_RECEIVER_ID_META_KEY,
+  FACTORY_TEMPLATE_ID,
+  LOCK_RELEASE_POOL_TEMPLATE_ID,
+  POOL_TEMPLATE_IDS,
+  RATE_LIMITER_TEMPLATE_ID,
+} from '../constants.ts'
 
 /**
  * The {@link PoolType} of a template ID (symbolic `#<pkg-name>:…` or concrete
@@ -72,10 +65,6 @@ export function poolTypeOfTemplateId(templateId: string): PoolType | undefined {
     (t) => POOL_TEMPLATE_IDS[t].split(':').slice(-2).join(':') === qualifiedName,
   )
 }
-
-/** RateLimiter template ID — registry-pools family (see {@link BURN_MINT_POOL_TEMPLATE_ID}). */
-export const RATE_LIMITER_TEMPLATE_ID =
-  '#ccip-registry-rate-limiter:CCIP.Registry.RateLimiterV2:RateLimiter'
 
 /** A contract reference for the exercise builders: a CID plus its disclosure blob. */
 export interface PoolContractRef {
@@ -415,20 +404,24 @@ export interface PoolCreateArgsInput {
   poolReceiveContext?: PoolReceiveContext
   /** Transfer timeout (default: `RelativeHours 24`, matching Go). */
   transferTimeout?: TransferTimeout
+  /** Pool type — lock-release create args carry an extra mandatory field. */
+  poolType?: PoolType
+  /** Holdings labels for lock-release pools (defaults to {@link CCIP_PUBLIC_LABEL};
+   * pass `{}` to opt out). Ignored for burn-mint. */
+  poolReceiveMetadata?: Record<string, string>
 }
 
 /**
  * Build the full `BurnMintTokenPool`/`LockReleaseTokenPool` create-arguments
- * record (identical field shape for both — `LockReleaseTokenPool` shares the
- * same fields). Shared by the `Initialize`-atomic-deploy path
- * (`deploy-token-pool.ts`) and the standalone bare-create path.
- *
- * Typed against the `BurnMintTokenPool` binding; `LockReleaseTokenPool` is a
- * separate generated package but shares the identical field shape, so this
- * return type is structurally valid for both.
+ * record. `LockReleaseTokenPool` shares the burn-mint fields but adds a
+ * mandatory `poolReceiveMetadata` (holdings labels) — included when
+ * `p.poolType === 'lockRelease'`. Shared by the `Initialize`-atomic-deploy
+ * path (`deploy-token-pool.ts`) and the standalone bare-create path.
  */
-export function buildPoolCreateArguments(p: PoolCreateArgsInput): BurnMintTokenPoolArg {
-  return {
+export function buildPoolCreateArguments(
+  p: PoolCreateArgsInput,
+): BurnMintTokenPoolArg | LockReleaseTokenPoolArg {
+  const args: BurnMintTokenPoolArg = {
     instanceId: p.instanceId,
     poolOwner: p.poolOwner,
     ccipOwner: p.ccipOwner,
@@ -448,6 +441,13 @@ export function buildPoolCreateArguments(p: PoolCreateArgsInput): BurnMintTokenP
       feeQuoter: rawInstanceAddress(p.deps.feeQuoter),
     },
   }
+  // LockReleaseTokenPool has one extra mandatory field the burn-mint template
+  // lacks; default it to the standard CCIP holdings label.
+  if (p.poolType === 'lockRelease') {
+    const labels = p.poolReceiveMetadata ?? { [CIP112_RECEIVER_ID_META_KEY]: CCIP_PUBLIC_LABEL }
+    return { ...args, poolReceiveMetadata: { values: labels } }
+  }
+  return args
 }
 
 /**

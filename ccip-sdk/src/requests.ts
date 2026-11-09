@@ -275,6 +275,25 @@ export function buildMessageForDest(message: MessageInput, dest: ChainFamily): A
 }
 
 /**
+ * Get the CCIP protocol version of a decoded 1.6+ message (one with a header).
+ *
+ * @remarks
+ * The message shape gives the version, not the emitting contract: one contract can emit
+ * messages of more than one version. For example, a Solana 2.0 Router keeps its 1.6 entrypoint
+ * (`ccip_send`, event `CCIPMessageSent`) next to the 2.0 one (`ccip_send_v2`, event
+ * `CCIPMessageSentV2`), on the same program address.
+ * Only 2.0 messages carry `offRampAddress`.
+ *
+ * @param message - Decoded message with a header (`destChainSelector`).
+ * @returns `2.0.0` for a 2.0 message, else `1.6.0`.
+ */
+export function getMessageVersion(
+  message: CCIPMessage<typeof CCIPVersion.V1_6 | typeof CCIPVersion.V2_0>,
+): typeof CCIPVersion.V1_6 | typeof CCIPVersion.V2_0 {
+  return 'offRampAddress' in message ? CCIPVersion.V2_0 : CCIPVersion.V1_6
+}
+
+/**
  * Resolve the lane for a decoded CCIP message.
  *
  * Shared helper used by {@link getMessagesInTx}, {@link getMessageById}, and
@@ -301,12 +320,11 @@ export async function resolveLane(
         version: CCIPVersion.V2_0,
       }
     }
-    const [_, version] = await source.typeAndVersion(log.address)
     return {
       sourceChainSelector: message.sourceChainSelector,
       destChainSelector: message.destChainSelector,
       onRamp: log.address,
-      version: version as CCIPVersion,
+      version: getMessageVersion(message),
     }
   } else if (source.network.family !== ChainFamily.EVM) {
     throw new CCIPChainFamilyUnsupportedError(source.network.family)

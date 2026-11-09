@@ -743,6 +743,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           synchronizerId: active.synchronizerId,
           signatories: active.signatories,
           createArgument: active.createArgument,
+          createdAtOffset: active.createdAtOffset,
         })
       }
     }
@@ -796,11 +797,20 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       const raw = `${instanceId}@${contract.signatories[0]}`
       const got = hashedRawInstanceAddress(raw)
       if (got !== target) continue
+      // Re-registrations/redeploys can leave several live contracts at one
+      // instance address — take the latest-created; refuse when order is
+      // indeterminate.
       if (match) {
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `findActiveContractByInstanceAddress: multiple active contracts match ${instanceAddress}`,
-        )
+        const prev = match.createdAtOffset
+        const next = contract.createdAtOffset
+        if (prev === undefined || next === undefined || prev === next) {
+          throw new CCIPError(
+            CCIPErrorCode.CANTON_API_ERROR,
+            `findActiveContractByInstanceAddress: multiple active contracts match ${instanceAddress} and creation order is indeterminate`,
+          )
+        }
+        if (next > prev) match = contract
+        continue
       }
       match = contract
     }
@@ -2342,6 +2352,8 @@ type ActiveContractDetails = {
   synchronizerId: string
   createArgument: unknown
   signatories: string[]
+  /** Ledger offset at creation, when provided by the source response. */
+  createdAtOffset?: number
   interfaceViews?: unknown[]
   disclosedContract: DisclosedContract
 }
@@ -2418,6 +2430,13 @@ async function fetchTokenHoldings(
   return holdings
 }
 
+/** Parse a ledger offset from a JSON int64 (number or numeric string). */
+function parseOffset(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value)
+  return undefined
+}
+
 function activeContractFromResponse(response: unknown): ActiveContractDetails | null {
   if (!response || typeof response !== 'object') return null
   const entry = (response as Record<string, unknown>)['contractEntry']
@@ -2450,6 +2469,9 @@ function activeContractFromResponse(response: unknown): ActiveContractDetails | 
     synchronizerId,
     signatories,
     createArgument: createdRecord['createArgument'],
+    // JsActiveContract.createdAt / CreatedEvent.offset — JSON int64 arrives as a
+    // string; accept both.
+    createdAtOffset: parseOffset(activeRecord['createdAt'] ?? createdRecord['offset']),
     interfaceViews: Array.isArray(createdRecord['interfaceViews'])
       ? (createdRecord['interfaceViews'] as unknown[])
       : undefined,
