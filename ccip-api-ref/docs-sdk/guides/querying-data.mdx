@@ -157,7 +157,7 @@ Returns `Partial<LaneFeatures>` — not all fields are guaranteed:
 | `FINALITY_SAFE` | `true \| undefined` | `true` = FCR/safe finality supported on this lane |
 | `RATE_LIMITS` | `RateLimiterState \| null` | Standard rate limiter state (`null` if disabled) |
 | `FAST_RATE_LIMITS` | `RateLimiterState` | FTF/FCR-specific rate limiter (only when FINALITY_FAST > 0 or FINALITY_SAFE, and the fast bucket is enabled; when absent, FTF/FCR transfers use `RATE_LIMITS`) |
-| `LANE_STATUS` | `LaneStatus` | With a `token`: `{ status: 'ok' }`, `{ status: 'paused', scope, direction }` or `{ status: 'incomplete', missing }`. Single-token pools always report `ok`; multi-token pools report their pauses and missing config records |
+| `LANE_STATUS` | `LaneStatus` | With a `token`: `{ status: 'ok' }`, `{ status: 'paused', scope, direction }` or `{ status: 'incomplete', missing }`. Single-token pools always report `ok`; multi-token pools report their pauses and missing config records. Source leg only: check the destination with `estimateReceiveExecution` (see [Pre-Send Validation](/sdk/guides/pre-send-validation)) |
 
 :::note
 `getLaneFeatures` is implemented for EVM chains only.

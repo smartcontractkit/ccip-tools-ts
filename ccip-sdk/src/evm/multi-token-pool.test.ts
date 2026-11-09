@@ -639,6 +639,24 @@ describe('EVMChain multi-token pool send preflight', () => {
     assert.equal(checked?.sender, ROUTER)
   })
 
+  it('checkExecute blocks a transfer the destination pool pauses inbound', async () => {
+    // the source pool may still allow the send: each chain's pool keeps its own pauses
+    const chain = chainWithRegistry(oneLaneProvider({ pauses: { isChainInboundPaused: true } }))
+    const message = {
+      sourceChainSelector: DEST.chainSelector,
+      receiver: REMOTE_TOKEN,
+      tokenAmounts: [{ token: TOKEN, amount: 1n }],
+    }
+    await assert.rejects(chain.checkExecute({ offRamp: ONRAMP, message }), (err: unknown) => {
+      assert.ok(err instanceof CCIPTokenTransferPausedError)
+      assert.equal(err.context.scope, 'chain')
+      assert.equal(err.context.direction, 'inbound')
+      assert.equal(err.context.token, TOKEN)
+      assert.equal(err.context.sourceChainSelector, DEST.chainSelector)
+      return true
+    })
+  })
+
   it('checkSendMessage deducts the default-finality fee for a finalized send', async () => {
     // 10% fee: 110 → 99 fits the 100-token default bucket
     const chain = chainWithRegistry(

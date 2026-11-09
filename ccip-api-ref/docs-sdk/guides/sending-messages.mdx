@@ -20,6 +20,8 @@ Every CCIP send follows these steps:
 3. **Estimate the fee** — call `getFee` to get the cost
 4. **Send** — call `sendMessage` with the fee and a wallet
 
+`getFee` and `sendMessage` check the source pool for you, and `sendMessage` also simulates its `lockOrBurn` with your address. The destination pool is not checked on the source chain: for token transfers, also run `estimateReceiveExecution` with both chains before sending. See [Pre-Send Validation](/sdk/guides/pre-send-validation).
+
 ```typescript
 import { EVMChain, networkInfo } from '@chainlink/ccip-sdk'
 
