@@ -1101,23 +1101,6 @@ export async function readTokenPoolToken(
 }
 
 /**
- * Reads a pool's `getTokenDecimals()` in one `eth_call`: the local token decimals the pool was
- * deployed with, which it scales cross-chain amounts by.
- * @remarks No dispatch, but callers must resolve the pool and reject v1.5.0 first: the getter is
- * declared identically by every family from v1.5.1 on, and by none at v1.5.0.
- * @param chain - Chain to read from.
- * @param poolAddress - v1.5.1+ token pool to read `getTokenDecimals()` from.
- * @returns The pool's configured token decimals.
- */
-export async function readTokenPoolTokenDecimals(
-  chain: EVMChain,
-  poolAddress: string,
-): Promise<number> {
-  const pool = getTypedContract(chain, poolAddress, BURN_MINT_TOKEN_POOL_V1_5_1_ABI)
-  return Number(resultToObject(await pool.getTokenDecimals()))
-}
-
-/**
  * Reads a pool's `isSupportedToken(token)` in one `eth_call`. Declared identically by every pool
  * type and version, so this needs no dispatch.
  * @param chain - Chain to read from.
