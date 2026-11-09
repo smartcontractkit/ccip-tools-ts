@@ -264,10 +264,11 @@ describe('getLbtcAttestation', () => {
       mockedFetch.mock.calls[0]?.arguments[0],
       'https://gastald-testnet.prod.lombard.finance/api/bridge/v1/deposits/getByHash',
     )
-    assert.deepEqual(mockedFetch.mock.calls[0].arguments[1], {
-      method: 'POST',
-      body: JSON.stringify({ messageHash: [approvedPayloadHash1] }),
-    })
+    const { method, body } = mockedFetch.mock.calls[0].arguments[1]
+    assert.deepEqual(
+      { method, body },
+      { method: 'POST', body: JSON.stringify({ messageHash: [approvedPayloadHash1] }) },
+    )
     assert.equal(result.attestation, approvedPayloadAttestation1)
   })
 
@@ -279,10 +280,11 @@ describe('getLbtcAttestation', () => {
       mockedFetch.mock.calls[0]?.arguments[0],
       'https://mainnet.prod.lombard.finance/api/bridge/v1/deposits/getByHash',
     )
-    assert.deepEqual(mockedFetch.mock.calls[0].arguments[1], {
-      method: 'POST',
-      body: JSON.stringify({ messageHash: [approvedPayloadHash1] }),
-    })
+    const { method, body } = mockedFetch.mock.calls[0].arguments[1]
+    assert.deepEqual(
+      { method, body },
+      { method: 'POST', body: JSON.stringify({ messageHash: [approvedPayloadHash1] }) },
+    )
     assert.equal(result.attestation, approvedPayloadAttestation1)
   })
 
@@ -541,6 +543,133 @@ describe('getOffchainTokenData for CCTP v2', () => {
 
     assert.equal(mockedFetch.mock.calls.length, 0)
     assert.equal(result[0], undefined)
+  })
+})
+
+describe('getOffchainTokenData watch', () => {
+  const extraData = '0x' + '7005b'.padStart(64, '0') + '5'.padStart(64, '0')
+  const request = (data = extraData) =>
+    ({
+      log: { transactionHash: 'solana-tx' },
+      message: {
+        sourceChainSelector: 16423721717087811551n,
+        tokenAmounts: [{ extraData: '0x' }, { extraData: data }],
+      },
+    }) as unknown as Parameters<typeof getOffchainTokenData>[0]
+  const circle = (status = 'pending_confirmations') => ({
+    messages: [{ status, eventNonce: '458843', attestation: '0xab', message: '0xcd' }],
+  })
+  const logger = () => ({ debug: mock.fn(), info: mock.fn(), warn: mock.fn(), error: mock.fn() })
+
+  for (const tag of ['usdc', 'lbtc']) {
+    it(`polls ${tag} until ready and preserves token positions`, async (t) => {
+      const hash = '0x' + 'ab'.repeat(32)
+      const response = (ready: boolean) =>
+        tag === 'usdc'
+          ? circle(ready ? 'complete' : undefined)
+          : {
+              attestations: [
+                {
+                  message_hash: hash,
+                  status: ready ? 'NOTARIZATION_STATUS_SESSION_APPROVED' : 'PENDING',
+                  attestation: '0xab',
+                },
+              ],
+            }
+      let calls = 0
+      t.mock.method(
+        globalThis,
+        'fetch',
+        async () => new Response(JSON.stringify(response(++calls === 2))),
+      )
+      const log = logger()
+      const result = await getOffchainTokenData(request(tag === 'usdc' ? extraData : hash), {
+        logger: log,
+        watch: true,
+        pollInterval: 0,
+      })
+      assert.equal(calls, 2)
+      assert.equal(result[0], undefined)
+      assert.equal(result[1]?._tag, tag)
+      assert.equal(result[1]!.attestation, '0xab')
+      assert.equal(log.warn.mock.callCount(), 0)
+    })
+  }
+
+  for (const phase of ['fetch', 'sleep']) {
+    it(`cancels during ${phase} without warnings or another poll`, { timeout: 1000 }, async (t) => {
+      const ac = new AbortController()
+      const fetch = t.mock.method(
+        globalThis,
+        'fetch',
+        async (...[_url, opts]: Parameters<typeof globalThis.fetch>) => {
+          if (phase === 'sleep') return new Response(JSON.stringify(circle()))
+          return new Promise<Response>((_resolve, reject) => {
+            opts!.signal!.addEventListener('abort', () => reject(opts!.signal!.reason), {
+              once: true,
+            })
+          })
+        },
+      )
+      const log = logger()
+      const result = getOffchainTokenData(request(), { logger: log, watch: ac.signal })
+      const rejected = assert.rejects(result, { name: 'AbortError' })
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      ac.abort()
+      await rejected
+      assert.equal(fetch.mock.callCount(), 1)
+      assert.equal(log.warn.mock.callCount(), 0)
+    })
+  }
+
+  for (const watch of [false, true]) {
+    it(
+      watch ? 'does not poll permanent failures' : 'keeps one-shot behavior without watch',
+      async (t) => {
+        const fetch = t.mock.method(globalThis, 'fetch', async () => {
+          if (watch) throw new Error('invalid response')
+          return new Response(JSON.stringify(circle()))
+        })
+        const log = logger()
+        assert.deepEqual(await getOffchainTokenData(request(), { logger: log, watch }), [
+          undefined,
+          undefined,
+        ])
+        assert.equal(fetch.mock.callCount(), 1)
+        assert.equal(log.warn.mock.callCount(), 1)
+      },
+    )
+  }
+
+  it('polls through dropped connections, 5xx, and bodies that are not JSON', async (t) => {
+    const replies = [
+      () => Promise.reject(new TypeError('fetch failed')),
+      () => Promise.resolve(new Response('<html>bad gateway</html>', { status: 502 })),
+      () => Promise.resolve(new Response('<html>maintenance</html>', { status: 200 })),
+      () => Promise.resolve(new Response(JSON.stringify(circle('complete')))),
+    ]
+    const fetch = t.mock.method(globalThis, 'fetch', () => replies.shift()!())
+    const log = logger()
+    const result = await getOffchainTokenData(request(), {
+      logger: log,
+      watch: true,
+      pollInterval: 0,
+    })
+    assert.equal(fetch.mock.callCount(), 4)
+    assert.equal(result[1]?._tag, 'usdc')
+    assert.equal(log.warn.mock.callCount(), 0)
+  })
+
+  it('reports a 5xx once without watch', async (t) => {
+    const fetch = t.mock.method(
+      globalThis,
+      'fetch',
+      async () => new Response('<html>unavailable</html>', { status: 503 }),
+    )
+    const log = logger()
+    assert.deepEqual(await getOffchainTokenData(request(), { logger: log }), [undefined, undefined])
+    assert.equal(fetch.mock.callCount(), 1)
+    assert.equal(log.warn.mock.callCount(), 1)
   })
 })
 

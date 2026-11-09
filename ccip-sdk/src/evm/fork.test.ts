@@ -44,7 +44,6 @@ const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 
-const FUJI_RPC = rpcEndpoint('RPC_FUJI')
 const FUJI_CHAIN_ID = 43113
 
 // Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official CCIP
@@ -120,6 +119,7 @@ const V2_API_EXEC_MSG = {
 // execution inputs to the API-driven path below.
 const V1_5_API_EXEC_MSG = {
   messageId: '0xe654dc68b4d98e8ea2f182ee45d5766af4f62e2417395153a90c4b377d3fcd07',
+  offRamp: '0x01e3D835b4C4697D7F81B9d7Abc89A6E478E4a2f',
 }
 
 // Source chain selector for the v2.0 fixture's lane (Arbitrum Sepolia, chainId 421614)
@@ -230,7 +230,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
       timeout: 60_000,
       forkRetryBackoff: 1_000,
     } as const
-    // The default Fuji RPC (api.avax-test.network) sits behind Cloudflare, which answers
+    // The official Fuji RPC fallback (api.avax-test.network) sits behind Cloudflare, which answers
     // bursty fork traffic with hard 1015 bans that outlast anvil's retries — reproduced
     // locally as fork transport errors and empty-revert "missing revert data" call
     // failures (the same signatures as CI run 39058311489). Bound the fork's upstream
@@ -249,8 +249,30 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
       { forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8646, ...forkOpts },
       {},
     )
+    // A fork reads state lazily for the whole suite: probe an OffRamp 1000 blocks
+    // back, which covers the 600s budget (~410 blocks) plus 256 blockhash ancestors.
+    const fujiRpc = await raceRpcEndpoint(
+      'RPC_FUJI',
+      async (url) => {
+        const chain = await EVMChain.fromUrl(url, {
+          apiClient: null,
+          abort: AbortSignal.timeout(10_000),
+        })
+        try {
+          return (
+            (await chain.provider.getCode(
+              V1_5_API_EXEC_MSG.offRamp,
+              (await chain.provider.getBlockNumber()) - 1000,
+            )) !== '0x'
+          )
+        } finally {
+          chain.destroy()
+        }
+      },
+      { ordered: true },
+    )
     fujiInstance = Instance.anvil(
-      { forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8645, ...fujiForkOpts },
+      { forkUrl: fujiRpc, chainId: FUJI_CHAIN_ID, port: 8645, ...fujiForkOpts },
       {},
     )
     await Promise.all([startForkWithRetries(sepoliaInstance), startForkWithRetries(fujiInstance)])

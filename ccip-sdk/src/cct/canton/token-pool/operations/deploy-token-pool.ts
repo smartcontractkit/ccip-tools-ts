@@ -56,6 +56,7 @@ import {
 } from '../../token-admin-registry/shared.ts'
 import type { CantonDeployResult } from '../../types.ts'
 import { parseInstrumentId, parsePartyId, parseRawInstanceAddress } from '../../validate.ts'
+import { TRANSFER_PREAPPROVAL_CONTEXT_KEY, resolveTransferPreapprovalCid } from '../preapproval.ts'
 import {
   type LaneDeploySpec,
   type PoolFactoryDeps,
@@ -111,6 +112,11 @@ export interface DeployTokenPoolParams {
   deps?: Partial<PoolFactoryDeps>
   /** Pool receive-context choice-context. */
   poolReceiveContext?: PoolReceiveContext
+  /**
+   * Holdings labels for lock-release pools (defaults to the standard CCIP
+   * label; pass `{}` to opt out). Ignored for burn-mint.
+   */
+  poolReceiveMetadata?: Record<string, string>
   /** Transfer timeout (Daml variant; defaults to `RelativeHours 24`, matching Go). */
   transferTimeout?: TransferTimeout
   /**
@@ -238,6 +244,11 @@ export class DeployTokenPool extends CantonOperation<
       instrumentId,
       poolOwner: instrumentId.admin,
       admin: p.admin ?? instrumentId.admin,
+      // Detach caller-owned nested params: validation runs in prepare while
+      // encoding happens after ledger reads — a retained reference could be
+      // mutated in between.
+      transferTimeout: p.transferTimeout ? { ...p.transferTimeout } : undefined,
+      poolReceiveMetadata: p.poolReceiveMetadata ? { ...p.poolReceiveMetadata } : undefined,
       // oxlint-disable-next-line typescript/no-unnecessary-condition
       lanes: (p.lanes ?? []).map((l, i) => parseLaneRemoteAddresses(this.name, `lanes[${i}]`, l)),
     }
@@ -311,7 +322,34 @@ export class DeployTokenPool extends CantonOperation<
       }
     }
 
-    const createArguments = buildPoolCreateArguments({ ...p, ccipOwner, deps })
+    // Lock-release: auto-wire the pool owner's transfer preapproval into the
+    // receive context, so inbound locks settle directly for any sender.
+    let poolReceiveContext = p.poolReceiveContext
+    if (
+      p.poolType === 'lockRelease' &&
+      poolReceiveContext?.values[TRANSFER_PREAPPROVAL_CONTEXT_KEY] === undefined
+    ) {
+      const preapprovalCid = await resolveTransferPreapprovalCid(chain, p.poolOwner, p.instrumentId)
+      if (preapprovalCid) {
+        poolReceiveContext = {
+          values: {
+            ...(poolReceiveContext?.values ?? {}),
+            [TRANSFER_PREAPPROVAL_CONTEXT_KEY]: { tag: 'AV_ContractId', value: preapprovalCid },
+          },
+        }
+        chain.logger.info(
+          `${this.name}: wired transfer preapproval ${preapprovalCid} into poolReceiveContext`,
+        )
+      } else {
+        chain.logger.warn(
+          `${this.name}: no TransferPreapproval found for ${p.poolOwner} covering ${p.instrumentId.id}; ` +
+            'sends from parties other than the pool owner will abort until one is pinned ' +
+            `(see ${TRANSFER_PREAPPROVAL_CONTEXT_KEY} receive-context entry)`,
+        )
+      }
+    }
+
+    const createArguments = buildPoolCreateArguments({ ...p, ccipOwner, deps, poolReceiveContext })
     const choiceArgument = buildInitializeChoiceArgument({
       tokenAdminRegistryCid: tarContract.contractId,
       existingTokenConfigCid,
