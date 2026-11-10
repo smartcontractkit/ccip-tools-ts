@@ -493,33 +493,29 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
      * payloads of getTransactionReceipts and getLogs, cache the timestamps, and populate from
      * cached this.getBlockInfo inside getTransaction and getEvmLogs */
     type RawLog = { blockNumber: number | string; blockTimestamp?: string | number }
+    // some RPCs return the field as a `0x0` placeholder (e.g. Robinhood Chain testnet in
+    // eth_getLogs); caching it would date the block to 1970, so that getLogs' startTime filter
+    // drops its logs: only a positive timestamp is cached, else getBlockInfo reads the block
+    const cacheLogTimestamp = (log: RawLog | undefined) => {
+      if (!log?.blockTimestamp) return
+      const timestamp = getNumber(log.blockTimestamp)
+      if (timestamp <= 0) return
+      const number = getNumber(log.blockNumber)
+      getBlockInfo.cache.set([number], Promise.resolve({ number, timestamp }))
+    }
     this.provider._wrapTransactionReceipt = (
       value: TransactionReceiptParams,
       network: Network,
     ): TransactionReceipt => {
       // on provider.getTransactionReceipt, cache logs block timestamp, hidden by ethers
-      if (value.logs.length && (value.logs[0] as RawLog).blockTimestamp)
-        getBlockInfo.cache.set(
-          [getNumber(value.logs[0]!.blockNumber)],
-          Promise.resolve({
-            number: getNumber(value.logs[0]!.blockNumber),
-            timestamp: getNumber((value.logs[0]! as RawLog).blockTimestamp!),
-          }),
-        )
+      cacheLogTimestamp(value.logs[0] as RawLog | undefined)
       return (
         this.provider.constructor as typeof JsonRpcApiProvider
       ).prototype._wrapTransactionReceipt.call(this.provider, value, network)
     }
     this.provider._wrapLog = (value: LogParams, network: Network): Log => {
       // on provider.getLogs, cache logs block timestamp, hidden by ethers
-      if ((value as RawLog).blockTimestamp)
-        getBlockInfo.cache.set(
-          [getNumber(value.blockNumber)],
-          Promise.resolve({
-            number: getNumber(value.blockNumber),
-            timestamp: getNumber((value as RawLog).blockTimestamp!),
-          }),
-        )
+      cacheLogTimestamp(value as RawLog)
       return (this.provider.constructor as typeof JsonRpcApiProvider).prototype._wrapLog.call(
         this.provider,
         value,
