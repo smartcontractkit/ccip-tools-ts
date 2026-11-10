@@ -118,7 +118,7 @@ export class SetCanAcceptLiquidity extends SolanaOperation<
     chain: SolanaChain,
     params: ExecuteSetCanAcceptLiquidityParams,
   ): Promise<ExecuteSetCanAcceptLiquidityResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
 
     if (params.authority !== undefined) {
       validateAuthorityMatchesWallet(

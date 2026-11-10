@@ -12,6 +12,18 @@ import type { SolanaSplitMode } from '../../solana/utils.ts'
 import { type TransactionResult, Operation } from '../operation.ts'
 import { submit } from './submit.ts'
 
+/**
+ * Drops {@link SolanaChain}'s short-lived `getAccountInfo` memo, so a CCT operation validates
+ * against the state earlier operations left, including transactions signed outside the SDK.
+ * Consecutive onboarding steps otherwise land within the memo window and read stale accounts.
+ */
+export function refreshAccountState(chain: SolanaChain): void {
+  const connection = chain.connection as
+    | { getAccountInfo?: { cache?: { clear(): void } } }
+    | undefined
+  connection?.getAccountInfo?.cache?.clear()
+}
+
 /** Unsigned Solana operation params include an explicit fee payer. */
 export type SolanaGenerateParams<P extends object> = P & { payer: string }
 
@@ -40,11 +52,13 @@ export abstract class SolanaOperation<
 
   /** Run {@link prepare} and {@link buildUnsigned}; no signing. */
   async generate(chain: SolanaChain, params: SolanaGenerateParams<P>): Promise<Tx> {
+    refreshAccountState(chain)
     return this.buildUnsigned(chain, this.prepare(params))
   }
 
   /** Validates the wallet and prepares signed execution parameters with it as payer. */
-  protected prepareWalletExecution(params: SolanaExecuteParams<P>) {
+  protected prepareWalletExecution(chain: SolanaChain, params: SolanaExecuteParams<P>) {
+    refreshAccountState(chain)
     const { wallet, computeUnits, ...rest } = params
     if (!isWallet(wallet)) throw new CCIPWalletInvalidError(wallet)
 
@@ -59,7 +73,7 @@ export abstract class SolanaOperation<
 
   /** Generate, sign, simulate, send, and confirm with wallet.publicKey as payer. */
   async execute(chain: SolanaChain, params: SolanaExecuteParams<P>): Promise<TransactionResult> {
-    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(params)
+    const { wallet, computeUnits, parsed } = this.prepareWalletExecution(chain, params)
     return submit(
       chain,
       wallet,
