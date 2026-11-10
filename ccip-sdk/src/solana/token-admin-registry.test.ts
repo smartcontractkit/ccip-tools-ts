@@ -65,6 +65,24 @@ describe('decodeTokenAdminRegistryConfig', () => {
     }
   })
 
+  it('decodes the account resolution flags and pool interface version of v4 accounts', () => {
+    // [account_resolution_enabled, skip_lookup_table_additional_entries, interface version]
+    for (const [enabled, skip, interfaceVersion, accountResolution] of [
+      [0, 0, 1, 'NoResolution'],
+      [0, 1, 2, 'NoResolution'], // the skip flag only applies with resolution enabled
+      [1, 0, 2, 'Standard'],
+      [1, 1, 2, 'WithoutExtendedLookupTable'],
+    ] as const) {
+      const config = decodeTokenAdminRegistryConfig(
+        registryData(4, enabled, 254, interfaceVersion, skip),
+      )
+      assert.ok(config.mint.equals(MINT))
+      assert.equal(config.accountResolution, accountResolution)
+      assert.equal(config.supportsAutoDerivation, enabled === 1)
+      assert.equal(config.interfaceVersion, interfaceVersion)
+    }
+  })
+
   it('rejects unknown account resolutions', () => {
     assert.throws(
       () => decodeTokenAdminRegistryConfig(registryData(3, 3, 254, 2)),

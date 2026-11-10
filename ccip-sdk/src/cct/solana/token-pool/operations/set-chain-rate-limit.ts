@@ -50,13 +50,19 @@ export type RateLimitConfig =
       rate?: bigint
     }
 
-type ParsedRateLimitConfig = {
+/** A parsed {@link RateLimitConfig}, with omitted values of a disabled limit set to zero. */
+export type ParsedRateLimitConfig = {
   enabled: boolean
   capacity: bigint
   rate: bigint
 }
 
-function parseRateLimitConfig(
+/**
+ * Parses one direction of a rate limit as the pool program validates it.
+ * @throws {@link CCTParamsInvalidError} if the config is malformed, an enabled limit's rate
+ * exceeds its capacity, or a disabled limit has a non-zero rate or capacity.
+ */
+export function parseRateLimitConfig(
   operation: string,
   direction: string,
   config: unknown,
