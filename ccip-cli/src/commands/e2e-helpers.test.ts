@@ -136,3 +136,24 @@ export async function spawnCLI(
     })
   })
 }
+
+/**
+ * {@link spawnCLI}, run once more when the CLI fails with a transient error (it prints
+ * `note: this error may resolve on retry`, e.g. after a public RPC rate-limited it). The retry
+ * waits the delay that the note suggests (5 s by default). Use it only for runs that must
+ * succeed: an expected failure can be transient too, and would only run twice.
+ * @param args - CLI arguments.
+ * @param timeout - Timeout of each attempt, in ms.
+ * @returns The output of the last attempt.
+ */
+export async function spawnCLIRetryingTransient(
+  args: string[],
+  timeout = 60000,
+): ReturnType<typeof spawnCLI> {
+  const first = await spawnCLI(args, timeout)
+  const output = first.stdout + first.stderr
+  if (first.exitCode === 0 || !output.includes('this error may resolve on retry')) return first
+  const waitS = Number(/may resolve on retry \(wait (\d+)s\)/.exec(output)?.[1] ?? 5)
+  await new Promise((resolve) => setTimeout(resolve, Math.min(waitS, 30) * 1_000))
+  return spawnCLI(args, timeout)
+}

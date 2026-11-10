@@ -5,6 +5,7 @@ import {
   CCIPMerkleRootMismatchError,
   CCIPMessageNotInBatchError,
   CCIPOffRampNotFoundError,
+  shouldRetry,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
 import { ChainFamily } from './networks.ts'
@@ -158,10 +159,14 @@ export const discoverOffRamp = memoize(
     // reported in the error if none of them accepts our onRamp
     const examined: { destOnRamp: string; offRamp: string; accepts: string; version?: string }[] =
       []
+    // every lookup that failed on the way; a transient one (e.g. a rate-limited RPC) makes the
+    // final not-found transient too, so callers retry instead of reporting a missing lane
+    const skipped: { step: string; address: string; error: unknown }[] = []
     let sourceOffRamps: string[] = []
     try {
       sourceOffRamps = await source.getOffRampsForRouter(sourceRouter, dest.network.chainSelector)
     } catch (err) {
+      skipped.push({ step: 'source offRamps', address: sourceRouter, error: err })
       // Source-side offRamp enumeration can be impossible (e.g. Sui on
       // history-pruned RPCs); fall through to dest-side discovery below
       logger.debug(
@@ -174,6 +179,7 @@ export const discoverOffRamp = memoize(
       try {
         destOnRamps = await source.getOnRampsForOffRamp(offRamp, dest.network.chainSelector)
       } catch (err) {
+        skipped.push({ step: 'source offRamp config', address: offRamp, error: err })
         logger.debug(
           'discoverOffRamp: skipping offRamp',
           offRamp,
@@ -188,6 +194,7 @@ export const discoverOffRamp = memoize(
           const destRouter = await dest.getRouterForOnRamp(destOnRamp, source.network.chainSelector)
           destOffRamps = await dest.getOffRampsForRouter(destRouter, source.network.chainSelector)
         } catch (err) {
+          skipped.push({ step: 'dest offRamps', address: destOnRamp, error: err })
           logger.debug(
             'discoverOffRamp: skipping dest onRamp',
             destOnRamp,
@@ -201,6 +208,7 @@ export const discoverOffRamp = memoize(
           try {
             offRampsOnRamps = await dest.getOnRampsForOffRamp(offRamp, source.network.chainSelector)
           } catch (err) {
+            skipped.push({ step: 'dest offRamp config', address: offRamp, error: err })
             logger.debug(
               'discoverOffRamp: skipping dest offRamp',
               offRamp,
@@ -252,8 +260,25 @@ export const discoverOffRamp = memoize(
     // when a lane is half-wired (the dest's offRamp pairs with a *different*
     // source onRamp) that pairing is the answer, and it is otherwise only
     // visible with debug logging on.
+    const transient = skipped.filter(({ error }) => shouldRetry(error))
     throw new CCIPOffRampNotFoundError(onRamp, dest.network.name, {
-      context: { version, sourceRouter, sourceOffRamps, examined },
+      context: {
+        version,
+        sourceRouter,
+        sourceOffRamps,
+        examined,
+        ...(skipped.length && {
+          skipped: skipped.map(({ step, address, error }) => ({
+            step,
+            address,
+            error: error instanceof Error ? error.message : String(error),
+          })),
+        }),
+      },
+      ...(transient.length && {
+        isTransient: true,
+        cause: transient[0]!.error instanceof Error ? transient[0]!.error : undefined,
+      }),
     })
   },
   {

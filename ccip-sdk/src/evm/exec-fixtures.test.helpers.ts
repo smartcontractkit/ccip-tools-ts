@@ -9,7 +9,7 @@
 import type { CCIPAPIClient } from '../api/index.ts'
 import { CCIPError, CCIPErrorCode, CCIPMessageIdNotFoundError } from '../errors/index.ts'
 import { type CCIPVersion, MessageStatus } from '../types.ts'
-import { withForkRetry } from './fork-retry.test.helpers.ts'
+import { isTransientForkError, withForkRetry } from './fork-retry.test.helpers.ts'
 
 /** An executable failed-message fixture: message id plus its source tx hash. */
 export type ExecFixture = { messageId: string; txHash?: string }
@@ -20,7 +20,10 @@ const MAX_FIXTURES = 3
 /**
  * The pinned message (when the API still reports it failed and ready for manual
  * execution), then the lane's newest such messages to the same receiver, on
- * `version`. API errors other than "not found" fail the caller.
+ * `version`. Transient API errors (e.g. a timeout) are retried; when they persist, the
+ * pin is kept unverified and the search is skipped, so one slow API call cannot cancel a
+ * whole suite (the test itself then reports whether the pin still executes). Other API
+ * errors fail the caller.
  */
 export async function rankExecFixtures(opts: {
   api: Pick<CCIPAPIClient, 'getMessageById' | 'searchMessages'>
@@ -31,7 +34,7 @@ export async function rankExecFixtures(opts: {
 }): Promise<ExecFixture[]> {
   const { api, pinned, version, sourceSelector, destSelector } = opts
   const lookup = (messageId: string) =>
-    api.getMessageById(messageId).catch((err: unknown) => {
+    withForkRetry(() => api.getMessageById(messageId)).catch((err: unknown) => {
       if (err instanceof CCIPMessageIdNotFoundError) return undefined
       throw err
     })
@@ -42,18 +45,32 @@ export async function rankExecFixtures(opts: {
     BigInt(msg.lane.sourceChainSelector) === sourceSelector &&
     BigInt(msg.lane.destChainSelector) === destSelector
 
-  const pinMsg = await lookup(pinned.messageId)
+  let pinMsg
+  try {
+    pinMsg = await lookup(pinned.messageId)
+  } catch (err) {
+    if (!isTransientForkError(err)) throw err
+    return [pinned] // the API is unreachable: try the pin as it is
+  }
   const receiver = (pinMsg?.message as { receiver?: string } | undefined)?.receiver?.toLowerCase()
   const fixtures: ExecFixture[] = executable(pinMsg) ? [pinned] : []
 
-  const page = await api.searchMessages(
-    {
-      sourceChainSelector: sourceSelector,
-      destChainSelector: destSelector,
-      readyForManualExecOnly: true,
-    },
-    { limit: 25 },
-  )
+  let page
+  try {
+    page = await withForkRetry(() =>
+      api.searchMessages(
+        {
+          sourceChainSelector: sourceSelector,
+          destChainSelector: destSelector,
+          readyForManualExecOnly: true,
+        },
+        { limit: 25 },
+      ),
+    )
+  } catch (err) {
+    if (!isTransientForkError(err)) throw err
+    return fixtures // the search is unreachable: the verified pin, if any
+  }
   const hits = page.data
     .filter(
       (hit) =>
@@ -64,7 +81,11 @@ export async function rankExecFixtures(opts: {
     .sort((a, b) => Date.parse(b.sendTimestamp) - Date.parse(a.sendTimestamp))
   for (const hit of hits) {
     if (fixtures.length >= MAX_FIXTURES) break
-    if (executable(await lookup(hit.messageId)))
+    const msg = await lookup(hit.messageId).catch((err: unknown) => {
+      if (!isTransientForkError(err)) throw err
+      return undefined // an unreachable candidate is skipped
+    })
+    if (executable(msg))
       fixtures.push({ messageId: hit.messageId, txHash: hit.sendTransactionHash })
   }
   return fixtures

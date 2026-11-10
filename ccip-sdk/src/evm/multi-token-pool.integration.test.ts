@@ -3,8 +3,9 @@
  * `BurnMintMultiTokenPool 2.1.0-dev` on the robinhood-testnet <-> arbitrum-sepolia lane.
  *
  * Every SDK read is checked against a raw read of the same state through the generated
- * pool and PoolConfigManager (PCM) ABIs, in both directions. A pinned token transfer checks
- * the long (224-byte) pool data decode and the destination execution receipt.
+ * pool and PoolConfigManager (PCM) ABIs, in both directions. A pinned, executed token transfer
+ * in each direction checks the long (224-byte) pool data decode, the destination execution
+ * receipt, and a receipt search by time on the destination.
  *
  * Staging is redeployed from time to time. When the pool is no longer a multi-token pool on
  * both chains, the tests skip (they do not fail); RPC errors still fail them.
@@ -44,6 +45,13 @@ const RH = {
   router: '0x55fC135F95cE915B609BE5746E6d39AA03918bAc',
   onRamp: '0x0663c54dffD95270B28Ca54C11dE52135b746f8c',
   token: '0x60244b08CBbfddb2bDa93B43A61C37A10188757f', // MTTP1
+  // a 4.0 MTTP1 transfer RH -> ARB through the pool, executed on ARB (state Success)
+  sent: {
+    messageId: '0x939d72cd1f157f7c6b6be33bfb03741b599d085b64baf8aa2c3bceda66aadce0',
+    sendTx: '0xef482779c47ae60019044a6c00c246a84f66833be8f8a927e4d0049e6aacfdf6',
+    execTx: '0x279444d8f8a22c206f7d3c9c446492d22efb4a73fd8b7aeaf407f534305cfe2d',
+    amount: 4n * 10n ** 18n,
+  },
 } as const
 const ARB = {
   rpc: 'RPC_ARBITRUM_SEPOLIA',
@@ -51,15 +59,14 @@ const ARB = {
   router: '0x8F95FA37c55eF7beFdf05f6abDeC551773E17Fb4',
   onRamp: '0xcA5842B776Ea62712AE58A0d4D6363Cb51fB38d8',
   token: '0x40D55FeC015F7B54eCA0807CE33818C1C4d84D48', // MTTP1
+  // a 2.0 MTTP1 transfer ARB -> RH through the pool, executed on RH (state Success)
+  sent: {
+    messageId: '0x5fc643692aa88dfbafc98d79c3212b5c72c0b505662c1046f18c4daf9fc97999',
+    sendTx: '0x9e668b46004743cd4b428c56016e3e9ae648826bdef7eaa286de7b112f3e9f1e',
+    execTx: '0x09742e17915d0512c0fb34285c43ad6b317ca7f49bfba58bc4bfe7a499e6a28d',
+    amount: 2n * 10n ** 18n,
+  },
 } as const
-
-// A token transfer ARB -> RH through the pool, executed on RH (state Success)
-const PINNED = {
-  messageId: '0x3c2e8cffcdf1a836b53f89280cef9b688d30106f9befe306e38943e0ec4ab323',
-  sendTx: '0x8f34754782e1c61d017a04366426c2949fc06efcefedf7c2d62b74ae4eb8d83f',
-  execTx: '0x911931564ad60606bd09ae43545c4599ccbd5ea23bc2413b4fd104c69c12f618',
-  amount: 2n * 10n ** 18n,
-}
 
 /** A receiver with no code: the destination runs no ccipReceive. */
 const EOA = '0x000000000000000000000000000000000000dEaD'
@@ -361,40 +368,60 @@ describe(
 
     it('decodes a sent token transfer and its execution receipt', async (t) => {
       if (!deployed) return t.skip('staging multi-token pool not deployed')
-      assert.ok(rh && arb)
-      const tx = await arb.getTransaction(PINNED.sendTx)
-      const request = (await arb.getMessagesInTx(tx)).find(
-        (r) => r.message.messageId === PINNED.messageId,
-      )
-      assert.ok(request, 'message in its send tx')
-      assert.equal(request.lane.destChainSelector, RH.selector)
-      const [tokenAmount] = request.message.tokenAmounts
-      assert.ok(tokenAmount && 'extraData' in tokenAmount, 'token amount with pool data')
-      assert.equal(dataLength(tokenAmount.extraData), 224)
-      assert.equal(getSourceDecimalsFromExtraData(tokenAmount.extraData), 18)
-      assert.equal(
-        getSourceTokenFromExtraData(tokenAmount.extraData, arb.network.family),
-        ARB.token,
-      )
-      assert.equal(tokenAmount.amount, PINNED.amount)
+      for (const [name, src, dst, S, D] of directions()) {
+        const sent = S.sent
+        const tx = await src.getTransaction(sent.sendTx)
+        const request = (await src.getMessagesInTx(tx)).find(
+          (r) => r.message.messageId === sent.messageId,
+        )
+        assert.ok(request, `${name}: message in its send tx`)
+        assert.equal(request.lane.destChainSelector, D.selector, name)
+        const [tokenAmount] = request.message.tokenAmounts
+        assert.ok(tokenAmount && 'extraData' in tokenAmount, `${name}: token amount with pool data`)
+        assert.equal(dataLength(tokenAmount.extraData), 224, name)
+        assert.equal(getSourceDecimalsFromExtraData(tokenAmount.extraData), 18, name)
+        assert.equal(
+          getSourceTokenFromExtraData(tokenAmount.extraData, src.network.family),
+          S.token,
+          name,
+        )
+        assert.equal(tokenAmount.amount, sent.amount, name)
 
-      assert.deepEqual(
-        await getDestTokenAmount({
-          source: arb,
-          onRamp: request.lane.onRamp,
-          dest: rh,
-          tokenAmount: tokenAmount as never,
-        }),
-        { token: RH.token, amount: PINNED.amount },
-      )
+        assert.deepEqual(
+          await getDestTokenAmount({
+            source: src,
+            onRamp: request.lane.onRamp,
+            dest: dst,
+            tokenAmount: tokenAmount as never,
+          }),
+          { token: D.token, amount: sent.amount },
+          name,
+        )
 
-      const execTx = await rh.getTransaction(PINNED.execTx)
-      const receipt = execTx.logs
-        .map((log) => EVMChain.decodeReceipt(log))
-        .find((r) => r?.messageId === PINNED.messageId)
-      assert.ok(receipt, 'execution receipt in its tx')
-      assert.equal(receipt.state, ExecutionState.Success)
-      assert.equal(receipt.sourceChainSelector, ARB.selector)
+        const execTx = await dst.getTransaction(sent.execTx)
+        const execLog = execTx.logs.find(
+          (log) => EVMChain.decodeReceipt(log)?.messageId === sent.messageId,
+        )
+        assert.ok(execLog, `${name}: execution receipt in its tx`)
+        const receipt = EVMChain.decodeReceipt(execLog)!
+        assert.equal(receipt.state, ExecutionState.Success, name)
+        assert.equal(receipt.sourceChainSelector, S.selector, name)
+
+        // A receipt search by time (as `show` without the API does) finds the execution, with
+        // its block's real timestamp: an RPC that sends a `0x0` log blockTimestamp placeholder
+        // (robinhood-testnet) must not date the log to 1970 and drop it. The range is bounded to
+        // the blocks just before the execution, so the scan stays small as the fixture ages.
+        const found = []
+        for await (const log of dst.getLogs({
+          address: execLog.address,
+          topics: ['ExecutionStateChanged'],
+          startTime: execTx.timestamp - 30,
+          endBlock: execLog.blockNumber,
+        }))
+          if (EVMChain.decodeReceipt(log)?.messageId === sent.messageId) found.push(log)
+        assert.equal(found.length, 1, `${name}: receipt found by a search from its time`)
+        assert.equal(found[0]!.blockTimestamp, execTx.timestamp, name)
+      }
     })
   },
 )

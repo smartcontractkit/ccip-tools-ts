@@ -493,9 +493,10 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
      * payloads of getTransactionReceipts and getLogs, cache the timestamps, and populate from
      * cached this.getBlockInfo inside getTransaction and getEvmLogs */
     type RawLog = { blockNumber: number | string; blockTimestamp?: string | number }
-    // some RPCs return the field as a `0x0` placeholder (e.g. Robinhood Chain testnet in
-    // eth_getLogs); caching it would date the block to 1970, so that getLogs' startTime filter
-    // drops its logs: only a positive timestamp is cached, else getBlockInfo reads the block
+    // some RPCs return the field as a `0x0` placeholder in eth_getLogs (e.g. Arbitrum Nitro
+    // chains: Arbitrum Sepolia, Robinhood Chain testnet); caching it would date the block to
+    // 1970, so that getLogs' startTime filter drops its logs: only a positive timestamp is
+    // cached, else getBlockInfo reads the block
     const cacheLogTimestamp = (log: RawLog | undefined) => {
       if (!log?.blockTimestamp) return
       const timestamp = getNumber(log.blockTimestamp)

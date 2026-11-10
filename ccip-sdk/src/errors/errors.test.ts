@@ -737,11 +737,23 @@ describe('utility functions', () => {
       assert.equal(shouldRetry(new Error('ECONNREFUSED')), true)
       assert.equal(shouldRetry(new Error('Network error')), true)
       assert.equal(shouldRetry(new Error('Rate limit exceeded')), true)
+      assert.equal(
+        shouldRetry(new Error('429 Too Many Requests: {"code":429,"message":"Too many requests"}')),
+        true,
+      )
+      assert.equal(
+        shouldRetry(
+          new Error('failed to get program accounts: Too many requests for a specific RPC call'),
+        ),
+        true,
+      )
     })
 
     it('should return false for regular non-transient errors', () => {
       assert.equal(shouldRetry(new Error('Invalid argument')), false)
       assert.equal(shouldRetry(new Error('Not found')), false)
+      // a 429 inside a longer number is not a status code
+      assert.equal(shouldRetry(new Error('invalid block 14290')), false)
     })
 
     it('should return false for non-Error values', () => {

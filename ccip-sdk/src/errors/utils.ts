@@ -36,7 +36,10 @@ export function shouldRetry(error: unknown): boolean {
       msg.includes('timeout') ||
       msg.includes('econnrefused') ||
       msg.includes('network') ||
-      msg.includes('rate limit')
+      msg.includes('rate limit') ||
+      // HTTP 429, e.g. web3.js after its own retries: "429 Too Many Requests: …"
+      /\b429\b/.test(msg) ||
+      msg.includes('too many requests')
     )
   }
   return false

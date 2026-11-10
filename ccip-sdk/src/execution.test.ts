@@ -7,6 +7,7 @@ import { Interface } from 'ethers'
 import type { PickDeep } from 'type-fest'
 
 import { Chain } from './chain.ts'
+import { CCIPOffRampNotFoundError } from './errors/index.ts'
 import OffRamp_1_6_ABI from './evm/abi/OffRamp_1_6.ts'
 import type { CCIPMessage_V1_6_EVM } from './evm/messages.ts'
 import { calculateManualExecProof, discoverOffRamp } from './execution.ts'
@@ -510,6 +511,54 @@ describe('discoverOffRamp', () => {
       async () =>
         await discoverOffRamp(sourceChain, destChain, { onRamp, version: CCIPVersion.V1_5 }),
       /No matching offRamp found/,
+    )
+  })
+
+  it('reports a dest lookup that failed transiently as a transient not-found', async () => {
+    const sourceChain = new MockChain(11155111)
+    const destChain = new MockChain(421614)
+    const onRamp = '0x8888888888888888888888888888888888888888'
+    sourceChain.setRouterForOnRamp(onRamp, '0xSourceRouter8')
+    sourceChain.setOffRampsForRouter('0xSourceRouter8', ['0xSourceOffRamp8'])
+    sourceChain.setOnRampForOffRamp('0xSourceOffRamp8', '0xDestOnRamp8')
+    // e.g. a public Solana RPC that rate-limits getProgramAccounts
+    const rateLimited = new Error(
+      '429 Too Many Requests: Too many requests for a specific RPC call',
+    )
+    destChain.getOffRampsForRouter = () => Promise.reject(rateLimited)
+
+    await assert.rejects(
+      discoverOffRamp(sourceChain, destChain, { onRamp, version: CCIPVersion.V1_6 }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCIPOffRampNotFoundError)
+        assert.equal(err.isTransient, true)
+        assert.equal(err.cause, rateLimited)
+        assert.deepEqual(err.context.skipped, [
+          { step: 'dest offRamps', address: '0xDestOnRamp8', error: rateLimited.message },
+        ])
+        return true
+      },
+    )
+  })
+
+  it('keeps the not-found permanent when no lookup failed transiently', async () => {
+    const sourceChain = new MockChain(11155111)
+    const destChain = new MockChain(421614)
+    const onRamp = '0x9999999999999999999999999999999999999999'
+    sourceChain.setRouterForOnRamp(onRamp, '0xSourceRouter9')
+    sourceChain.setOffRampsForRouter('0xSourceRouter9', ['0xSourceOffRamp9'])
+    sourceChain.setOnRampForOffRamp('0xSourceOffRamp9', '0xDestOnRamp9')
+    destChain.getOffRampsForRouter = () => Promise.reject(new Error('router has no offRamps'))
+
+    await assert.rejects(
+      discoverOffRamp(sourceChain, destChain, { onRamp, version: CCIPVersion.V1_6 }),
+      (err: unknown) => {
+        assert.ok(err instanceof CCIPOffRampNotFoundError)
+        assert.equal(err.isTransient, false)
+        assert.equal(err.cause, undefined)
+        assert.equal((err.context.skipped as unknown[]).length, 1)
+        return true
+      },
     )
   })
 
