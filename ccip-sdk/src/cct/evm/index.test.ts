@@ -8,7 +8,30 @@ import { interfaces } from '../../evm/const.ts'
 import type { EVMChain } from '../../evm/index.ts'
 import { ChainFamily, networkInfo } from '../../networks.ts'
 import { CCTContractTypeInvalidError, CCTParamsInvalidError } from '../errors.ts'
-import { EVMTokenManager } from './index.ts'
+import * as cctEvm from './index.ts'
+import {
+  type AdvancedPoolHooksTarget,
+  type BurnMintTokenPoolType,
+  type CCVConfig,
+  type CCVConfigUpdate,
+  type DeployableTokenPoolType,
+  type FactoryPoolFamily,
+  type LaneTokenTransferFeeConfig,
+  type LockReleaseTokenPoolType,
+  type LockboxConfig,
+  type SiloedLockReleaseTokenPoolStateV2_0_0,
+  type TokenBucket,
+  type TokenPoolDynamicConfig,
+  type TokenPoolFamily,
+  type TokenPoolFee,
+  type TokenPoolRateLimiterState,
+  type TokenPoolType,
+  type TokenPoolVersion,
+  type USDCTokenPoolStateV2_0_0,
+  type USDCTokenPoolType,
+  type USDCTokenPoolVersion,
+  EVMTokenManager,
+} from './index.ts'
 
 const TOKEN = '0x' + '11'.repeat(20)
 const POOL = '0x' + '22'.repeat(20)
@@ -1096,5 +1119,57 @@ describe('EVMTokenManager (cct/evm)', () => {
       })
       assert.equal(unsigned.transactions[0]!.chainId, CHAIN_ID)
     })
+  })
+})
+
+describe('cct/evm entry point', () => {
+  it('exposes only the manager, the factory functions and the pool taxonomy at runtime, so callers go through the query ops', () => {
+    assert.deepEqual(Object.keys(cctEvm).sort(), [
+      'DEPLOYABLE_TOKEN_POOL_TYPES',
+      'EVMTokenManager',
+      'LegacyUSDCTokenPoolVersion',
+      'TOKEN_POOL_FAMILIES',
+      'TOKEN_POOL_TYPES',
+      'TokenPoolVersion',
+      'USDC_TOKEN_POOL_TYPES',
+      'deployTokenAndTokenPoolViaFactory',
+      'deployTokenAndTokenPoolViaFactoryUnchecked',
+      'deployTokenPoolWithExistingTokenViaFactory',
+      'deployTokenPoolWithExistingTokenViaFactoryUnchecked',
+      'getTokenPoolFamily',
+      'isDeployableTokenPoolType',
+      'isLockReleaseTokenPoolType',
+      'isTokenPoolType',
+      'isTokenPoolVersion',
+      'simulateEVMTx',
+    ])
+  })
+
+  it('still names the types that public op params and results reference', () => {
+    // compile-time check: each alias fails tsc if the entry point stops exporting the type
+    type Exported = [
+      AdvancedPoolHooksTarget,
+      BurnMintTokenPoolType,
+      CCVConfig,
+      CCVConfigUpdate,
+      DeployableTokenPoolType,
+      FactoryPoolFamily,
+      LaneTokenTransferFeeConfig,
+      LockReleaseTokenPoolType,
+      LockboxConfig,
+      SiloedLockReleaseTokenPoolStateV2_0_0,
+      TokenBucket,
+      TokenPoolDynamicConfig,
+      TokenPoolFamily,
+      TokenPoolFee,
+      TokenPoolRateLimiterState,
+      TokenPoolType,
+      TokenPoolVersion,
+      USDCTokenPoolStateV2_0_0,
+      USDCTokenPoolType,
+      USDCTokenPoolVersion,
+    ]
+    const count: Exported['length'] = 20
+    assert.equal(count, 20)
   })
 })
