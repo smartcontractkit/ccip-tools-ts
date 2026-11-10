@@ -69,6 +69,7 @@ import {
   CCIPHasherVersionUnsupportedError,
   CCIPInsufficientBalanceError,
   CCIPLaneConfigIncompleteError,
+  CCIPLaneNotFoundError,
   CCIPLocalTokenRequiredError,
   CCIPLogDataInvalidError,
   CCIPRateLimitExceededError,
@@ -1599,26 +1600,44 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
    * Gets any available OnRamp for the given router.
    * @param address - Router or OnRamp contract address.
    * @returns OnRamp contract address.
+   * @throws {@link CCIPLaneNotFoundError} if no `destChainSelector` is given and the router
+   *   has no OnRamp to any chain it lists an OffRamp from
    */
   async _getSomeOnRampFor(address: string, destChainSelector?: bigint): Promise<string> {
     const [type, , typeAndVersion] = await this.typeAndVersion(address)
     if (type.includes('OnRamp')) return address
     else if (type !== 'Router') throw new CCIPContractNotRouterError(address, typeAndVersion)
     // when given a router, we take any onRamp we can find, as usually they all use same registry
-    if (!destChainSelector) {
-      // usually, we're handed a destChainSelector hint;
-      // but if not, assume this router is connected to one of the ethereum networks (or to Avalanche, if Ethereum)
-      const someOtherNetwork =
-        this.network.networkType === NetworkType.Testnet
-          ? this.network.name === 'ethereum-testnet-sepolia'
-            ? 'avalanche-testnet-fuji'
-            : 'ethereum-testnet-sepolia'
-          : this.network.name === 'ethereum-mainnet'
-            ? 'avalanche-mainnet'
-            : 'ethereum-mainnet'
-      destChainSelector = networkInfo(someOtherNetwork).chainSelector
+    if (destChainSelector) return this.getOnRampForRouter(address, destChainSelector)
+    // usually, we're handed a destChainSelector hint;
+    // but if not, assume this router is connected to one of the ethereum networks (or to Avalanche, if Ethereum)
+    const someOtherNetwork =
+      this.network.networkType === NetworkType.Testnet
+        ? this.network.name === 'ethereum-testnet-sepolia'
+          ? 'avalanche-testnet-fuji'
+          : 'ethereum-testnet-sepolia'
+        : this.network.name === 'ethereum-mainnet'
+          ? 'avalanche-mainnet'
+          : 'ethereum-mainnet'
+    const guess = networkInfo(someOtherNetwork).chainSelector
+    const onRamp = await this.getOnRampForRouter(address, guess)
+    if (onRamp && onRamp !== ZeroAddress) return onRamp
+    // a router without that lane (e.g. a new chain's first lanes): lanes are bidirectional, so the
+    // source chains it lists OffRamps from are the chains it most likely has OnRamps to
+    const router = new Contract(
+      address,
+      interfaces.Router,
+      this.provider,
+    ) as unknown as TypedContract<typeof Router_ABI>
+    const selectors = new Set((await router.getOffRamps()).map((o) => o.sourceChainSelector))
+    selectors.delete(guess)
+    for (const selector of selectors) {
+      const laneOnRamp = await this.getOnRampForRouter(address, selector)
+      if (laneOnRamp && laneOnRamp !== ZeroAddress) return laneOnRamp
     }
-    return this.getOnRampForRouter(address, destChainSelector)
+    throw new CCIPLaneNotFoundError(this.network.chainSelector, guess, {
+      context: { router: address },
+    })
   }
 
   /**
@@ -1630,13 +1649,28 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     if (type === 'TokenAdminRegistry') {
       return address
     } else if (isMultiTokenPoolType(type)) {
-      // a multi-token pool needs a token for its config, but not for its router
-      const contract = new Contract(
+      // a multi-token pool needs a token for its config, but not for its registry: its
+      // PoolConfigManager names the registry, with no lane to guess. Best-effort, since
+      // getStaticConfig is not part of IPoolConfigManager; else the pool's router resolves it.
+      const pool = new Contract(
         address,
         interfaces.MultiTokenPool_v2_1,
         this.provider,
       ) as unknown as TypedContract<typeof MultiTokenPool_2_1_ABI>
-      address = (await contract.getRouter()) as string
+      const pcm = new Contract(
+        (await pool.getPoolConfigManager()) as string,
+        interfaces.PoolConfigManager_v2_1,
+        this.provider,
+      ) as unknown as TypedContract<typeof PoolConfigManager_2_1_ABI>
+      const registry = await pcm.getStaticConfig().then(
+        ([tokenAdminRegistry]) => tokenAdminRegistry as string,
+        (err) => {
+          if (isError(err, 'CALL_EXCEPTION')) return undefined
+          throw CCIPError.from(err)
+        },
+      )
+      if (registry && registry !== ZeroAddress) return registry
+      address = (await pool.getRouter()) as string
       return this.getTokenAdminRegistryFor(address, destChainSelector)
     } else if (type.includes('TokenPool') || type === 'CrossChainPoolToken') {
       address = (await this.getTokenPoolConfig(address)).router

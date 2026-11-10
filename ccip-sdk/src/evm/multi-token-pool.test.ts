@@ -9,13 +9,20 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { type Interface, type JsonRpcApiProvider, makeError, zeroPadValue } from 'ethers'
+import {
+  type Interface,
+  type JsonRpcApiProvider,
+  getAddress,
+  makeError,
+  zeroPadValue,
+} from 'ethers'
 
 import { LaneFeature } from '../chain.ts'
 import {
   CCIPError,
   CCIPFinalityNotAllowedError,
   CCIPLaneConfigIncompleteError,
+  CCIPLaneNotFoundError,
   CCIPLocalTokenRequiredError,
   CCIPRateLimitExceededError,
   CCIPSourcePoolRevertError,
@@ -483,7 +490,16 @@ describe('EVMChain multi-token pool reads', () => {
     )
   })
 
-  it("getTokenAdminRegistryFor resolves through the pool's router, without a token", async () => {
+  it("getTokenAdminRegistryFor reads the registry from the pool's PCM, without a token", async () => {
+    const provider = mttpProvider()
+    const chain = new EVMChain(provider, SOURCE)
+    assert.equal(await chain.getTokenAdminRegistryFor(POOL), REGISTRY)
+    // no router lane to guess, and no token-scoped read
+    assert.ok(!provider.calls.some((c) => c.to === ROUTER))
+    assert.ok(!provider.calls.some((c) => c.selector === sel(pcm, 'getTokenConfigBatch')))
+  })
+
+  it("getTokenAdminRegistryFor falls back to the pool's router for a PCM without getStaticConfig", async () => {
     // the router address answers as a TokenAdminRegistry, so resolution stops at the 2nd hop
     const provider = stubProvider({
       [POOL]: {
@@ -491,6 +507,9 @@ describe('EVMChain multi-token pool reads', () => {
           'BurnMintMultiTokenPool 2.1.0-dev',
         ]),
         [sel(mttp, 'getRouter')]: mttp.encodeFunctionResult('getRouter', [ROUTER]),
+        [sel(mttp, 'getPoolConfigManager')]: mttp.encodeFunctionResult('getPoolConfigManager', [
+          PCM,
+        ]),
       },
       [ROUTER]: {
         [sel(mttp, 'typeAndVersion')]: mttp.encodeFunctionResult('typeAndVersion', [
@@ -501,6 +520,71 @@ describe('EVMChain multi-token pool reads', () => {
     const chain = new EVMChain(provider, SOURCE)
     assert.equal(await chain.getTokenAdminRegistryFor(POOL), ROUTER)
     assert.ok(!provider.calls.some((c) => c.selector === sel(tokenPool, 'getToken')))
+  })
+})
+
+describe('EVMChain router OnRamp discovery without a destination', () => {
+  const ARB_ONRAMP = getAddress('0x' + 'ab'.repeat(20))
+  const onRamp = interfaces.OnRamp_v2_0
+  /** A Router 1.2.0 with an OnRamp only to `onRamps` keys, and OffRamps from `offRampSources`. */
+  function routerProvider(onRamps: Record<string, string>, offRampSources: bigint[]) {
+    const provider = stubProvider({
+      [ROUTER]: {
+        [sel(router, 'typeAndVersion')]: router.encodeFunctionResult('typeAndVersion', [
+          'Router 1.2.0',
+        ]),
+        [sel(router, 'getOffRamps')]: router.encodeFunctionResult('getOffRamps', [
+          offRampSources.map((sourceChainSelector) => ({
+            sourceChainSelector,
+            offRamp: '0x' + 'cd'.repeat(20),
+          })),
+        ]),
+      },
+      [ARB_ONRAMP.toLowerCase()]: {
+        [sel(onRamp, 'typeAndVersion')]: onRamp.encodeFunctionResult('typeAndVersion', [
+          'OnRamp 2.0.0',
+        ]),
+      },
+    })
+    // getOnRamp(selector) answers per selector, so route it by calldata
+    const call = provider.call.bind(provider)
+    provider.call = (async (tx: { to?: string; data?: string }) => {
+      if (tx.to?.toLowerCase() === ROUTER && tx.data?.startsWith(sel(router, 'getOnRamp'))) {
+        const [selector] = router.decodeFunctionData('getOnRamp', tx.data)
+        provider.calls.push({ to: ROUTER, selector: sel(router, 'getOnRamp') })
+        return router.encodeFunctionResult('getOnRamp', [
+          onRamps[(selector as bigint).toString()] ?? '0x' + '00'.repeat(20),
+        ])
+      }
+      return call(tx as never)
+    }) as typeof provider.call
+    return provider
+  }
+
+  it('uses an OnRamp to a chain the router lists OffRamps from, when it has no Sepolia lane', async () => {
+    // a robinhood-testnet-like router: one lane to Arbitrum Sepolia, none to Sepolia
+    const provider = routerProvider({ [OTHER_DEST.chainSelector.toString()]: ARB_ONRAMP }, [
+      OTHER_DEST.chainSelector,
+    ])
+    const chain = new EVMChain(provider, networkInfo('robinhood-testnet'))
+    assert.equal(await chain._getSomeOnRampFor(ROUTER), ARB_ONRAMP)
+  })
+
+  it('throws CCIPLaneNotFoundError when the router has no OnRamp at all', async () => {
+    const provider = routerProvider({}, [OTHER_DEST.chainSelector])
+    const chain = new EVMChain(provider, networkInfo('robinhood-testnet'))
+    await assert.rejects(chain._getSomeOnRampFor(ROUTER), (err: unknown) => {
+      assert.ok(err instanceof CCIPLaneNotFoundError)
+      assert.equal(err.context.router, ROUTER)
+      return true
+    })
+  })
+
+  it('keeps the explicit destination lane as is', async () => {
+    const provider = routerProvider({ [DEST.chainSelector.toString()]: ARB_ONRAMP }, [])
+    const chain = new EVMChain(provider, SOURCE)
+    assert.equal(await chain._getSomeOnRampFor(ROUTER, DEST.chainSelector), ARB_ONRAMP)
+    assert.ok(!provider.calls.some((c) => c.selector === sel(router, 'getOffRamps')))
   })
 })
 
