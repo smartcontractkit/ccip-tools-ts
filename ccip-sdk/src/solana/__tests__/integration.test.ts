@@ -681,8 +681,12 @@ describe('Solana Devnet 2.0 router serving 1.6 and 2.0 lanes', { skip, timeout: 
     assert.equal(v16!.offramp ?? v16!.offRamp, undefined)
     // 2.0 lane (`dest_chain_state_v2`): names its offRamp
     assert.equal(v2!.offramp ?? v2!.offRamp, DUAL_SEPOLIA_OFFRAMP_V2)
-    // without a version, the router's own (2.0) lane config is read
-    assert.equal(byDefault!.offramp ?? byDefault!.offRamp, DUAL_SEPOLIA_OFFRAMP_V2)
+    // without a version, the config of the lane messages are sent over is read. The 2.0 lane to
+    // Sepolia has its sender allowlist enabled (in testing, read 2026-11-10), so that is the 1.6
+    // lane. Change these to the 2.0 values when the allowlist is lifted.
+    assert.equal(v2!.allowListEnabled, true)
+    assert.equal(byDefault!.laneVersion, CCIPVersion.V1_6)
+    assert.equal(byDefault!.offramp ?? byDefault!.offRamp, undefined)
   })
 
   it('finds the 1.6 and the 2.0 offRamp allowed by the router for a source chain', async () => {

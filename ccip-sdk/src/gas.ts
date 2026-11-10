@@ -16,7 +16,12 @@ import type { FinalityRequested } from './extra-args.ts'
 import { networkInfo } from './networks.ts'
 import { buildMessageForDest } from './requests.ts'
 import type { CCIPMessage_V1_6_Solana } from './solana/types.ts'
-import type { CCIPMessage, CCIPVersion, MessageInput, OffchainTokenData } from './types.ts'
+import {
+  type CCIPMessage,
+  type MessageInput,
+  type OffchainTokenData,
+  CCIPVersion,
+} from './types.ts'
 import {
   getDataBytes,
   getSourceDecimalsFromExtraData,
@@ -75,12 +80,17 @@ export type EstimateMessageInput = Simplify<
 
 /**
  * OffRamp of the OnRamp's default lane, for a message not sent yet (no message shape to give the
- * lane version): the OnRamp's own version, e.g. 2.0 for a Solana 2.0 Router that also serves 1.6
- * lanes, which is the lane its sends prefer.
+ * lane version): the lane messages are sent over. That is the OnRamp's own version, e.g. 2.0 for a
+ * Solana 2.0 Router that also serves 1.6 lanes, unless its default lane config reports another
+ * `laneVersion` (a Solana 2.0 lane in testing, with its sender allowlist enabled, is sent as 1.6).
  */
 async function discoverDefaultOffRamp(source: Chain, dest: Chain, onRamp: string) {
-  const [, version] = await source.typeAndVersion(onRamp)
-  return discoverOffRamp(source, dest, { onRamp, version: version as CCIPVersion }, source)
+  let version = (await source.typeAndVersion(onRamp))[1] as CCIPVersion
+  if (version >= CCIPVersion.V2_0) {
+    const config = await source.getOnRampConfig(onRamp, dest.network.chainSelector)
+    version = (config as { laneVersion?: CCIPVersion }).laneVersion ?? version
+  }
+  return discoverOffRamp(source, dest, { onRamp, version }, source)
 }
 
 /**

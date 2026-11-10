@@ -43,7 +43,7 @@ export const builder = (yargs: Argv) =>
       type: 'string',
       choices: ['1.2', '1.5', '1.6', '2.0'],
       describe:
-        'CCIP version of the lane, for an OnRamp that serves more than one (e.g. a Solana 2.0 Router also serves 1.6 lanes). Default: the OnRamp version',
+        'CCIP version of the lane, for an OnRamp that serves more than one (e.g. a Solana 2.0 Router also serves 1.6 lanes). Default: the lane messages are sent over',
     })
     .example([
       [
@@ -111,8 +111,12 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
     destNetwork.chainSelector,
     laneVersion ? { version: laneVersion } : undefined,
   )
-  // the lane version: both lanes of a Solana 2.0 Router report the same contract typeAndVersion
-  const version = laneVersion || ((await source.typeAndVersion(onRamp))[1] as CCIPVersion)
+  // the lane version: both lanes of a Solana 2.0 Router report the same contract typeAndVersion,
+  // so its default lane config reports the lane it read as `laneVersion`
+  const version =
+    laneVersion ||
+    (onRampConfig as { laneVersion?: CCIPVersion }).laneVersion ||
+    ((await source.typeAndVersion(onRamp))[1] as CCIPVersion)
 
   switch (argv.format) {
     case Format.log:

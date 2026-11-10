@@ -142,6 +142,7 @@ import {
   getFeeV2,
   observeDestChainV2,
   selectSendLane,
+  v2LaneUnavailableReason,
 } from './send-v2.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
@@ -328,6 +329,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       expires: 60e3,
     })
 
+    // the lane observation decides the lane version every method sees: getFee and the send it
+    // quotes for, lane features and the default lane config agree for 10min
+    this._observeDestChainV2 = memoize(this._observeDestChainV2.bind(this), {
+      async: true,
+      maxArgs: 2,
+      maxSize: 100,
+      expires: 600e3,
+    })
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
     this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), {
       async: true,
@@ -632,7 +641,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *
    * A 2.0 Router serves a 1.6 lane (`ccip_send`, `dest_chain_state` PDA) and a 2.0 lane
    * (`ccip_send_v2`, `dest_chain_state_v2` PDA) to the same destination. `opts.version`
-   * selects which lane config to read; without it, the Router's own version selects it.
+   * selects which lane config to read; without it, the lane messages are sent over: on a 2.0
+   * Router, the 2.0 lane only if it's configured and without its sender allowlist enabled, or if
+   * the Router has no 1.6 lane to fall back to (see {@link SolanaChain.getFee}).
    */
   async getOnRampConfig(
     onRamp: string,
@@ -640,6 +651,12 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts?: { version?: CCIPVersion },
   ) {
     const [, version, typeAndVersion] = await this.typeAndVersion(onRamp)
+    const laneVersion =
+      opts?.version ??
+      (version >= CCIPVersion.V2_0 &&
+      v2LaneUnavailableReason(await this._observeDestChainV2(onRamp, destChainSelector))
+        ? CCIPVersion.V1_6
+        : (version as CCIPVersion))
     const routerConfig = await this._getRouterConfig(onRamp)
 
     // CCIP v2 router (`ccip-router 2.0.0-dev`) stores the per-lane dest chain state under a
@@ -647,7 +664,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     // the lane fee config into that account instead of a separate FeeQuoter dest_chain account
     // (fees are quoted by a committee-verifier CCV at send time). Handle it separately; the rest
     // of the router (Config account) stays byte-compatible with the 1.6 IDL.
-    if ((opts?.version ?? version) >= CCIPVersion.V2_0) {
+    if (laneVersion >= CCIPVersion.V2_0) {
       const program = newProgram(CCIP_ROUTER_V2_IDL, new PublicKey(onRamp), {
         connection: this.connection,
       })
@@ -656,7 +673,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         new PublicKey(onRamp),
       )
       const destChainState = await program.account.destChainCcipV2.fetch(destChainStatePda)
-      return normalizeDeep(
+      const config = normalizeDeep(
         {
           ...routerConfig,
           destChainSelector,
@@ -670,6 +687,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           destFamily: networkInfo(destChainSelector).family,
         },
       )
+      return { ...config, laneVersion }
     }
 
     const program = newProgram(CCIP_ROUTER_IDL, new PublicKey(onRamp), {
@@ -697,7 +715,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       feeQuoter.account.config.fetch(feeQuoterConfigAddress),
       feeQuoter.account.destChain.fetch(feeQuoterDestAddress),
     ])
-    return normalizeDeep(
+    const config = normalizeDeep(
       {
         ...routerConfig,
         destChainSelector,
@@ -711,6 +729,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         destFamily: networkInfo(destChainSelector).family,
       },
     )
+    return { ...config, laneVersion }
   }
 
   /**
@@ -1447,9 +1466,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * {@inheritDoc Chain.getFee}
    *
    * Solana routers expose separate CCIP 1.6 and 2.0 entrypoints, chosen per message: 2.0 whenever
-   * the lane supports it (without its sender allowlist enabled) and the extraArgs are (or convert
-   * to) GenericExtraArgsV3, 1.6 otherwise. The quote follows the same choice as
-   * {@link SolanaChain.sendMessage}, given the same {@link SolanaSendMessageOpts}.
+   * the lane supports it (without its sender allowlist enabled, unless the router has no 1.6 lane
+   * to fall back to) and the extraArgs are (or convert to) GenericExtraArgsV3, 1.6 otherwise. The quote follows the same choice as
+   * {@link SolanaChain.sendMessage}, given the same {@link SolanaSendMessageOpts}: an instance
+   * reuses each lane's observation for 10min, so both see the lane alike.
    * @throws {@link CCIPSolanaV2LaneUnavailableError} if the extraArgs are GenericExtraArgsV3 and
    *   the lane doesn't support CCIP 2.0, or has its sender allowlist enabled
    */
@@ -1462,6 +1482,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       destChainSelector,
       message: populatedMessage,
       sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
+      observe: () => this._observeDestChainV2(router, destChainSelector),
     })
     return this.quoteSendLane(router, destChainSelector, lane)
   }
@@ -1487,7 +1508,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *
    * Sends through the router's CCIP 2.0 entrypoint (`ccip_send_v2`) when possible, and its 1.6 one
    * (`ccip_send`) otherwise; see {@link SolanaChain.getFee}. A 2.0 lane with its sender allowlist
-   * enabled counts as unsupported, whether or not it includes the sender.
+   * enabled counts as unsupported, whether or not it includes the sender, when the router has a 1.6
+   * lane to fall back to.
    * @returns instructions - array of instructions; the send instruction is last, after any
    *   approval (and, for 2.0, a heap frame request, which must share its transaction)
    *   lookupTables - array of lookup tables for the send instruction
@@ -1509,6 +1531,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       destChainSelector,
       message: populatedMessage,
       sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
+      observe: () => this._observeDestChainV2(router, destChainSelector),
     })
     let fee = opts.message.fee
     if (fee == null) {
@@ -2123,19 +2146,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * A 2.0 Solana router keeps serving 1.6 lanes, so a lane only carries fast finality if the router
-   * has a 2.0 path to it (it may still allowlist senders).
+   * A 2.0 Solana router keeps serving 1.6 lanes, so a lane only carries fast finality if messages go
+   * over its 2.0 path, which a 2.0 lane with its sender allowlist enabled (in testing) doesn't,
+   * unless the router has no 1.6 lane to fall back to.
    */
   protected override async laneSupportsFastFinality(
     router: string,
     destChainSelector: bigint,
   ): Promise<boolean> {
     if (!(await super.laneSupportsFastFinality(router, destChainSelector))) return false
-    const lane = await observeDestChainV2(this, {
-      router: new PublicKey(router),
-      destChainSelector,
-    })
-    return 'observation' in lane
+    return !v2LaneUnavailableReason(await this._observeDestChainV2(router, destChainSelector))
   }
 
   /** Solana token pools configure their allowed finality per remote chain. */
@@ -2412,6 +2432,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     const usdPerToken = billingTokenConfigWrapper.config.usdPerToken
     return { price: Number(toBigInt(Buffer.from(usdPerToken.value))) * 10 ** (decimals - 36) }
+  }
+
+  /**
+   * {@link observeDestChainV2}, memoized for 10min.
+   * @param router - Router program address.
+   * @param destChainSelector - Destination chain selector.
+   * @returns The lane's observation, or why the router has no 2.0 lane to it.
+   */
+  async _observeDestChainV2(router: string, destChainSelector: bigint) {
+    return observeDestChainV2(this, { router: new PublicKey(router), destChainSelector })
   }
 
   /**

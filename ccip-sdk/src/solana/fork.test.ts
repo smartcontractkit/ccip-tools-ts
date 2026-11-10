@@ -30,7 +30,7 @@ import {
   CCIPSolanaV2LaneUnavailableError,
 } from '../errors/index.ts'
 import type { GenericExtraArgsV3 } from '../extra-args.ts'
-import { networkInfo } from '../index.ts'
+import { LaneFeature, networkInfo } from '../index.ts'
 import {
   type CCIPMessage,
   type MessageInput,
@@ -1089,7 +1089,13 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         )
       }
 
+      // a new instance: `solanaChain` observed this lane without its allowlist, and reuses that
+      let chain: SolanaChain | undefined
       before(async () => {
+        chain = new SolanaChain(connection!, networkInfo('solana-devnet'), {
+          apiClient: null,
+          logger: testLogger,
+        })
         const account = await connection!.getAccountInfoAndContext(laneState)
         assert.ok(account.value, 'the lane state should exist')
         original = account.value.data
@@ -1105,23 +1111,32 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         message,
       })
 
-      it("doesn't quote or send over 2.0, even for an allowlisted sender", async () => {
+      // this 2.0-only deployment has no 1.6 lane to fall back to: messages go over the 2.0 lane
+      it('quotes and sends over 2.0 for an allowlisted sender, at the quoted fee', async () => {
         await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
-
-        const allowlistEnabled = (err: unknown) =>
-          err instanceof CCIPSolanaV2LaneUnavailableError &&
-          err.context.reason === 'allowlist-enabled'
-        await assert.rejects(solanaChain!.getFee(feeOpts(v3)), allowlistEnabled)
-        await assert.rejects(solanaChain!.sendMessage(sendOpts(v3)), allowlistEnabled)
-        // legacy args fall back to 1.6 instead, which this 2.0-only deployment doesn't have
+        const fee = await chain!.getFee(feeOpts(v3))
+        const request = await chain!.sendMessage(sendOpts({ ...v3, fee }))
+        assert.equal(request.lane.version, CCIPVersion.V2_0)
+        const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+        assert.equal(sent.feeTokenAmount, fee, 'the send should charge the quoted fee')
+        // legacy args convert to GenericExtraArgsV3, as on a lane without its allowlist enabled
         const legacy = { ...v3, extraArgs: legacyArgs }
+        assert.ok((await chain!.getFee(feeOpts(legacy))) > 0n)
+        // messages go over 2.0, which carries fast finality
+        const features = await chain!.getLaneFeatures({
+          router: STAGING.router,
+          destChainSelector: STAGING.sepoliaSelector,
+        })
+        assert.ok(LaneFeature.FINALITY_FAST in features)
+      })
+
+      it('leaves rejecting a sender off the allowlist to the router', async () => {
+        await setAllowlist([Keypair.generate().publicKey])
         await assert.rejects(
-          solanaChain!.getFee(feeOpts(legacy)),
-          (err: unknown) => !(err instanceof CCIPSolanaV2LaneUnavailableError),
-        )
-        await assert.rejects(
-          solanaChain!.sendMessage(sendOpts(legacy)),
-          (err: unknown) => !(err instanceof CCIPSolanaV2LaneUnavailableError),
+          chain!.sendMessage(sendOpts(v3)),
+          (err: unknown) =>
+            err instanceof SendTransactionError &&
+            !!err.logs?.some((log) => log.includes('SenderNotAllowed')),
         )
       })
 
@@ -1130,8 +1145,8 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
 
         it('quotes and sends over 2.0 for an allowlisted sender, at the quoted fee', async () => {
           await setAllowlist([Keypair.generate().publicKey, wallet!.publicKey])
-          const fee = await solanaChain!.getFee({ ...feeOpts(v3), ...optedIn })
-          const request = await solanaChain!.sendMessage({
+          const fee = await chain!.getFee({ ...feeOpts(v3), ...optedIn })
+          const request = await chain!.sendMessage({
             ...sendOpts({ ...v3, fee }),
             ...optedIn,
           })
@@ -1143,7 +1158,7 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
         it('leaves rejecting a sender off the allowlist to the router', async () => {
           await setAllowlist([Keypair.generate().publicKey])
           await assert.rejects(
-            solanaChain!.sendMessage({ ...sendOpts(v3), ...optedIn }),
+            chain!.sendMessage({ ...sendOpts(v3), ...optedIn }),
             (err: unknown) =>
               err instanceof SendTransactionError &&
               !!err.logs?.some((log) => log.includes('SenderNotAllowed')),

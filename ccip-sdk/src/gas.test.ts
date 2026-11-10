@@ -481,6 +481,47 @@ describe('estimateExecGasForRequest', () => {
     assert.equal(sendCall.arguments[1].length, 2) // Only transaction and block, no stateOverrides
   })
 
+  it('should use the OffRamp of the lane its default config reports, not the OnRamp version', async () => {
+    // a Solana 2.0 Router sends over its 1.6 lane while the 2.0 lane is in testing; the dest has
+    // a 2.0 OffRamp and a 1.6 OffRamp that both accept it
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const offRampV2 = getAddress(hexlify(randomBytes(20)))
+    const offRampV16 = getAddress(hexlify(randomBytes(20)))
+
+    const chains = createMockChains(onRamp, offRampV2)
+    mockSourceChain = chains.mockSourceChain
+    mockDestChain = chains.mockDestChain
+    mockSourceChain.typeAndVersion = mock.fn(async (address: string) =>
+      address === onRamp ? ['Router', '2.0.0', address] : ['Router', '1.0.0', address],
+    )
+    mockSourceChain.getOnRampConfig = mock.fn(async () => ({
+      typeAndVersion: 'Router 2.0.0',
+      laneVersion: '1.6.0',
+    }))
+    mockDestChain.getOffRampsForRouter = mock.fn(async () => [offRampV2, offRampV16])
+    mockDestChain.typeAndVersion = mock.fn(async (address: string) =>
+      address === offRampV2 ? ['OffRamp', '2.0.0', address] : ['OffRamp', '1.6.0', address],
+    )
+    mockDestChain.provider.send = mock.fn(async () => toBeHex(35_000))
+
+    await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
+      message: {
+        sender: getAddress(hexlify(randomBytes(20))),
+        receiver: getAddress(hexlify(randomBytes(20))),
+        data: '0x',
+        tokenAmounts: [],
+      },
+    })
+
+    assert.equal(
+      mockDestChain.estimateReceiveExecution.mock.calls[0].arguments[0].offRamp,
+      offRampV16,
+    )
+  })
+
   it('should resolve dest decimals from the dest pool when the dest token has no decimals()', async () => {
     const onRamp = getAddress(hexlify(randomBytes(20)))
     const offRamp = getAddress(hexlify(randomBytes(20)))
