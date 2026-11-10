@@ -3706,7 +3706,7 @@ export type SolanaV2LaneUnavailableReason =
  * Thrown when a Solana message requires a CCIP 2.0 lane (its extraArgs are GenericExtraArgsV3),
  * but the router can't send it over one: the lane isn't configured for 2.0, the router doesn't
  * have 2.0 support yet, or the lane has its sender allowlist enabled, which the SDK doesn't send
- * 2.0 messages over.
+ * 2.0 messages over while the router has a 1.6 lane to fall back to.
  *
  * @example
  * ```typescript

@@ -25,6 +25,7 @@ import {
 } from '../extra-args.ts'
 import { networkInfo } from '../networks.ts'
 import { type AnyMessage, CCIPVersion } from '../types.ts'
+import { toLeArray } from '../utils.ts'
 import { sighash, sizedCoder } from './coder.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import {
@@ -120,18 +121,21 @@ type SimulationResult = Buffer | { err: unknown; logs?: string[] }
 function routerConnection(
   router: PublicKey,
   {
-    observation = STAGING_SEPOLIA_OBSERVATION as SimulationResult,
+    observation = STAGING_SEPOLIA_OBSERVATION as SimulationResult | (() => SimulationResult),
     saved = [{ pubkey: randomKey(), isSigner: false, isWritable: false }] as AccountMeta[],
     lookupTablesToSave = [] as PublicKey[],
     fee = 12_345n,
     other = { err: { InstructionError: [1, { Custom: 9999 }] } } as SimulationResult,
+    // whether the router also has a 1.6 lane (`dest_chain_state`) to SEPOLIA
+    v16Lane = true,
   } = {},
 ) {
   const simulateTransaction = mock.fn(async (tx: VersionedTransaction) => {
     const { data } = lastInstruction(tx)
     const discriminator = data.subarray(0, 8)
     let result: SimulationResult = other
-    if (discriminator.equals(OBSERVE_DEST_CHAIN_V2_DISCRIMINATOR)) result = observation
+    if (discriminator.equals(OBSERVE_DEST_CHAIN_V2_DISCRIMINATOR))
+      result = typeof observation === 'function' ? observation() : observation
     else if (discriminator.equals(RESOLVE_ACCOUNTS_START_DISCRIMINATOR))
       result = encodeResponse({
         askAgainWith: [],
@@ -158,7 +162,17 @@ function routerConnection(
   const connection = {
     simulateTransaction,
     getAddressLookupTable,
-    getAccountInfo: mock.fn(async () => null),
+    getAccountInfo: mock.fn(async (key: PublicKey) =>
+      v16Lane &&
+      key.equals(
+        PublicKey.findProgramAddressSync(
+          [Buffer.from('dest_chain_state'), toLeArray(SEPOLIA, 8)],
+          router,
+        )[0],
+      )
+        ? { owner: router, data: Buffer.alloc(8), lamports: 1, executable: false }
+        : null,
+    ),
     getSignaturesForAddress: mock.fn(async () => []),
   } as unknown as Connection
   return { connection, simulateTransaction, getAddressLookupTable }
@@ -415,6 +429,18 @@ describe('selectSendLane', () => {
     assert.equal(v3.version, CCIPVersion.V2_0)
   })
 
+  it('uses 2.0 on a lane with its allowlist enabled when the router has no 1.6 lane', async () => {
+    const { connection } = routerConnection(STAGING_ROUTER, {
+      observation: allowlistedObservation(),
+      v16Lane: false,
+    })
+    const legacy = await select(connection, { gasLimit: 5n })
+    assert.equal(legacy.version, CCIPVersion.V2_0)
+    assert.deepEqual(legacy.message.extraArgs, { ...LANE_DEFAULTS_V3, gasLimit: 5n })
+    const v3 = await select(connection, LANE_DEFAULTS_V3)
+    assert.equal(v3.version, CCIPVersion.V2_0)
+  })
+
   it('sends args without a V3 equivalent over 1.6, without observing the lane', async () => {
     const { connection, simulateTransaction } = routerConnection(STAGING_ROUTER)
     const lane = await select(connection, { gasLimit: 0x1_0000_0000n })
@@ -578,6 +604,52 @@ describe('SolanaChain send lane routing', () => {
       await assert.rejects(
         chain(connection).generateUnsignedSendMessage(opts({ finality: 'safe' })),
         allowlistEnabled,
+      )
+    })
+
+    it('keeps the lane at 1.6 per instance after the allowlist is lifted', async () => {
+      let observation: SimulationResult = allowlistedObservation()
+      const { connection, simulateTransaction } = routerConnection(STAGING_ROUTER, {
+        observation: () => observation,
+        fee: 99n,
+      })
+      const observations = () =>
+        simulateTransaction.mock.calls.filter((call) =>
+          lastInstruction(call.arguments[0])
+            .data.subarray(0, 8)
+            .equals(OBSERVE_DEST_CHAIN_V2_DISCRIMINATOR),
+        ).length
+      const { sender: _, ...feeOpts } = opts({ gasLimit: 0n })
+      const testing = chain(connection)
+      // the 1.6 quote reads the router config, which this mock doesn't have
+      await assert.rejects(testing.getFee(feeOpts), CCIPSolanaRouterConfigNotFoundError)
+
+      observation = STAGING_SEPOLIA_OBSERVATION // the allowlist is lifted
+      await assert.rejects(testing.getFee(feeOpts), CCIPSolanaRouterConfigNotFoundError)
+      await assert.rejects(
+        testing.generateUnsignedSendMessage(opts({ finality: 'safe' })),
+        CCIPSolanaV2LaneUnavailableError,
+      )
+      assert.equal(observations(), 1, 'the instance should observe the lane once')
+
+      // a new instance sees the lane at 2.0
+      assert.equal(await chain(connection).getFee(feeOpts), 99n)
+    })
+
+    it('quotes and sends over 2.0 when the router has no 1.6 lane', async () => {
+      const { connection } = routerConnection(STAGING_ROUTER, {
+        observation: allowlistedObservation(),
+        fee: 99n,
+        v16Lane: false,
+      })
+      const { sender: _, ...feeOpts } = opts({ gasLimit: 0n })
+      assert.equal(await chain(connection).getFee(feeOpts), 99n)
+      const unsigned = await chain(connection).generateUnsignedSendMessage(
+        opts({ finality: 'safe' }),
+      )
+      assert.deepEqual(
+        unsigned.instructions.at(-1)!.data.subarray(0, 8),
+        CCIP_SEND_V2_DISCRIMINATOR,
       )
     })
 
