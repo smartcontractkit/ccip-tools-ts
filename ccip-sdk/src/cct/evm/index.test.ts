@@ -15,6 +15,7 @@ import {
   type CCVConfig,
   type CCVConfigUpdate,
   type DeployableTokenPoolType,
+  type FactoryPoolFamily,
   type LaneTokenTransferFeeConfig,
   type LockReleaseTokenPoolType,
   type LockboxConfig,
@@ -1152,6 +1153,7 @@ describe('cct/evm entry point', () => {
       CCVConfig,
       CCVConfigUpdate,
       DeployableTokenPoolType,
+      FactoryPoolFamily,
       LaneTokenTransferFeeConfig,
       LockReleaseTokenPoolType,
       LockboxConfig,
@@ -1167,7 +1169,7 @@ describe('cct/evm entry point', () => {
       USDCTokenPoolType,
       USDCTokenPoolVersion,
     ]
-    const count: Exported['length'] = 19
-    assert.equal(count, 19)
+    const count: Exported['length'] = 20
+    assert.equal(count, 20)
   })
 })

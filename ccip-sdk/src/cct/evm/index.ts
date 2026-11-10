@@ -4780,6 +4780,7 @@ export type {
   FactoryRemoteTokenPool,
   FactoryTokenPoolType,
 } from './token-pool-factory/deploy.ts'
+export type { FactoryPoolFamily } from './token-pool-factory/predict.ts'
 export {
   deployTokenAndTokenPoolViaFactory,
   deployTokenAndTokenPoolViaFactoryUnchecked,
