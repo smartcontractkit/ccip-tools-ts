@@ -13,17 +13,17 @@ CCIP API v1 is being retired. Move your integration to API v2.
 
 ## Timeline
 
-| Date                        | What happens                                                                 |
-| --------------------------- | ---------------------------------------------------------------------------- |
-| November 6, 2026, 14:00 UTC | v1 is disabled. All v1 requests return `410 Gone` with a link to this guide. |
-| November 30, 2026           | v1 is permanently retired. All v1 requests keep returning `410 Gone`.        |
+| Date              | What happens                                                                 |
+| ----------------- | ---------------------------------------------------------------------------- |
+| November 11, 2026 | v1 is disabled. All v1 requests return `410 Gone` with a link to this guide. |
+| November 30, 2026 | v1 is permanently retired. All v1 requests keep returning `410 Gone`.        |
 
 ## Why migrate
 
 v1 returns data that is no longer accurate:
 
-- **Lane latency.** v1 `totalMs` is a 90th-percentile figure, so it overstates typical delivery time. v2 `totalMs` is a trimmed median that excludes the slowest 10% of messages. For example, Ethereum to BNB Chain reported about 18.7 minutes on v1 and 16.1 minutes on v2 on November 5, 2026.
-- **Messages.** v1 returns an empty `tokenAmounts` list for CCIP 2.0 token transfers and omits fields such as `verifiers`, `finality`, and `fees`.
+- **Lane latency.** v1 uses an outdated estimation methodology that aggregates all messages on a lane regardless of lane version or token. v2 uses a more accurate methodology based on message properties — lane version and token now factor into the estimate — so values better reflect actual delivery times. For example, Ethereum to BNB Chain reported about 18.7 minutes on v1 and 16.1 minutes on v2 on November 5, 2026.
+- **Messages.** CCIP v2 is not supported on API v1.
 
 ## Endpoint mapping
 
@@ -41,7 +41,7 @@ Replace the base URL `https://api.ccip.chain.link/v1` with `https://api.ccip.cha
 
 Existing parameters and response fields are unchanged. v2 adds fields to `lane.sourceNetworkInfo` and `lane.destNetworkInfo`, and rejects selector pairs that mix mainnet and testnet with `400`. Also:
 
-- `totalMs` is a trimmed median instead of a 90th percentile, so expect lower values.
+- `totalMs` is estimated with a more accurate methodology that factors in message properties such as lane version and token, so expect values that better reflect actual delivery times.
 - Two optional query parameters are available: `numOfBlocks` (block confirmations to estimate against; `0` or omitted means full finality) and `sourceTokenAddress` (token-specific latency).
 
 ```bash
