@@ -1,0 +1,517 @@
+import type { EventListener, Provider } from '@canton-network/core-splice-provider'
+import type { RequestArgs } from '@canton-network/core-types'
+import type {
+  LedgerApiParams,
+  LedgerApiResult,
+  PrepareExecuteAndWaitResult,
+  PrepareExecuteParams,
+  RpcTypes,
+  Wallet,
+} from '@canton-network/core-wallet-dapp-rpc-client'
+import { type PartyId, parsePartyId } from '@chainlink/ccip-sdk/src/canton/addressCodec.ts'
+import type {
+  JsExecuteSubmissionAndWaitForTransactionRequest,
+  JsPrepareSubmissionRequest,
+  JsPrepareSubmissionResponse,
+  SinglePartySignatures,
+} from '@chainlink/ccip-sdk/src/canton/clients/ledger-api/client.ts'
+import type { CantonRpcProvider } from '@chainlink/ccip-sdk/src/canton/types.ts'
+import { CCIPError, CCIPErrorCode, getDataBytes } from '@chainlink/ccip-sdk/src/index.ts'
+import axios from 'axios'
+
+/**
+ * Signs a prepared Canton transaction hash on behalf of an external party.
+ *
+ * Implementations receive the raw hash bytes (decoded from the base64
+ * `preparedTransactionHash` returned by the Preparing Participant Node) and
+ * must return a fully-assembled {@link SinglePartySignatures} structure.
+ *
+ * @example
+ * ```ts
+ * const signer: TransactionSigner = {
+ *   async sign(hash) {
+ *     const sig = ed25519.sign(hash, privateKey)
+ *     return {
+ *       signatures: [{
+ *         format: 'CRYPTO_KEY_FORMAT_RAW',
+ *         signature: Buffer.from(sig).toString('base64'),
+ *         signedBy: keyFingerprint,
+ *         signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
+ *       }],
+ *     }
+ *   },
+ * }
+ * ```
+ */
+export interface TransactionSigner {
+  signTxHash(hash: Uint8Array): Promise<SinglePartySignatures>
+}
+
+/**
+ * Node-side Canton provider for the CLI.
+ *
+ * Unlike the in-browser dApp provider, which proxies `ledgerApi` requests
+ * through the validator wallet, this provider talks to the Canton JSON Ledger
+ * API directly: `ledgerApi` requests are already in wire format, so the
+ * translation layer is a thin HTTP pass-through with JWT authentication.
+ */
+export class JsonRpcProvider implements CantonRpcProvider {
+  // CAIP-2 compliant chain ID, e.g. canton:mainnet
+  private readonly chainId: string
+  private readonly party: PartyId
+  private readonly baseUrl: string
+  private readonly jwt: string | (() => Promise<string>)
+  private readonly fetchFn: typeof fetch | undefined
+  /** HTTP protocol version for the axios transport (canton config `httpVersion`). Default `2`. */
+  private readonly httpVersion: '1' | '2'
+  /** Optional external signer (e.g. Ledger). When set, submissions go through the interactive submission API. */
+  private readonly signer: TransactionSigner | undefined
+  private readonly listeners = new Map<string, EventListener<unknown>[]>()
+
+  private constructor(
+    chainId: string,
+    baseUrl: string,
+    jwt: string | (() => Promise<string>),
+    fetchFn: typeof fetch | undefined,
+    httpVersion: '1' | '2' | undefined,
+    party: PartyId,
+    signer?: TransactionSigner,
+  ) {
+    this.chainId = chainId
+    // Trim a single trailing slash so resource paths join cleanly
+    this.baseUrl = baseUrl.replace(/\/$/, '')
+    this.jwt = jwt
+    this.fetchFn = fetchFn
+    this.httpVersion = httpVersion ?? '2'
+    this.party = party
+    this.signer = signer
+  }
+
+  static async fromUrl(
+    chainId: string,
+    url: string,
+    jwt: string | (() => Promise<string>),
+    fetchFn?: typeof fetch,
+    httpVersion?: '1' | '2',
+    party?: string,
+    signer?: TransactionSigner,
+  ) {
+    const baseUrl = url.replace(/\/$/, '')
+
+    // If no party is provided, get the primary party of the authenticated user
+    let partyId: PartyId
+    if (party) {
+      partyId = parsePartyId(party)
+    } else {
+      const data = (await ledgerJsonRequest({
+        method: 'GET',
+        url: `${baseUrl}/v2/authenticated-user`,
+        jwt,
+        fetchFn,
+        httpVersion,
+      })) as { user?: { primaryParty?: string } }
+      if (data.user?.primaryParty == undefined || data.user.primaryParty === '') {
+        throw new CCIPError(
+          CCIPErrorCode.CANTON_API_ERROR,
+          `Authenticated user has no primary party set and no party was provided`,
+        )
+      }
+      partyId = parsePartyId(data.user.primaryParty)
+    }
+
+    return new JsonRpcProvider(chainId, baseUrl, jwt, fetchFn, httpVersion, partyId, signer)
+  }
+
+  async request<M extends keyof RpcTypes>(
+    args: RequestArgs<RpcTypes, M>,
+  ): Promise<RpcTypes[M]['result']> {
+    const methodName: string = args.method
+    switch (args.method) {
+      case 'ledgerApi':
+        return (await this.ledgerApi(
+          (args as RequestArgs<RpcTypes, 'ledgerApi'>).params,
+        )) as RpcTypes[M]['result']
+      case 'prepareExecuteAndWait':
+        return (await this.prepareExecuteAndWait(
+          (args as RequestArgs<RpcTypes, 'prepareExecuteAndWait'>).params,
+        )) as RpcTypes[M]['result']
+      case 'getActiveNetwork':
+        return { networkId: this.chainId } as RpcTypes[M]['result']
+      case 'getPrimaryAccount':
+        return (await this.getPrimaryAccount()) as RpcTypes[M]['result']
+
+      // Native provider methods (wallet/session management), not implemented yet.
+      case 'listAccounts':
+      case 'connect':
+      case 'disconnect':
+      case 'isConnected':
+      case 'prepareExecute':
+      case 'signMessage':
+      case 'status':
+      case 'accountsChanged':
+      case 'txChanged':
+      case 'messageSignature':
+        throw new CCIPError(
+          CCIPErrorCode.NOT_IMPLEMENTED,
+          `Canton JsonRpcProvider does not implement '${methodName}' yet`,
+        )
+      default:
+        throw new CCIPError(
+          CCIPErrorCode.METHOD_UNSUPPORTED,
+          `Unknown Canton provider method: ${methodName}`,
+        )
+    }
+  }
+
+  on<E>(event: string, listener: EventListener<E>): Provider<RpcTypes> {
+    const existing = this.listeners.get(event) ?? []
+    existing.push(listener as EventListener<unknown>)
+    this.listeners.set(event, existing)
+    return this
+  }
+
+  emit<E>(event: string, ...args: E[]): boolean {
+    const existing = this.listeners.get(event)
+    if (existing == undefined || existing.length === 0) return false
+    for (const listener of [...existing]) listener(...args)
+    return true
+  }
+
+  removeListener<E>(event: string, listenerToRemove: EventListener<E>): Provider<RpcTypes> {
+    const existing = this.listeners.get(event)
+    if (existing == undefined) return this
+    const remaining = existing.filter((listener) => listener !== listenerToRemove)
+    if (remaining.length === 0) this.listeners.delete(event)
+    else this.listeners.set(event, remaining)
+    return this
+  }
+
+  getParty(): PartyId {
+    return this.party
+  }
+
+  /** Translate a `ledgerApi` request into a direct Ledger API HTTP call. */
+  private async ledgerApi(params: LedgerApiParams): Promise<LedgerApiResult> {
+    let resource = params.resource.startsWith('/') ? params.resource : `/${params.resource}`
+    // Substitute `{key}` placeholders when path params are provided
+    if (params.path != undefined) {
+      for (const [key, value] of Object.entries(params.path)) {
+        resource = resource.replaceAll(`{${key}}`, encodeURIComponent(String(value)))
+      }
+    }
+
+    const url = new URL(`${this.baseUrl}${resource}`)
+    if (params.query != undefined) {
+      for (const [key, value] of Object.entries(params.query)) {
+        if (value === undefined || value === null) continue
+        url.searchParams.set(key, String(value))
+      }
+    }
+
+    return (await ledgerJsonRequest({
+      method: params.requestMethod.toUpperCase(),
+      url: url.toString(),
+      jwt: this.jwt,
+      body: params.body,
+      fetchFn: this.fetchFn,
+      httpVersion: this.httpVersion,
+    })) as LedgerApiResult
+  }
+
+  /**
+   * Submit commands and wait for execution.
+   *
+   * With an external {@link TransactionSigner} configured, the interactive
+   * submission API is used: prepare the transaction on the participant, sign
+   * the prepared hash externally, then execute with the signatures. Without
+   * one, the participant signs with the party's key via JWT-authenticated
+   * direct submission.
+   */
+  private async prepareExecuteAndWait(
+    params: PrepareExecuteParams,
+  ): Promise<PrepareExecuteAndWaitResult> {
+    const commandId =
+      params.commandId ?? `ccip-cli-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+
+    if (this.signer) {
+      return (await this.interactiveSubmission(commandId, params)) as PrepareExecuteAndWaitResult
+    }
+
+    const response = (await ledgerJsonRequest({
+      method: 'POST',
+      url: `${this.baseUrl}/v2/commands/submit-and-wait`,
+      jwt: this.jwt,
+      body: {
+        commandId,
+        commands: params.commands,
+        // The dApp spec defaults actAs to the wallet's primary party
+        actAs: params.actAs ?? [this.party],
+        readAs: params.readAs,
+        disclosedContracts: params.disclosedContracts,
+        synchronizerId: params.synchronizerId,
+      },
+      fetchFn: this.fetchFn,
+      httpVersion: this.httpVersion,
+    })) as { updateId?: string; completionOffset?: number }
+    if (response.updateId == undefined) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `Canton submit-and-wait returned no updateId for command ${commandId}`,
+      )
+    }
+    return {
+      tx: {
+        status: 'executed',
+        commandId,
+        payload: {
+          updateId: response.updateId,
+          completionOffset: response.completionOffset ?? 0,
+        },
+      },
+    }
+  }
+
+  /**
+   * The provider's party as the primary account. The dApp `Wallet` shape's
+   * remaining fields are wallet-UI metadata the CLI doesn't need.
+   */
+  private async getPrimaryAccount(): Promise<Wallet> {
+    return {
+      primary: true,
+      partyId: this.party,
+      status: 'allocated',
+      hint: '',
+      publicKey: '',
+      namespace: '',
+      networkId: this.chainId,
+      signingProviderId: '',
+    } as Wallet
+  }
+
+  /**
+   * Interactive submission with external signing: prepare → sign → execute.
+   */
+  private async interactiveSubmission(
+    commandId: string,
+    params: PrepareExecuteParams,
+  ): Promise<PrepareExecuteAndWaitResult> {
+    // Step 1 — Prepare the transaction on the (preparing) participant node
+    const prepareRequest: JsPrepareSubmissionRequest = {
+      commandId,
+      // The dApp RPC mirrors the Ledger API Command schema loosely (payload as
+      // record); the generated type is strict. The wire format is identical.
+      commands: params.commands as JsPrepareSubmissionRequest['commands'],
+      actAs: params.actAs ?? [this.party],
+      readAs: params.readAs,
+      disclosedContracts: params.disclosedContracts,
+      // must be provided, even if empty
+      synchronizerId: params.synchronizerId ?? '',
+      hashingSchemeVersion: 'HASHING_SCHEME_VERSION_V3',
+      // must be provided, even if empty
+      packageIdSelectionPreference: [],
+    }
+    const prepareResponse = (await ledgerJsonRequest({
+      method: 'POST',
+      url: `${this.baseUrl}/v2/interactive-submission/prepare`,
+      jwt: this.jwt,
+      body: prepareRequest,
+      fetchFn: this.fetchFn,
+      httpVersion: this.httpVersion,
+    })) as Partial<JsPrepareSubmissionResponse>
+    if (!prepareResponse.preparedTransaction || !prepareResponse.preparedTransactionHash) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        'prepareSubmission returned an incomplete response (missing preparedTransaction or hash)',
+      )
+    }
+
+    // Step 2 — Sign the prepared transaction hash externally
+    const hashBytes = getDataBytes(prepareResponse.preparedTransactionHash)
+    const partySignatures = await this.signer!.signTxHash(hashBytes)
+
+    // Step 3 — Execute the signed transaction on the (executing) participant node
+    const hashingSchemeVersion =
+      prepareResponse.hashingSchemeVersion &&
+      prepareResponse.hashingSchemeVersion !== 'HASHING_SCHEME_VERSION_UNSPECIFIED'
+        ? prepareResponse.hashingSchemeVersion
+        : 'HASHING_SCHEME_VERSION_V3'
+    const executeRequest: JsExecuteSubmissionAndWaitForTransactionRequest = {
+      preparedTransaction: prepareResponse.preparedTransaction,
+      partySignatures: {
+        signatures: [partySignatures],
+      },
+      deduplicationPeriod: { Empty: {} },
+      hashingSchemeVersion,
+      submissionId: `ext-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    }
+    const { transaction } = (await ledgerJsonRequest({
+      method: 'POST',
+      url: `${this.baseUrl}/v2/interactive-submission/executeAndWaitForTransaction`,
+      jwt: this.jwt,
+      body: executeRequest,
+      fetchFn: this.fetchFn,
+      httpVersion: this.httpVersion,
+    })) as { transaction?: { updateId?: string; offset?: number } }
+    if (transaction?.updateId == undefined) {
+      throw new CCIPError(
+        CCIPErrorCode.CANTON_API_ERROR,
+        `Canton executeAndWaitForTransaction returned no transaction/updateId for command ${commandId}`,
+      )
+    }
+    return {
+      tx: {
+        status: 'executed',
+        commandId,
+        payload: {
+          updateId: transaction.updateId,
+          completionOffset: transaction.offset ?? 0,
+        },
+      },
+    }
+  }
+}
+
+// Canton endpoints differ in HTTP protocol: the hosted validator front-ends
+// require HTTP/2 (HTTP/1.1 is rejected with 464 at their load balancer), while
+// Canton's JSON Ledger API is documented as HTTP/1.1 + JSON and user-hosted
+// participants commonly serve HTTP/1.1 only. The protocol is selected
+// explicitly via the canton config's `httpVersion` (default `2`); an
+// explicitly provided `fetch` overrides both.
+const http2 = axios.create({ httpVersion: 2 })
+const http1 = axios.create({ httpVersion: 1 })
+
+/** fetch-compatible adapter routing requests through axios's native HTTP transport. */
+async function axiosFetch(version: '1' | '2', request: Request): Promise<Response> {
+  try {
+    const response = await (version === '1' ? http1 : http2).request({
+      url: request.url,
+      method: request.method,
+      headers: Object.fromEntries(request.headers),
+      data: request.body ? await request.arrayBuffer() : undefined,
+      signal: request.signal,
+      responseType: 'arraybuffer',
+      // Never throw on non-2xx: errors are classified by response status
+      validateStatus: () => true,
+    })
+    // axios may return AxiosHeaders or a plain object; normalize either into Headers
+    const headers = new Headers()
+    for (const [key, value] of Object.entries(response.headers)) {
+      if (value != null)
+        headers.set(key, Array.isArray(value) ? value.map(String).join(', ') : String(value))
+    }
+    return new Response(response.data, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    })
+  } catch (error) {
+    // Mirror fetch semantics: cancellation surfaces as an AbortError
+    if (axios.isCancel(error)) {
+      throw new DOMException('The operation was aborted.', 'AbortError')
+    }
+    throw error
+  }
+}
+
+/** Default delay before retrying a transient Canton API error. */
+const DEFAULT_RETRY_DELAY_MS = 1_000
+
+/**
+ * Build the error for a non-2xx Canton Ledger API response.
+ *
+ * Canton returns structured `JsCantonError` bodies (`{code, cause, …}`, either
+ * bare or wrapped in an `error` envelope). The code lands in `context.cantonCode`
+ * — the CCT operations' DUPLICATE_COMMAND detection reads it — alongside
+ * `statusCode`; 429/5xx responses are marked transient so callers retry them.
+ */
+function cantonApiError(method: string, url: string, statusCode: number, body: string): CCIPError {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    parsed = undefined
+  }
+  const record =
+    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : undefined
+  // Unwrap the gRPC-style `{error: {…}}` envelope when present.
+  const cantonError =
+    typeof record?.['error'] === 'object' && record['error'] !== null
+      ? (record['error'] as Record<string, unknown>)
+      : record
+  const code = typeof cantonError?.['code'] === 'string' ? cantonError['code'] : undefined
+  const cause = typeof cantonError?.['cause'] === 'string' ? cantonError['cause'] : undefined
+
+  const isTransient = statusCode === 429 || statusCode >= 500
+  const detail = code ? `[${code}]${cause ? ` ${cause}` : ''}` : body.slice(0, 200)
+  return new CCIPError(
+    CCIPErrorCode.CANTON_API_ERROR,
+    `Canton Ledger API ${method} ${url} failed (${statusCode}): ${detail}`,
+    {
+      context: {
+        statusCode,
+        ...(code ? { cantonCode: code } : {}),
+        ...(cause ? { cantonCause: cause } : {}),
+      },
+      isTransient,
+      retryAfterMs: isTransient ? DEFAULT_RETRY_DELAY_MS : undefined,
+    },
+  )
+}
+
+interface LedgerJsonRequestOptions {
+  method: string
+  url: string
+  jwt?: string | (() => Promise<string>)
+  body?: unknown
+  fetchFn?: typeof fetch
+  /** HTTP protocol version for the axios transport; ignored when `fetchFn` is set. Default `2`. */
+  httpVersion?: '1' | '2'
+}
+
+/** Perform a JSON request against the Canton Ledger API, returning the parsed response body. */
+async function ledgerJsonRequest({
+  method,
+  url,
+  jwt,
+  body,
+  fetchFn,
+  httpVersion,
+}: LedgerJsonRequestOptions): Promise<unknown> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  const token = typeof jwt === 'function' ? await jwt() : jwt
+  if (token) headers.Authorization = `Bearer ${token}`
+  const hasBody = body !== undefined && method !== 'GET' && method !== 'HEAD'
+  if (hasBody) headers['Content-Type'] = 'application/json'
+
+  const request = new Request(url, {
+    method,
+    headers,
+    body: hasBody ? JSON.stringify(body) : undefined,
+  })
+
+  let response: Response
+  try {
+    response = fetchFn ? await fetchFn(request) : await axiosFetch(httpVersion ?? '2', request)
+  } catch (error) {
+    // Network-level failures (unreachable, reset) are worth retrying.
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_API_ERROR,
+      `Canton Ledger API ${method} ${url} failed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error instanceof Error ? error : undefined, isTransient: true },
+    )
+  }
+
+  const text = await response.text()
+  if (!response.ok) {
+    throw cantonApiError(method, url, response.status, text)
+  }
+  if (text === '') return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new CCIPError(
+      CCIPErrorCode.CANTON_API_ERROR,
+      `Canton Ledger API ${method} ${url} returned invalid JSON: ${text.slice(0, 200)}`,
+    )
+  }
+}

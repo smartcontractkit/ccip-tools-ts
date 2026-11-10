@@ -3,7 +3,6 @@ import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto
 import {
   type Logger,
   type SinglePartySignatures,
-  type TransactionSigner,
   CCIPArgumentInvalidError,
   CCIPInteractiveRequiredError,
 } from '@chainlink/ccip-sdk/src/index.ts'
@@ -25,6 +24,7 @@ import { TransportStatusError } from '@ledgerhq/hw-transport/errors'
 import BIPPath from 'bip32-path'
 
 import { loadCantonConfig } from './config.ts'
+import type { TransactionSigner } from './provider.ts'
 
 // Unexported constants, copied from:
 // https://github.com/LedgerHQ/ledger-live/blob/6651fb6c9687afec979ffc7d8eddb0fcded452a7/libs/ledgerjs/packages/hw-app-canton/src/Canton.ts#L34-L40
@@ -41,9 +41,10 @@ const P1_SIGN_HASH = 0x00
 /**
  * Wallet object returned by {@link loadCantonWallet}.
  *
- * `signer` is reserved for the external-signing (prepare → sign → execute)
- * flow, which is not yet enabled in `loadCantonWallet`. Canton sends currently
- * use JWT-authenticated direct submit.
+ * `signer` is the external signer (e.g. Ledger) handed to the
+ * {@link JsonRpcProvider}, which then runs the interactive submission flow
+ * (prepare → sign → execute). Without it, submissions are
+ * JWT-authenticated direct submits.
  */
 export interface CantonWalletWithSigner {
   party: string
@@ -423,7 +424,7 @@ export async function loadCantonWallet(
   const party = cantonCfg?.party
   if (!party) {
     throw new Error(
-      'Canton wallet requires a party ID: provide --canton-config with a "party" field',
+      'Canton Ledger signing requires a party ID: provide --canton-config with a "party" field',
     )
   }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import type { JsCommands } from '../../canton/client/index.ts'
+import type { JsCommands } from '../../canton/clients/ledger-api/client.ts'
 import { CantonChain } from '../../canton/index.ts'
 import { CCIPError, CCIPErrorCode } from '../../errors/index.ts'
 import { CCTTxFailedError } from '../errors.ts'
@@ -14,12 +14,15 @@ class NoopOperation extends CantonOperation<Record<string, never>> {
   }
 }
 
-function mockChain(submitAndWaitForTransaction: () => Promise<unknown>): CantonChain {
+function mockChain(submitFails: () => Promise<unknown>): CantonChain {
   // Real CantonChain instance (private fields make object-literal casts
   // impossible); Object.assign overrides only what the test exercises.
   return Object.assign(Object.create(CantonChain.prototype), {
     logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
-    provider: { submitAndWaitForTransaction },
+    activeParty: 'party::1220ab',
+    async submitCommands(): Promise<unknown> {
+      return { transaction: await submitFails() }
+    },
   })
 }
 

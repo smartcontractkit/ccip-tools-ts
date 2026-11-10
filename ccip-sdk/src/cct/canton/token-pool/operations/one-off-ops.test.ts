@@ -87,8 +87,9 @@ function mockChain(poolTemplateId = BURN_MINT_POOL_TEMPLATE_ID) {
   }
   return Object.assign(Object.create(CantonChain.prototype), {
     network: { family: ChainFamily.Canton },
+    activeParty: POOL_OWNER,
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    provider,
+    ledgerApiClient: provider,
   }) as CantonChain
 }
 
@@ -179,12 +180,11 @@ describe('execute result extraction', () => {
 
   function chainReturning(events: unknown[]) {
     const chain = mockChain()
-    Object.assign(chain.provider, {
-      submitAndWaitForTransaction: async () => ({
-        transaction: { updateId: 'update-1', events },
-      }),
+    return Object.assign(chain, {
+      async submitCommands(): Promise<unknown> {
+        return { transaction: { updateId: 'update-1', events } }
+      },
     })
-    return chain
   }
 
   it('returns the new pool CID for consuming pool choices', async () => {

@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import type { JsSubmitAndWaitForTransactionResponse } from '../../canton/client/index.ts'
+import type { JsSubmitAndWaitForTransactionResponse } from '../../canton/clients/ledger-api/client.ts'
 import type { TransactionResult } from '../operation.ts'
 
 /**

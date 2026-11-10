@@ -123,7 +123,7 @@ export class GetTokenPoolState extends CantonQuery<
     const { contract, poolType } = await resolvePool(
       this.name,
       chain,
-      p.poolOwner ?? chain.ledgerParty,
+      p.poolOwner ?? chain.activeParty,
       p.poolInstanceAddress,
     )
 

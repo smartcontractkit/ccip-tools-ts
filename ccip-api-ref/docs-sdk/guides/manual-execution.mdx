@@ -290,21 +290,21 @@ Unlike `generateUnsignedSendMessage` (which may return multiple transactions for
 
 ## Canton Execution
 
-Canton manual execution requires a `CantonConfig` with `indexerUrl` for CCV verifications. The destination chain must be connected with `CantonChain.fromUrl`. No private key or signer is needed — the JWT from `cantonConfig` authenticates the submission. The `wallet` parameter only needs a `party` ID (for `actAs` in command submissions) — this is the same `party` already specified in `cantonConfig`:
+Canton manual execution requires a `CantonConfig` with `indexerUrl` for CCV verifications. The destination chain must be connected with `CantonChain.fromUrl`. No private key or signer is needed — the provider's JWT authenticates the submission. The `wallet` parameter only needs a `party` ID (for `actAs` in command submissions) — the same party the provider authenticates as:
 
 ```typescript
 import { CantonChain, type CantonConfig } from '@chainlink/ccip-sdk'
 
+const party = 'receiver::1220...'
+
+// A CantonRpcProvider supplying connectivity and JWT-authenticated requests —
+// constructed by the embedder. The CLI builds one from its own canton-config
+// (apiUrl, party, jwt/auth); web embedders bring their own.
+const provider: CantonRpcProvider = /* ... */
+
 const cantonConfig: CantonConfig = {
-  party: 'receiver::1220...',
+  provider,
   ccipParty: 'ccip::1220...',
-  // Either a static JWT string, or a () => Promise<string> getter for
-  // refreshable tokens (OAuth2). The CLI resolves its `auth` block into
-  // one of these upfront — see Canton Configuration. Web/Electron embedders
-  // compose the SDK's OAuth2 protocol helpers and inject a getter here.
-  jwt: 'eyJ...',
-  edsUrl: 'https://eds.example.com',
-  transferInstructionUrl: 'https://transfer-instruction.example.com',
   indexerUrl: 'https://indexer.example.com',
 }
 
@@ -315,14 +315,14 @@ const dest = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
 // Execute by message ID (CCIP API provides verifications)
 const execution = await dest.execute({
   messageId: '0x1234...abcd',
-  wallet: { party: cantonConfig.party }, // Canton wallet — reuses the config party, no signer needed
+  wallet: { party }, // Canton wallet — reuses the party, no signer needed
 })
 
 // Or execute with pre-fetched input (CCIP v2.0 only)
 const execution = await dest.execute({
   encodedMessage: '0x...',
   verifications: [...],
-  wallet: { party: cantonConfig.party },
+  wallet: { party },
   receiver: 'receiver::1220...', // optional; defaults to message receiver
 })
 ```

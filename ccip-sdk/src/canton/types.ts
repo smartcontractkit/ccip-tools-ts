@@ -1,63 +1,39 @@
-import { CCIPArgumentInvalidError } from '../errors/specialized.ts'
+import type { Provider } from '@canton-network/core-splice-provider'
+import type { RpcTypes as DappRpcTypes } from '@canton-network/core-wallet-dapp-rpc-client'
+
+import { CCIPArgumentInvalidError } from '../errors/index.ts'
 import type { ChainFamily } from '../networks.ts'
-import { type PartyId, parsePartyId } from './addressCodec.ts'
-import type { JsCommands, SinglePartySignatures } from './client/index.ts'
+import type { JsCommands } from './clients/ledger-api/client.ts'
 
 /**
- * Signs a prepared Canton transaction hash on behalf of an external party.
+ * Canton connectivity provider, as defined by the Canton dApp SDK
+ * ({@link https://www.npmjs.com/package/@canton-network/dapp-sdk | @canton-network/dapp-sdk}):
+ * a `Provider` over the dApp wallet RPC methods
+ * (`@canton-network/core-wallet-dapp-rpc-client`).
  *
- * Implementations receive the raw hash bytes (decoded from the base64
- * `preparedTransactionHash` returned by the Preparing Participant Node) and
- * must return a fully-assembled {@link SinglePartySignatures} structure.
+ * The SDK never dials a Canton Ledger API itself — all Canton connectivity and
+ * authentication flows through `provider.request(...)`:
  *
- * @example
- * ```ts
- * const signer: TransactionSigner = {
- *   async sign(hash) {
- *     const sig = ed25519.sign(hash, privateKey)
- *     return {
- *       signatures: [{
- *         format: 'CRYPTO_KEY_FORMAT_RAW',
- *         signature: Buffer.from(sig).toString('base64'),
- *         signedBy: keyFingerprint,
- *         signingAlgorithmSpec: 'SIGNING_ALGORITHM_SPEC_ED25519',
- *       }],
- *     }
- *   },
- * }
- * ```
- */
-export interface TransactionSigner {
-  signTxHash(hash: Uint8Array): Promise<SinglePartySignatures>
-}
-
-/**
- * A Canton "wallet" identifies the acting party and optionally carries a
- * {@link TransactionSigner} for external signing.
+ * - `getActiveNetwork` / `getPrimaryAccount` — network + party detection
+ *   (used by {@link CantonChain.fromProvider})
+ * - `ledgerApi` / `prepareExecuteAndWait` — Ledger API requests and
+ *   interactive submissions (prepare → sign → execute)
+ * - `accountsChanged` / `txChanged` events — wallet state changes
  *
- * When `signer` is present, {@link CantonChain.sendMessage} and
- * {@link CantonChain.execute} use the external signing flow
- * (prepare → sign → execute) instead of direct submission.
+ * Construct it with the environment that matches your runtime:
+ *
+ * - **Browser (dApp SDK)** — connect to the user's Canton wallet and take the
+ *   provider from it: `new DappSDK(config)` / `getConnectedProvider()`. This
+ *   provider proxies `ledgerApi` requests through the validator wallet.
+ * - **Node.js (ccip-cli)** — the CLI ships its own
+ *   `ccip-cli/src/providers/canton/provider.ts` `JsonRpcProvider`, which talks
+ *   to the Canton JSON Ledger API directly (JWT-authenticated wire-format
+ *   pass-through, optional external signer e.g. Ledger). Built from the CLI's
+ *   `CantonCliConfig` and handed to {@link CantonChain.fromProvider}.
+ * - **Bring your own** — implement the `Provider` interface over
+ *   `DappRpcTypes` and pass it to {@link CantonChain.fromProvider}.
  */
-export interface CantonWallet {
-  /** Daml party ID used for `actAs` in command submissions. */
-  party: string
-  /** Optional external signer. When provided, transactions go through the interactive submission API. */
-  signer?: TransactionSigner
-}
-
-/**
- * Type-guard for {@link CantonWallet}.
- */
-export function isCantonWallet(v: unknown): v is CantonWallet {
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    'party' in v &&
-    typeof (v as CantonWallet).party === 'string' &&
-    (v as CantonWallet).party.length > 0
-  )
-}
+export type CantonRpcProvider = Provider<DappRpcTypes>
 
 /**
  * An unsigned Canton transaction wraps a `JsCommands` object ready to be
@@ -70,30 +46,25 @@ export interface UnsignedCantonTx {
   commands: JsCommands
 }
 
-/**
- * Identifies a token on Canton (maps to `splice_api_token_holding_v1.InstrumentId`).
- *
- * Encoded as `"party::fingerprint::tokenId"` (e.g. `ccipOwner::1220…::link-token`).
- * The ledger stores `admin` as `party::fingerprint` and `id` as the token name.
- */
-export interface CantonInstrumentId {
-  admin: PartyId
-  id: string
+export interface CantonCreatedContract {
+  contractId: string
+  updateId: string
 }
 
 /**
- * An active contract read from the ACS via {@link CantonChain.findActiveContractsByTemplate}.
+ * An active contract read from the ACS via
+ * {@link CantonChain.findActiveContractByInstanceAddress}.
  *
  * Carries the fields needed both to resolve a contract by `instanceId` and to
  * embed it as a disclosed contract in a later submission (`createdEventBlob` +
- * `synchronizerId`). `createArgument` is the raw Daml record value (gRPC
- * `{ Sum: { Record: { fields: [...] } } }` form) — decode with the shared
- * `extractField` / `extractStringField` helpers.
+ * `synchronizerId`). `createArgument` is the raw JSON Ledger API
+ * `createArgument` value — decode with the shared `canton/daml-parse.ts`
+ * helpers or the typed bindings decoders.
  */
 export interface CantonActiveContract {
   /** Daml contract ID (`#...`). */
   contractId: string
-  /** Full template ID string (`#<pkg>:<Module>:<Entity>`). */
+  /** Full template ID string (`#<pkg>:<Module>:<Entity>` or `<pkg>:<Module>:<Entity>`). */
   templateId: string
   /** Opaque blob for disclosed-contract submission (from `createdEventBlob`). */
   createdEventBlob: string
@@ -101,37 +72,10 @@ export interface CantonActiveContract {
   synchronizerId: string
   /** Contract signatories (from the created event); used for InstanceAddress derivation. */
   signatories: string[]
-  /** Raw Daml `createArgument` record (decode lazily with field helpers). */
+  /** Raw Daml `createArgument` value (decode lazily with the parse helpers). */
   createArgument: unknown
   /** Ledger offset at creation, when the source response provides it. */
   createdAtOffset?: number
-}
-
-/**
- * Input for a single CCV that should verify the outbound send
- * (maps to Go `ccipsender.CCVSendInput`).
- */
-export interface CantonCCVSendInput {
-  ccvCid: string
-  ccvRawAddress: string
-  verifierArgs: string
-}
-
-/**
- * Token input carrying the Transfer Factory reference and metadata.
- */
-export interface CantonTokenInput {
-  transferFactory: string
-  extraArgs: CantonTokenExtraArgs
-  tokenPoolHoldings: string[]
-}
-
-/**
- * Extra arguments attached to a Canton token input.
- */
-export interface CantonTokenExtraArgs {
-  context: { values: Record<string, unknown> }
-  meta: { values: Record<string, unknown> }
 }
 
 /**
@@ -141,10 +85,28 @@ export interface CantonTokenExtraArgs {
  * These values cannot be derived automatically and must be supplied by the caller.
  */
 export interface CantonExtraArgsV1 {
-  /** Contract IDs of pre-funded fee-token holdings owned by the sender party. */
-  feeTokenHoldingCids: string[]
-  /** Contract IDs of pre-funded token-transfer holdings owned by the sender party. */
+  /**
+   * Contract IDs of holdings to be used as an input to pay for CCIP fees.
+   * Holdings are unchecked and passed through as-is.
+   * Optional - if not set, will automatically detect holdings
+   * */
+  feeTokenHoldingCids?: string[]
+  /**
+   * Contract IDs of holdings to be used as an input to the CCIP token transfer.
+   * Holdings are unchecked and passed through as-is.
+   * Optional - if not set, will automatically detect holdings
+   */
   tokenTransferHoldingCids?: string[]
+  /**
+   * Contract ID of the PerPartyRouter contract to be used for the send.
+   * Optional - if not set, will automatically detect (or deploy) PerPartyRouter.
+   */
+  perPartyRouterCid?: string
+  /**
+   * Contract ID of the CCIPSender contract to be used for the send.
+   * Optional - if not set, will automatically detect (or deploy) CCIPSender.
+   */
+  ccipSenderCid?: string
   /**
    * Optional raw (`instanceId@owner`) or hashed InstanceAddress of the source
    * Canton LockReleaseTokenPool. The global TokenAdminRegistry lookup remains
@@ -168,31 +130,68 @@ export interface CantonExtraArgsV1 {
   executorMode?: 'default' | 'none'
 }
 
+export type CantonTokenInfo = {
+  instrumentId: string
+  symbol: string
+  decimals: number
+}
+
 /**
- * Parse a Canton instrument string `party::fingerprint::tokenId` into
- * {@link CantonInstrumentId} for ledger Holding filters and CCIP fee/token fields.
+ * A Daml template or interface identifier, in its wire format
+ * `packageId:moduleName:entityName` — e.g.
+ * `b8e4dfb8…984:CCIP.ClientV2:PerPartyRouter`.
  *
- * @example
- * ```ts
- * parseCantonInstrumentId(
- *   'ccipOwner::1220e382…::link-token',
- * )
- * // => { admin: 'ccipOwner::1220e382…', id: 'link-token' }
- * ```
+ * The first segment is either:
+ * - a package **ID** (bare hex hash, no prefix) — the form found in ledger
+ *   payloads (`CreatedEvent.templateId`, interface views' `interfaceId`), or
+ * - a package **name** (`#`-prefixed) — the form used by the generated
+ *   bindings (`PerPartyRouter.templateId`), e.g.
+ *   `#ccip-runtime-v2:CCIP.RuntimeV2.PerPartyRouter:PerPartyRouter`.
  *
- * @throws {@link CCIPArgumentInvalidError} if the string is not three `::`-separated parts.
+ * Used to identify templates/interfaces for ACS queries and event filtering.
+ * Note {@link CantonIdentifier.equal} compares all three segments exactly — a
+ * name-form and a hash-form identifier for the same template are **not** equal.
  */
-export function parseCantonInstrumentId(instrument: string): CantonInstrumentId {
-  const parts = instrument.split('::')
-  if (parts.length !== 3) {
-    throw new CCIPArgumentInvalidError(
-      'instrument',
-      `invalid Canton instrument ID "${instrument}": expected party::fingerprint::tokenId`,
-    )
+export class CantonIdentifier {
+  packageId: string
+  moduleName: string
+  entityName: string
+
+  constructor(packageId: string, moduleName: string, entityName: string) {
+    this.packageId = packageId
+    this.moduleName = moduleName
+    this.entityName = entityName
   }
-  const adminPartyId = parsePartyId([parts[0], parts[1]].join('::'))
-  return {
-    admin: adminPartyId,
-    id: parts[2]!,
+
+  /**
+   * Parse an identifier from its `packageId:moduleName:entityName` wire format.
+   *
+   * @param identifier - Exactly three colon-separated segments; the segments
+   *   themselves must not contain colons.
+   * @throws {@link CCIPArgumentInvalidError} if the format doesn't match.
+   */
+  static fromString(identifier: string): CantonIdentifier {
+    const parts = identifier.split(':')
+    if (parts.length !== 3) {
+      throw new CCIPArgumentInvalidError(
+        'identifier',
+        `invalid Canton identifier "${identifier}": expected packageId:moduleName:entityName`,
+      )
+    }
+    return new CantonIdentifier(parts[0]!, parts[1]!, parts[2]!)
+  }
+
+  /** Reassemble the identifier into its `packageId:moduleName:entityName` wire format. */
+  toString(): string {
+    return `${this.packageId}:${this.moduleName}:${this.entityName}`
+  }
+
+  /** Exact, segment-wise equality (packageId, moduleName and entityName must all match). */
+  equal(other: CantonIdentifier): boolean {
+    return (
+      this.packageId === other.packageId &&
+      this.moduleName === other.moduleName &&
+      this.entityName === other.entityName
+    )
   }
 }

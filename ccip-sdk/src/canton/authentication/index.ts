@@ -131,7 +131,7 @@ export type AuthProviderOptions = OAuthRequestOptions
  * callback handling.
  *
  * The `type` field selects the auth scheme; when omitted, `"static"`
- * is assumed (backward compatible with the existing `CantonConfig.jwt` field).
+ * is assumed (backward compatible with passing a bare `jwt`).
  *
  * @param config - Auth config (static or clientCredentials).
  * @param options - Optional fetch override and abort signal.

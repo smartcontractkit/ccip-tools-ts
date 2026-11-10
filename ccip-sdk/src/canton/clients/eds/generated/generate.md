@@ -1,0 +1,6 @@
+npx openapi-typescript https://raw.githubusercontent.com/smartcontractkit/chainlink-canton/refs/heads/main/eds/api/ccip/eds-ccip.yaml -o ./src/canton/clients/eds/generated/eds-ccip.generated.d.ts
+npx openapi-typescript https://raw.githubusercontent.com/smartcontractkit/chainlink-canton/refs/heads/main/eds/api/ccv/eds-ccv.yaml -o ./src/canton/clients/eds/generated/eds-ccv.generated.d.ts
+npx openapi-typescript https://raw.githubusercontent.com/smartcontractkit/chainlink-canton/refs/heads/main/eds/api/common/eds-common.yaml -o ./src/canton/clients/eds/generated/eds-common.generated.d.ts
+npx openapi-typescript https://raw.githubusercontent.com/smartcontractkit/chainlink-canton/refs/heads/main/eds/api/executor/eds-executor.yaml -o ./src/canton/clients/eds/generated/eds-executor.generated.d.ts
+npx openapi-typescript https://raw.githubusercontent.com/smartcontractkit/chainlink-canton/refs/heads/main/eds/api/global/eds-global.yaml -o ./src/canton/clients/eds/generated/eds-global.generated.d.ts
+npx openapi-typescript https://raw.githubusercontent.com/smartcontractkit/chainlink-canton/refs/heads/main/eds/api/tokenpool/eds-tokenpool.yaml -o ./src/canton/clients/eds/generated/eds-tokenpool.generated.d.ts

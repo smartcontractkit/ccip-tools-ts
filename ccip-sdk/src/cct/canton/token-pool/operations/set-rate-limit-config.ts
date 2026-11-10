@@ -11,7 +11,7 @@
  * @packageDocumentation
  */
 
-import type { JsCommands } from '../../../../canton/client/index.ts'
+import type { JsCommands } from '../../../../canton/clients/ledger-api/client.ts'
 import { type CantonChain, decodeDamlRecord, extractFieldValue } from '../../../../canton/index.ts'
 import type { UnsignedCantonTx } from '../../../../canton/types.ts'
 import { CCTParamsInvalidError, CCTTxFailedError } from '../../../errors.ts'

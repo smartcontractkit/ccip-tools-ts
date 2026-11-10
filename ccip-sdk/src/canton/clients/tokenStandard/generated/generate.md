@@ -1,0 +1,2 @@
+npx openapi-typescript https://raw.githubusercontent.com/canton-network/splice/refs/heads/main/token-standard/splice-api-token-metadata-v1/openapi/token-metadata-v1.yaml -o ./src/canton/clients/tokenStandard/generated/token-metadata-v1.generated.d.ts
+npx openapi-typescript https://raw.githubusercontent.com/canton-network/splice/refs/heads/main/token-standard/splice-api-token-transfer-instruction-v1/openapi/transfer-instruction-v1.yaml -o ./src/canton/clients/tokenStandard/generated/transfer-instruction-v1.generated.d.ts

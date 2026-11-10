@@ -97,7 +97,6 @@ export class GetTokenAdminRegistry extends CantonQuery<
     const contract = await chain.findActiveContractByInstanceAddress(
       TOKEN_CONFIG_TEMPLATE_ID,
       tokenConfigInstanceAddress,
-      [p.adminParty],
     )
 
     if (!contract) {

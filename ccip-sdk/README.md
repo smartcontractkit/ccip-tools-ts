@@ -32,14 +32,14 @@ const solanaChain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 // Aptos
 const aptosChain = await AptosChain.fromUrl('https://api.testnet.aptoslabs.com/v1')
 
-// Canton (requires CantonConfig — see Multi-Chain guide)
+// Canton (requires CantonConfig with a provider — see Multi-Chain guide)
 const cantonChain = await CantonChain.fromUrl('https://ledger.example.com/api/json', {
   cantonConfig: {
-    party: 'sender::1220...',
+    // A CantonRpcProvider supplying connectivity and JWT-authenticated requests.
+    // Constructed by the embedder — e.g. the CLI builds one from its own
+    // canton-config (apiUrl, party, jwt/auth); web embedders bring their own.
+    provider,
     ccipParty: 'ccip::1220...',
-    jwt: 'eyJ...',
-    edsUrl: 'https://eds.example.com',
-    transferInstructionUrl: 'https://transfer-instruction.example.com',
   },
 })
 ```

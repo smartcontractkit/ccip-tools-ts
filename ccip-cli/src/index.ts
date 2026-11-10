@@ -33,7 +33,7 @@ Error.stackTraceLimit = 50 // show more stack frames for better debugging
 
 // generate:nofail
 // `const VERSION = '${require('./package.json').version}-${require('child_process').execSync('git rev-parse --short HEAD').toString().trim()}'`
-const VERSION = '1.16.1-1d2f850c'
+const VERSION = '1.16.1-cb45aba0'
 // generate:end
 
 const require = createRequire(import.meta.url)
@@ -112,8 +112,7 @@ const globalOpts = {
   },
   'canton-config': {
     type: 'string',
-    describe:
-      'Path to Canton config JSON file (party, ccipParty, jwt, edsUrl, transferInstructionUrl, etc.)',
+    describe: 'Path to Canton config JSON file (party, ccipParty, jwt, etc.)',
   },
   indexer: {
     type: 'array',
