@@ -34,7 +34,8 @@ export type UnsignedSolanaTx = {
 export type SolanaSendMessageOpts = {
   /**
    * Also send over CCIP 2.0 lanes with their sender allowlist enabled, which are otherwise
-   * treated as not supporting 2.0, so quotes and sends never depend on the sender. When enabled,
+   * treated as not supporting 2.0 when the router has a 1.6 lane to fall back to, so quotes and
+   * sends never depend on the sender. When enabled,
    * every sender goes over 2.0 on those lanes, and the router rejects senders off the allowlist on
    * send. Pass the same value to `getFee` and the send, for both to pick the same entrypoint.
    * Meant for testing allowlisted lanes.

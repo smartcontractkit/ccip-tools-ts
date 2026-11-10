@@ -17,6 +17,7 @@ import { CCIPVersion } from '../../types.ts'
 import { parseTypeAndVersion, toLeArray } from '../../utils.ts'
 import { sizedCoder } from '../coder.ts'
 import { IDL as BASE_TOKEN_POOL_V2 } from '../idl/2.0.0/BASE_TOKEN_POOL.ts'
+import { IDL as CCIP_ROUTER_V2 } from '../idl/2.0.0/CCIP_ROUTER.ts'
 import { type SolanaTransaction, SolanaChain } from '../index.ts'
 import {
   deriveTokenPoolChainConfigOverridePda,
@@ -728,6 +729,14 @@ describe('SolanaChain token pool readers', () => {
     'base64',
   )
 
+  const routerV2Coder = sizedCoder(CCIP_ROUTER_V2)
+  const allowlisted = (observation: Buffer): Buffer =>
+    routerV2Coder.types.encode('RouterDestChainV2Observation', {
+      ...routerV2Coder.types.decode<object>('RouterDestChainV2Observation', observation),
+      allowListEnabled: true,
+      allowedSendersCount: 1,
+    })
+
   const bucket = (enabled: boolean, capacity: number, rate: number) => ({
     tokens: new BN(capacity),
     lastUpdated: new BN(Math.floor(Date.now() / 1000)),
@@ -738,18 +747,22 @@ describe('SolanaChain token pool readers', () => {
   /**
    * A chain with a 2.0 router and a pool of `poolTypeAndVersion` (`null` for a custom pool without
    * `typeVersion`) with a ChainConfig to `remoteSelector`, and optionally a ChainConfigV2 and FTF
-   * override; the router has a 2.0 lane to `remoteSelector` unless `laneV2` is false.
+   * override; the router has a 2.0 lane to `remoteSelector` unless `laneV2` is false, with its
+   * sender allowlist enabled if `laneV2` is `'allowlisted'`, and a 1.6 lane unless `v16Lane` is
+   * false.
    */
   async function poolChain({
     poolTypeAndVersion,
     override,
     chainConfigV2,
     laneV2 = true,
+    v16Lane = true,
   }: {
     poolTypeAndVersion: string | null
     override?: { enabled: boolean }
     chainConfigV2?: { flags: number; blockDepth: number }
-    laneV2?: boolean
+    laneV2?: boolean | 'allowlisted'
+    v16Lane?: boolean
   }) {
     const state = await encode('state', {
       version: 1,
@@ -817,6 +830,13 @@ describe('SolanaChain token pool readers', () => {
       accounts.set(chainConfigV2Pda.toBase58(), { owner: poolProgram, data: chainConfigV2Data })
     if (overrideData)
       accounts.set(overridePda.toBase58(), { owner: poolProgram, data: overrideData })
+    if (v16Lane) {
+      const [destChainState] = PublicKey.findProgramAddressSync(
+        [Buffer.from('dest_chain_state'), toLeArray(remoteSelector, 8)],
+        router,
+      )
+      accounts.set(destChainState.toBase58(), { owner: router, data: Buffer.alloc(8) })
+    }
     const getAccountInfo = mock.fn(async (k: PublicKey) => accounts.get(k.toBase58()) ?? null)
     const getMultipleAccountsInfo = mock.fn(async (keys: PublicKey[]) =>
       keys.map((k) => accounts.get(k.toBase58()) ?? null),
@@ -838,7 +858,13 @@ describe('SolanaChain token pool readers', () => {
                 unitsConsumed: 1,
                 returnData: {
                   programId: router.toBase58(),
-                  data: [laneObservation.toString('base64'), 'base64'],
+                  data: [
+                    (laneV2 === 'allowlisted'
+                      ? allowlisted(laneObservation)
+                      : laneObservation
+                    ).toString('base64'),
+                    'base64',
+                  ],
                 },
               }
             : { err: { InstructionError: [0, { Custom: 3012 }] }, logs: [], unitsConsumed: 1 },
@@ -1053,6 +1079,34 @@ describe('SolanaChain token pool readers', () => {
         assert.ok(!(LaneFeature.FAST_RATE_LIMITS in features))
       }
       assert.equal(chainConfigV2Reads(getAccountInfo), 0)
+    })
+
+    // a 2.0 lane with its allowlist enabled is in testing: messages go over 1.6, whoever the sender
+    it('reports no fast finality on a 2.0 lane with its allowlist enabled', async () => {
+      const { chain, getAccountInfo } = await poolChain({
+        poolTypeAndVersion: v2Pool,
+        chainConfigV2: v2ChainConfig,
+        override: { enabled: true },
+        laneV2: 'allowlisted',
+      })
+      for (const features of [await laneFeatures(chain), await laneFeatures(chain, mint)]) {
+        assert.ok(!(LaneFeature.FINALITY_FAST in features))
+        assert.ok(!(LaneFeature.FINALITY_SAFE in features))
+        assert.ok(!(LaneFeature.FAST_RATE_LIMITS in features))
+      }
+      assert.equal(chainConfigV2Reads(getAccountInfo), 0)
+    })
+
+    // a 2.0-only router has no 1.6 lane to fall back to: messages go over the allowlisted 2.0 lane
+    it('reports fast finality on an allowlisted 2.0 lane without a 1.6 lane', async () => {
+      const { chain } = await poolChain({
+        poolTypeAndVersion: v2Pool,
+        laneV2: 'allowlisted',
+        v16Lane: false,
+      })
+      const features = await laneFeatures(chain)
+      assert.equal(features[LaneFeature.FINALITY_FAST], 1)
+      assert.equal(features[LaneFeature.FINALITY_SAFE], true)
     })
 
     it('defaults to fast and safe finality on 2.0 lanes without a token', async () => {

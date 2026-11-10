@@ -267,6 +267,8 @@ describe('e2e command lane EVM <-> Solana (v1.6 and v2.0)', () => {
       'solana-devnet',
       EVM_ONRAMP,
       LANE_RPCS,
+      '--lane-version',
+      '1.6',
       '--format',
       'json',
     )
@@ -336,36 +338,60 @@ describe('e2e command lane EVM <-> Solana (v1.6 and v2.0)', () => {
     )
   })
 
-  it(
-    'should show lane config Solana -> Sepolia (v2.0, the default)',
-    { timeout: 120000 },
-    async () => {
-      const args = buildLaneArgs(
-        'solana-devnet',
-        'ethereum-testnet-sepolia',
-        SOLANA_ONRAMP,
-        LANE_RPCS,
-        '--format',
-        'json',
-      )
-      const result = await spawnCLI(args, 90000)
+  it('should show lane config Solana -> Sepolia (v2.0)', { timeout: 120000 }, async () => {
+    const args = buildLaneArgs(
+      'solana-devnet',
+      'ethereum-testnet-sepolia',
+      SOLANA_ONRAMP,
+      LANE_RPCS,
+      '--lane-version',
+      '2.0',
+      '--format',
+      'json',
+    )
+    const result = await spawnCLI(args, 90000)
 
-      assert.equal(result.exitCode, 0, result.stdout + result.stderr)
+    assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
-      const envelope = JSON.parse(result.stdout)
-      assert.match(envelope.onRamp, new RegExp(SOLANA_ONRAMP))
-      assert.equal(envelope.version, '2.0.0')
-      // the 2.0 lane config (`dest_chain_state_v2`) names its offRamp
-      assert.match(envelope.onRampConfig.typeAndVersion, /^ccip-router 2\./)
-      assert.match(envelope.onRampConfig.offramp, new RegExp(EVM_OFFRAMP_V2, 'i'))
-      assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP_V2, 'i'))
-      assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\./)
-      assert.ok(
-        envelope.offRampConfig.onRamps.some((r: string) => r === SOLANA_ONRAMP),
-        `offRampConfig.onRamps should include ${SOLANA_ONRAMP}`,
-      )
-    },
-  )
+    const envelope = JSON.parse(result.stdout)
+    assert.match(envelope.onRamp, new RegExp(SOLANA_ONRAMP))
+    assert.equal(envelope.version, '2.0.0')
+    assert.equal(envelope.onRampConfig.laneVersion, '2.0.0')
+    // the 2.0 lane config (`dest_chain_state_v2`) names its offRamp
+    assert.match(envelope.onRampConfig.typeAndVersion, /^ccip-router 2\./)
+    assert.match(envelope.onRampConfig.offramp, new RegExp(EVM_OFFRAMP_V2, 'i'))
+    assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP_V2, 'i'))
+    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\./)
+    assert.ok(
+      envelope.offRampConfig.onRamps.some((r: string) => r === SOLANA_ONRAMP),
+      `offRampConfig.onRamps should include ${SOLANA_ONRAMP}`,
+    )
+  })
+
+  it('should show lane config Solana -> Sepolia (the default)', { timeout: 120000 }, async () => {
+    const args = buildLaneArgs(
+      'solana-devnet',
+      'ethereum-testnet-sepolia',
+      SOLANA_ONRAMP,
+      LANE_RPCS,
+      '--format',
+      'json',
+    )
+    const result = await spawnCLI(args, 90000)
+
+    assert.equal(result.exitCode, 0, result.stdout + result.stderr)
+
+    const envelope = JSON.parse(result.stdout)
+    assert.match(envelope.onRamp, new RegExp(SOLANA_ONRAMP))
+    // the default is the lane messages are sent over. The 2.0 lane to Sepolia has its sender
+    // allowlist enabled (in testing, read 2026-11-10), so messages go over the 1.6 lane. Change
+    // these to the 2.0 values of the test above when the allowlist is lifted.
+    assert.equal(envelope.version, '1.6.0')
+    assert.equal(envelope.onRampConfig.laneVersion, '1.6.0')
+    assert.match(envelope.onRampConfig.typeAndVersion, /^ccip-router 2\./)
+    assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP, 'i'))
+    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 1\.6\.0/)
+  })
 
   it('should show lane config Sepolia -> Solana (v2.0)', { timeout: 120000 }, async () => {
     const args = buildLaneArgs(
@@ -373,6 +399,8 @@ describe('e2e command lane EVM <-> Solana (v1.6 and v2.0)', () => {
       'solana-devnet',
       EVM_ONRAMP_V2,
       LANE_RPCS,
+      '--lane-version',
+      '2.0',
       '--format',
       'json',
     )
