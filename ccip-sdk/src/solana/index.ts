@@ -33,9 +33,10 @@ import {
   type LogFilter,
   type TokenInfo,
   type TokenPoolConfig,
+  type TokenPoolConfigOpts,
   type TokenPoolRemote,
+  type TokenPoolRemotesOpts,
   type TokenPrice,
-  type TokenTransferFeeOpts,
   Chain,
 } from '../chain.ts'
 import {
@@ -141,6 +142,7 @@ import {
   getFeeV2,
   observeDestChainV2,
   selectSendLane,
+  v2LaneUnavailableReason,
 } from './send-v2.ts'
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
@@ -314,7 +316,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     })
     this.getOnRampConfig = memoize(this.getOnRampConfig.bind(this), {
       async: true,
-      maxArgs: 2,
+      maxArgs: 3,
+      // the lane version selects the 1.6 or the 2.0 lane config of a 2.0 router; key on it, not
+      // on the options object's identity (a new literal on every call)
+      transformKey: ([onRamp, destChainSelector, opts]) =>
+        [onRamp, destChainSelector, opts?.version] as const,
       expires: 60e3,
     })
     this.getOffRampConfig = memoize(this.getOffRampConfig.bind(this), {
@@ -323,6 +329,14 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       expires: 60e3,
     })
 
+    // the lane observation decides the lane version every method sees: getFee and the send it
+    // quotes for, lane features and the default lane config agree for 10min
+    this._observeDestChainV2 = memoize(this._observeDestChainV2.bind(this), {
+      async: true,
+      maxArgs: 2,
+      maxSize: 100,
+      expires: 600e3,
+    })
     this.getFeeTokens = memoize(this.getFeeTokens.bind(this), { async: true, maxArgs: 1 })
     this.getOffRampsForRouter = memoize(this.getOffRampsForRouter.bind(this), {
       async: true,
@@ -622,9 +636,27 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     return onRamp
   }
 
-  /** {@inheritDoc Chain.getOnRampConfig} */
-  async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+  /**
+   * {@inheritDoc Chain.getOnRampConfig}
+   *
+   * A 2.0 Router serves a 1.6 lane (`ccip_send`, `dest_chain_state` PDA) and a 2.0 lane
+   * (`ccip_send_v2`, `dest_chain_state_v2` PDA) to the same destination. `opts.version`
+   * selects which lane config to read; without it, the lane messages are sent over: on a 2.0
+   * Router, the 2.0 lane only if it's configured and without its sender allowlist enabled, or if
+   * the Router has no 1.6 lane to fall back to (see {@link SolanaChain.getFee}).
+   */
+  async getOnRampConfig(
+    onRamp: string,
+    destChainSelector: bigint,
+    opts?: { version?: CCIPVersion },
+  ) {
     const [, version, typeAndVersion] = await this.typeAndVersion(onRamp)
+    const laneVersion =
+      opts?.version ??
+      (version >= CCIPVersion.V2_0 &&
+      v2LaneUnavailableReason(await this._observeDestChainV2(onRamp, destChainSelector))
+        ? CCIPVersion.V1_6
+        : (version as CCIPVersion))
     const routerConfig = await this._getRouterConfig(onRamp)
 
     // CCIP v2 router (`ccip-router 2.0.0-dev`) stores the per-lane dest chain state under a
@@ -632,7 +664,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     // the lane fee config into that account instead of a separate FeeQuoter dest_chain account
     // (fees are quoted by a committee-verifier CCV at send time). Handle it separately; the rest
     // of the router (Config account) stays byte-compatible with the 1.6 IDL.
-    if (version.startsWith('2.')) {
+    if (laneVersion >= CCIPVersion.V2_0) {
       const program = newProgram(CCIP_ROUTER_V2_IDL, new PublicKey(onRamp), {
         connection: this.connection,
       })
@@ -641,7 +673,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         new PublicKey(onRamp),
       )
       const destChainState = await program.account.destChainCcipV2.fetch(destChainStatePda)
-      return normalizeDeep(
+      const config = normalizeDeep(
         {
           ...routerConfig,
           destChainSelector,
@@ -655,6 +687,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
           destFamily: networkInfo(destChainSelector).family,
         },
       )
+      return { ...config, laneVersion }
     }
 
     const program = newProgram(CCIP_ROUTER_IDL, new PublicKey(onRamp), {
@@ -682,7 +715,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       feeQuoter.account.config.fetch(feeQuoterConfigAddress),
       feeQuoter.account.destChain.fetch(feeQuoterDestAddress),
     ])
-    return normalizeDeep(
+    const config = normalizeDeep(
       {
         ...routerConfig,
         destChainSelector,
@@ -696,6 +729,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         destFamily: networkInfo(destChainSelector).family,
       },
     )
+    return { ...config, laneVersion }
   }
 
   /**
@@ -791,14 +825,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * discriminator), so we:
    *  1. enumerate all `allowed_offramp` marker accounts owned by the router
    *     (filtered by 8-byte data length),
-   *  2. read each marker's transaction history (offRamps reference their marker
-   *     when executing commit/execute),
-   *  3. for every account key seen in those txs, re-derive the marker PDA for
-   *     our `sourceChainSelector` and keep the keys that reproduce the marker
-   *     address.
-   * A match proves both that the key is the offRamp program and that it's
-   * allowed for this source chain. All matching offRamps are returned (not just
-   * the first), so lanes with multiple historical offRamps are fully discovered.
+   *  2. read a marker's transaction history (offRamps reference their marker
+   *     when executing),
+   *  3. for every program invoked in those txs, re-derive its markers for every known source
+   *     chain (of the router's network type): matches prove the program is an offRamp, and the
+   *     markers explained this way are skipped in step 2,
+   *  4. keep the offRamps whose marker for our `sourceChainSelector` exists; as a fallback, any
+   *     account key that reproduces a marker for `sourceChainSelector` is one too.
+   * All matching offRamps are returned (not just the first), so lanes with more than one offRamp
+   * (e.g. a 2.0 router's 1.6 and 2.0 offRamps, or historical ones) are fully discovered. Only a
+   * few markers need RPC calls: one for each offRamp program, plus markers of unknown chains.
    *
    * @throws {@link CCIPSolanaOffRampEventsNotFoundError} if no OffRamp markers
    *         match for this source chain.
@@ -834,33 +870,75 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       filters: [{ dataSize: 8 }],
       encoding: 'base64',
     })
+    const markerSet = new Set(markers.map(({ pubkey }) => pubkey.toBase58()))
+    const markerFor = (selector: bigint, offRamp: PublicKey) =>
+      PublicKey.findProgramAddressSync(
+        [Buffer.from('allowed_offramp'), toLeArray(selector, 8), offRamp.toBuffer()],
+        routerPk,
+      )[0].toBase58()
 
+    // A router has one marker per (source chain, offRamp) pair, but few offRamp programs (e.g. a
+    // 2.0 router serves a 1.6 and a 2.0 offRamp, each allowed for many source chains). Once a tx
+    // shows an offRamp program, derive its markers for every known source chain of this network
+    // type: the markers that this explains need no RPC calls. Fetching every marker's history in
+    // parallel instead made public RPCs throttle (HTTP 429) for minutes on a 32-marker router.
+    const knownSelectors = new Set([sourceChainSelector])
+    for (const { selector, network_type } of Object.values(SELECTORS))
+      if (network_type === this.network.networkType) knownSelectors.add(selector)
     const offRamps = new Set<string>()
-    await Promise.all(
-      markers.map(async ({ pubkey: marker }) => {
-        const sigs = await this.connection.getSignaturesForAddress(marker, { limit: 10 })
-        for (const { signature } of sigs) {
-          const tx = await this.connection.getTransaction(signature, {
-            maxSupportedTransactionVersion: 1,
-            commitment: 'confirmed',
-          })
-          if (!tx) continue
-          const keys = tx.transaction.message
-            .getAccountKeys({ accountKeysFromLookups: tx.meta?.loadedAddresses })
-            .keySegments()
-            .flat()
-          for (const key of keys) {
-            const [pda] = PublicKey.findProgramAddressSync(
-              [Buffer.from('allowed_offramp'), toLeArray(sourceChainSelector, 8), key.toBuffer()],
-              routerPk,
-            )
-            const keyAddr = key.toBase58()
-            if (pda.equals(marker)) offRamps.add(keyAddr)
-            if (keyAddr.toLowerCase().startsWith('off')) return
-          }
+    const explained = new Set<string>()
+    const testedPrograms = new Set<string>()
+    const testProgram = (program: PublicKey) => {
+      const programAddr = program.toBase58()
+      if (testedPrograms.has(programAddr)) return
+      testedPrograms.add(programAddr)
+      for (const selector of knownSelectors) {
+        const marker = markerFor(selector, program)
+        if (!markerSet.has(marker)) continue
+        explained.add(marker)
+        if (selector === sourceChainSelector) offRamps.add(programAddr)
+      }
+    }
+
+    for (const { pubkey } of markers) {
+      const marker = pubkey.toBase58()
+      if (explained.has(marker)) continue
+      const sigs = await this.connection.getSignaturesForAddress(pubkey, { limit: 10 })
+      for (const { signature } of sigs) {
+        const tx = await this.connection.getTransaction(signature, {
+          maxSupportedTransactionVersion: 1,
+          commitment: 'confirmed',
+        })
+        if (!tx) continue
+        const accountKeys = tx.transaction.message.getAccountKeys({
+          accountKeysFromLookups: tx.meta?.loadedAddresses,
+        })
+        // the offRamp runs the instruction (execute) that references its marker, at the top
+        // level or through a CPI
+        for (const { programIdIndex } of [
+          ...tx.transaction.message.compiledInstructions,
+          ...(tx.meta?.innerInstructions ?? []).flatMap(({ instructions }) => instructions),
+        ]) {
+          const program = accountKeys.get(programIdIndex)
+          if (program) testProgram(program)
         }
-      }),
-    )
+        // fallback: any key that reproduces a marker for our source chain is an offRamp for it
+        for (const key of accountKeys.keySegments().flat()) {
+          const keyMarker = markerFor(sourceChainSelector, key)
+          if (!markerSet.has(keyMarker)) continue
+          explained.add(keyMarker)
+          offRamps.add(key.toBase58())
+        }
+        if (explained.has(marker)) break
+      }
+    }
+    this.logger.debug('getOffRampsForRouter: scanned allowed_offramp markers', {
+      router,
+      sourceChainSelector,
+      markers: markers.length,
+      unexplained: [...markerSet].filter((m) => !explained.has(m)),
+      offRamps: [...offRamps],
+    })
 
     if (!offRamps.size) throw new CCIPSolanaOffRampEventsNotFoundError(router)
     return [...offRamps]
@@ -1388,9 +1466,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * {@inheritDoc Chain.getFee}
    *
    * Solana routers expose separate CCIP 1.6 and 2.0 entrypoints, chosen per message: 2.0 whenever
-   * the lane supports it (without its sender allowlist enabled) and the extraArgs are (or convert
-   * to) GenericExtraArgsV3, 1.6 otherwise. The quote follows the same choice as
-   * {@link SolanaChain.sendMessage}, given the same {@link SolanaSendMessageOpts}.
+   * the lane supports it (without its sender allowlist enabled, unless the router has no 1.6 lane
+   * to fall back to) and the extraArgs are (or convert to) GenericExtraArgsV3, 1.6 otherwise. The quote follows the same choice as
+   * {@link SolanaChain.sendMessage}, given the same {@link SolanaSendMessageOpts}: an instance
+   * reuses each lane's observation for 10min, so both see the lane alike.
    * @throws {@link CCIPSolanaV2LaneUnavailableError} if the extraArgs are GenericExtraArgsV3 and
    *   the lane doesn't support CCIP 2.0, or has its sender allowlist enabled
    */
@@ -1403,6 +1482,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       destChainSelector,
       message: populatedMessage,
       sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
+      observe: () => this._observeDestChainV2(router, destChainSelector),
     })
     return this.quoteSendLane(router, destChainSelector, lane)
   }
@@ -1428,7 +1508,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *
    * Sends through the router's CCIP 2.0 entrypoint (`ccip_send_v2`) when possible, and its 1.6 one
    * (`ccip_send`) otherwise; see {@link SolanaChain.getFee}. A 2.0 lane with its sender allowlist
-   * enabled counts as unsupported, whether or not it includes the sender.
+   * enabled counts as unsupported, whether or not it includes the sender, when the router has a 1.6
+   * lane to fall back to.
    * @returns instructions - array of instructions; the send instruction is last, after any
    *   approval (and, for 2.0, a heap frame request, which must share its transaction)
    *   lookupTables - array of lookup tables for the send instruction
@@ -1450,6 +1531,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       destChainSelector,
       message: populatedMessage,
       sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
+      observe: () => this._observeDestChainV2(router, destChainSelector),
     })
     let fee = opts.message.fee
     if (fee == null) {
@@ -1996,13 +2078,13 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    *
    * @remarks
    * 2.0 pools configure their allowed finality per remote chain (EVM pools, pool-wide), so
-   * `finalityDepth`/`finalitySafe` are only returned with `feeOpts`, for its `destChainSelector`,
+   * `finalityDepth`/`finalitySafe` are only returned with `opts.destChainSelector`, for that lane,
    * along with `tokenTransferFeeConfig`. A lane without a 2.0 config allows only finalized
    * transfers, without fees (`finalityDepth: 0`, `tokenTransferFeeConfig.isEnabled: false`).
    */
   async getTokenPoolConfig(
     tokenPool: string,
-    feeOpts?: TokenTransferFeeOpts,
+    opts?: TokenPoolConfigOpts,
   ): Promise<TokenPoolConfig & { tokenPoolProgram: string }> {
     const { tokenPoolProgram, config } = await this._getTokenPoolState(tokenPool)
 
@@ -2020,10 +2102,11 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       typeAndVersion,
     }
     // 2.0 configs only exist on 2.0 pools; probe them on pools of unknown version too
-    if (!feeOpts || (version != null && version < CCIPVersion.V2_0)) return poolConfig
+    if (opts?.destChainSelector == null || (version != null && version < CCIPVersion.V2_0))
+      return poolConfig
 
     const chainConfigV2 = await this.connection.getAccountInfo(
-      deriveTokenPoolChainConfigV2Pda(tokenPoolProgram, feeOpts.destChainSelector, config.mint),
+      deriveTokenPoolChainConfigV2Pda(tokenPoolProgram, opts.destChainSelector, config.mint),
     )
     // a pool of unknown version without a 2.0 config may not be a 2.0 pool
     if (!chainConfigV2 && version == null) return poolConfig
@@ -2063,30 +2146,27 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * A 2.0 Solana router keeps serving 1.6 lanes, so a lane only carries fast finality if the router
-   * has a 2.0 path to it (it may still allowlist senders).
+   * A 2.0 Solana router keeps serving 1.6 lanes, so a lane only carries fast finality if messages go
+   * over its 2.0 path, which a 2.0 lane with its sender allowlist enabled (in testing) doesn't,
+   * unless the router has no 1.6 lane to fall back to.
    */
   protected override async laneSupportsFastFinality(
     router: string,
     destChainSelector: bigint,
   ): Promise<boolean> {
     if (!(await super.laneSupportsFastFinality(router, destChainSelector))) return false
-    const lane = await observeDestChainV2(this, {
-      router: new PublicKey(router),
-      destChainSelector,
-    })
-    return 'observation' in lane
+    return !v2LaneUnavailableReason(await this._observeDestChainV2(router, destChainSelector))
   }
 
   /** Solana token pools configure their allowed finality per remote chain. */
   protected override async getTokenPoolFinality(
     tokenPool: string,
     destChainSelector: bigint,
+    token?: string,
   ): Promise<Partial<FinalityAllowed>> {
     const { finalityDepth, finalitySafe } = await this.getTokenPoolConfig(tokenPool, {
+      token,
       destChainSelector,
-      finality: 'finalized',
-      tokenArgs: '0x',
     })
     return { finalityDepth, finalitySafe }
   }
@@ -2106,6 +2186,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   async getTokenPoolRemotes(
     tokenPool: string,
     remoteChainSelector?: bigint,
+    _opts?: TokenPoolRemotesOpts,
   ): Promise<Record<string, TokenPoolRemote>> {
     const { tokenPoolProgram, config } = await this._getTokenPoolState(tokenPool)
 
@@ -2351,6 +2432,16 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     const usdPerToken = billingTokenConfigWrapper.config.usdPerToken
     return { price: Number(toBigInt(Buffer.from(usdPerToken.value))) * 10 ** (decimals - 36) }
+  }
+
+  /**
+   * {@link observeDestChainV2}, memoized for 10min.
+   * @param router - Router program address.
+   * @param destChainSelector - Destination chain selector.
+   * @returns The lane's observation, or why the router has no 2.0 lane to it.
+   */
+  async _observeDestChainV2(router: string, destChainSelector: bigint) {
+    return observeDestChainV2(this, { router: new PublicKey(router), destChainSelector })
   }
 
   /**

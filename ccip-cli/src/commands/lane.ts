@@ -1,4 +1,9 @@
-import { discoverOffRamp, jsonStringify, networkInfo } from '@chainlink/ccip-sdk/src/index.ts'
+import {
+  type CCIPVersion,
+  discoverOffRamp,
+  jsonStringify,
+  networkInfo,
+} from '@chainlink/ccip-sdk/src/index.ts'
 import type { Argv } from 'yargs'
 
 import type { GlobalOpts } from '../index.ts'
@@ -34,6 +39,12 @@ export const builder = (yargs: Argv) =>
       demandOption: true,
       describe: 'Router or OnRamp contract address on source chain',
     })
+    .option('lane-version', {
+      type: 'string',
+      choices: ['1.2', '1.5', '1.6', '2.0'],
+      describe:
+        'CCIP version of the lane, for an OnRamp that serves more than one (e.g. a Solana 2.0 Router also serves 1.6 lanes). Default: the lane messages are sent over',
+    })
     .example([
       [
         'ccip-cli lane -s ethereum-mainnet -d avalanche-mainnet -r 0x80226fc0Ee2b096224EeAc085Bb9a8cba1146f7D',
@@ -42,6 +53,10 @@ export const builder = (yargs: Argv) =>
       [
         'ccip-cli lane -s ethereum-testnet-sepolia -d avalanche-testnet-fuji -r 0x12492154714fBD28F28219f6fc4315d19de1025B',
         'Show lane config via OnRamp address',
+      ],
+      [
+        'ccip-cli lane -s solana-devnet -d ethereum-testnet-sepolia -r Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C --lane-version 1.6',
+        'Show the 1.6 lane of a Solana 2.0 Router',
       ],
     ])
 
@@ -89,29 +104,49 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
     // typeAndVersion unavailable for this address form: treat it as an OnRamp.
   }
 
-  const onRampConfig = await source.getOnRampConfig(onRamp, destNetwork.chainSelector)
+  // an OnRamp can serve more than one lane version (e.g. a Solana 2.0 Router also serves 1.6)
+  const laneVersion = argv.laneVersion ? (`${argv.laneVersion}.0` as CCIPVersion) : undefined
+  const onRampConfig = await source.getOnRampConfig(
+    onRamp,
+    destNetwork.chainSelector,
+    laneVersion ? { version: laneVersion } : undefined,
+  )
+  // the lane version: both lanes of a Solana 2.0 Router report the same contract typeAndVersion,
+  // so its default lane config reports the lane it read as `laneVersion`
+  const version =
+    laneVersion ||
+    (onRampConfig as { laneVersion?: CCIPVersion }).laneVersion ||
+    ((await source.typeAndVersion(onRamp))[1] as CCIPVersion)
 
   switch (argv.format) {
     case Format.log:
       output.write('onRamp:', onRamp)
+      output.write('version:', version)
       output.write('onRampConfig =', onRampConfig)
       break
-    case Format.pretty:
+    case Format.pretty: {
       output.write(`OnRamp (${sourceNetwork.name}) [${sourceNetwork.family}]:`)
+      // offRamp/offramp (v2 configs) are dest-chain addresses
+      const { version: _accountVersion, ...configRows } = prettyFormat(
+        onRampConfig,
+        sourceNetwork.family,
+        { offRamp: destNetwork.family, offramp: destNetwork.family },
+      ) as Record<string, unknown>
+      // the lane version replaces the config's own `version` row (e.g. a Solana account layout
+      // version), which identifies neither the lane nor the contract
       prettyTable.call(ctx, {
         onRamp: formatDisplayAddress(onRamp, sourceNetwork.family),
-        // offRamp/offramp (v2 configs) are dest-chain addresses
-        ...(prettyFormat(onRampConfig, sourceNetwork.family, {
-          offRamp: destNetwork.family,
-          offramp: destNetwork.family,
-        }) as Record<string, unknown>),
+        version,
+        ...configRows,
       })
       break
+    }
     default:
       if (jsonEnvelope) {
         jsonEnvelope.source = sourceNetwork.name
         jsonEnvelope.dest = destNetwork.name
         jsonEnvelope.onRamp = onRamp
+        jsonEnvelope.version = version
         jsonEnvelope.onRampConfig = onRampConfig
       }
   }
@@ -127,7 +162,7 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
 
   let offRamp: string
   try {
-    offRamp = await discoverOffRamp(source, dest, onRamp, ctx)
+    offRamp = await discoverOffRamp(source, dest, { onRamp, version }, ctx)
   } catch (err) {
     logger.debug('No offRamp found for', onRamp, '—', err)
     emitJsonEnvelope()

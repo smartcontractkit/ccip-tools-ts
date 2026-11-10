@@ -692,6 +692,21 @@ describe('EVMChain.checkExecute — dest-liquidity guard', () => {
     assert.ok(provider.calls.some((c) => c.data?.startsWith(ROM_V2_SEL)))
   })
 
+  it('multi-token pool without real pool data => skips the releaseOrMint simulation', async () => {
+    // it checks the source token and identity metadata that only real pool data carries
+    const mttp = { poolTypeAndVersion: 'BurnMintMultiTokenPool 2.1.0-dev' }
+    const { chain, provider } = makeChain({ ...mttp, offRampTypeAndVersion: 'OffRamp 2.0.0' })
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: MESSAGE }), true)
+    assert.ok(!provider.calls.some((c) => c.data?.startsWith(ROM_V2_SEL)))
+
+    // with the source pool's real pool data, it simulates as usual
+    const real = makeChain({ ...mttp, offRampTypeAndVersion: 'OffRamp 2.0.0' })
+    const extraData = '0x' + '00'.repeat(31) + '12'
+    const message = { ...MESSAGE, tokenAmounts: [{ token: TOKEN, amount: 1000n, extraData }] }
+    assert.equal(await real.chain.checkExecute({ offRamp: OFFRAMP, message }), true)
+    assert.ok(real.provider.calls.some((c) => c.data?.startsWith(ROM_V2_SEL)))
+  })
+
   it('any revert => one CCIPDestExecutionRevertError carrying the raw revert, isTransient per cause', async () => {
     const routing = [
       { revert: encodeErr('InsufficientLiquidity()'), transient: true },

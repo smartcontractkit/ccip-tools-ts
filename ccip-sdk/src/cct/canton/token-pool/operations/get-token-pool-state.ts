@@ -18,6 +18,7 @@ import {
   extractRecordField,
 } from '../../../../canton/index.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { FinalityConfig } from '../../encoding.ts'
 import { CantonQuery } from '../../query.ts'
 import { decodeOptionalParty } from '../../token-admin-registry/shared.ts'
 import { instanceAddressOwner, parsePartyId } from '../../validate.ts'
@@ -41,6 +42,8 @@ export interface PoolRemoteChainConfig {
   inboundCustomBlockConfirmationsRateLimiter: string
   /** Outbound rate limiter raw instance address. */
   outboundRateLimiter: string
+  /** Lane finality config (FTF = `WaitForSafe`/`BlockDepth`). */
+  finalityConfig?: FinalityConfig
 }
 
 /** Result of `getTokenPoolState`: the pool's config. */
@@ -238,6 +241,7 @@ function decodeRemoteChainConfigRecord(
   valueRec: unknown,
 ): PoolRemoteChainConfig | null {
   const cfg = decodeDamlRecord(valueRec)
+  const finalityConfig = decodeFinalityConfig(cfg['finalityConfig'])
   return {
     remoteChainSelector: key,
     remotePools: decodeStringList(cfg['remotePools']),
@@ -249,7 +253,38 @@ function decodeRemoteChainConfigRecord(
       cfg['inboundCustomBlockConfirmationsRateLimiter'],
     ),
     outboundRateLimiter: decodeRawAddress(cfg['outboundRateLimiter']),
+    // Optional — omit the key entirely when the variant doesn't decode.
+    ...(finalityConfig ? { finalityConfig } : {}),
   }
+}
+
+/**
+ * Decode a `FinalityConfig` variant. Handles the JSON-API `{tag, value}` form,
+ * the natural `{Ctor: value}` form (e.g. `{ WaitForFinality: {} }`), and the
+ * Sum-wrapped gRPC `Variant` envelope.
+ */
+function decodeFinalityConfig(value: unknown): FinalityConfig | undefined {
+  const v = extractFieldValue(value) ?? value
+  if (!v || typeof v !== 'object') return undefined
+  let rec = v as Record<string, unknown>
+  // gRPC Variant envelope: { Variant: { constructor, value } }.
+  const variant = rec['Variant']
+  if (variant && typeof variant === 'object') {
+    const g = variant as Record<string, unknown>
+    rec = { tag: g['constructor'], value: g['value'] }
+  }
+  // Natural JSON variant form: { WaitForFinality: {} } / { BlockDepth: "5" }.
+  if (typeof rec['tag'] !== 'string') {
+    const ctor = ['WaitForFinality', 'WaitForSafe', 'BlockDepth'].find((k) => k in rec)
+    if (ctor) rec = { tag: ctor, value: rec[ctor] }
+  }
+  const tag = rec['tag']
+  if (tag === 'WaitForFinality' || tag === 'WaitForSafe') return { type: tag }
+  if (tag === 'BlockDepth') {
+    const depth = Number(extractFieldValue(rec['value']))
+    if (Number.isFinite(depth)) return { type: 'BlockDepth', blockConfirmations: depth }
+  }
+  return undefined
 }
 
 /** Decode a `RawInstanceAddress` newtype (`{unpack: string}`, possibly Sum-wrapped in gRPC) to its raw string. */

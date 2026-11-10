@@ -86,6 +86,13 @@ function destChainStateV2Pda(router: PublicKey, destChainSelector: bigint): Publ
   )[0]
 }
 
+function destChainStatePda(router: PublicKey, destChainSelector: bigint): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('dest_chain_state'), toLeArray(destChainSelector, 8)],
+    router,
+  )[0]
+}
+
 function requestHeapFrameIx(): TransactionInstruction {
   return ComputeBudgetProgram.requestHeapFrame({ bytes: MAX_HEAP_FRAME_BYTES })
 }
@@ -137,7 +144,8 @@ export function toGenericExtraArgsV3(extraArgs: ExtraArgs): GenericExtraArgsV3 |
 
 /**
  * Observes a lane's CCIP 2.0 configuration by simulating the router's read-only
- * `observe_dest_chain_v2`.
+ * `observe_dest_chain_v2`. For a lane with its sender allowlist enabled, also reads whether the
+ * router has a 1.6 lane (`dest_chain_state`) to the same destination, as `hasV16Lane`.
  * @param ctx - Context with the Solana connection and logger.
  * @param opts - Router and destination chain selector.
  * @returns The lane's observation, or why the router has no 2.0 lane to it.
@@ -146,7 +154,10 @@ export function toGenericExtraArgsV3(extraArgs: ExtraArgs): GenericExtraArgsV3 |
 export async function observeDestChainV2(
   ctx: { connection: Connection } & WithLogger,
   { router, destChainSelector }: { router: PublicKey; destChainSelector: bigint },
-): Promise<{ observation: DestChainV2Observation } | { reason: SolanaV2LaneUnavailableReason }> {
+): Promise<
+  | { observation: DestChainV2Observation; hasV16Lane?: boolean }
+  | { reason: SolanaV2LaneUnavailableReason }
+> {
   const ix = new TransactionInstruction({
     programId: router,
     keys: [
@@ -180,12 +191,30 @@ export async function observeDestChainV2(
       { context: { router: router.toBase58(), destChainSelector } },
     )
   }
-  return {
-    observation: routerV2Coder.types.decode<DestChainV2Observation>(
-      'RouterDestChainV2Observation',
-      bytesToBuffer(returnData.data[0]),
-    ),
-  }
+  const observation = routerV2Coder.types.decode<DestChainV2Observation>(
+    'RouterDestChainV2Observation',
+    bytesToBuffer(returnData.data[0]),
+  )
+  if (!observation.allowListEnabled) return { observation }
+  const v16Lane = await ctx.connection.getAccountInfo(destChainStatePda(router, destChainSelector))
+  return { observation, hasV16Lane: v16Lane != null }
+}
+
+/**
+ * Why a lane can't take CCIP 2.0 messages, if it can't. A lane with its sender allowlist enabled is
+ * in testing: it counts as without 2.0, whoever the sender, unless `sendV2OnAllowlistedLanes`, or
+ * the router has no 1.6 lane to fall back to (a 2.0-only deployment).
+ * @param lane - The lane's {@link observeDestChainV2} result.
+ * @param sendV2OnAllowlistedLanes - Whether lanes with their allowlist enabled count as 2.0.
+ * @returns The reason, or undefined if the lane takes 2.0 messages.
+ */
+export function v2LaneUnavailableReason(
+  lane: Awaited<ReturnType<typeof observeDestChainV2>>,
+  sendV2OnAllowlistedLanes = false,
+): SolanaV2LaneUnavailableReason | undefined {
+  if ('reason' in lane) return lane.reason
+  if (lane.observation.allowListEnabled && lane.hasV16Lane !== false && !sendV2OnAllowlistedLanes)
+    return 'allowlist-enabled'
 }
 
 /**
@@ -196,9 +225,10 @@ export async function observeDestChainV2(
  * - otherwise 1.6, for legacy extraArgs;
  * - GenericExtraArgsV3 has no 1.6 fallback, and throws instead.
  * @param ctx - Context with the Solana connection and logger.
- * @param opts - Router, destination selector, message (as populated by `buildMessageForDest`), and
+ * @param opts - Router, destination selector, message (as populated by `buildMessageForDest`),
  *   whether lanes with their allowlist enabled can go over 2.0 (see
- *   `SolanaSendMessageOpts.sendV2OnAllowlistedLanes`).
+ *   `SolanaSendMessageOpts.sendV2OnAllowlistedLanes`), and `observe`, which observes the lane
+ *   (default: {@link observeDestChainV2}); it's only called for messages that can go over 2.0.
  * @returns The entrypoint version, and the message to send through it (with V3 extraArgs for 2.0).
  * @throws {@link CCIPSolanaV2LaneUnavailableError} if the message requires 2.0 and it isn't possible
  */
@@ -209,11 +239,13 @@ export async function selectSendLane(
     destChainSelector,
     message,
     sendV2OnAllowlistedLanes = false,
+    observe = () => observeDestChainV2(ctx, { router, destChainSelector }),
   }: {
     router: PublicKey
     destChainSelector: bigint
     message: AnyMessage
     sendV2OnAllowlistedLanes?: boolean
+    observe?: () => ReturnType<typeof observeDestChainV2>
   },
 ): Promise<SolanaSendLane> {
   const { logger = console } = ctx
@@ -223,11 +255,7 @@ export async function selectSendLane(
     return { version: CCIPVersion.V1_6, message }
   }
 
-  const lane = await observeDestChainV2(ctx, { router, destChainSelector })
-  let reason: SolanaV2LaneUnavailableReason | undefined
-  if ('reason' in lane) reason = lane.reason
-  else if (lane.observation.allowListEnabled && !sendV2OnAllowlistedLanes)
-    reason = 'allowlist-enabled'
+  const reason = v2LaneUnavailableReason(await observe(), sendV2OnAllowlistedLanes)
   if (!reason) return { version: CCIPVersion.V2_0, message: { ...message, extraArgs } }
 
   if (isGenericExtraArgsV3(message.extraArgs)) {

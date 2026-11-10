@@ -6,11 +6,12 @@ import { getAddress, hexlify, randomBytes, toBeHex } from 'ethers'
 
 import {
   CCIPApiClientNotAvailableError,
+  CCIPMethodUnsupportedError,
   CCIPTokenDecimalsUnavailableError,
 } from './errors/index.ts'
 import { estimateExecGas } from './evm/gas.ts'
 import { EVMChain } from './evm/index.ts'
-import { estimateReceiveExecution } from './gas.ts'
+import { estimateReceiveExecution, getRequiredCCVs } from './gas.ts'
 import { ChainFamily, NetworkType } from './networks.ts'
 import { CCIPVersion } from './types.ts'
 
@@ -100,6 +101,49 @@ function createMockChains(onRamp: string, offRamp: string) {
 
   return { mockSourceChain, mockDestChain }
 }
+
+describe('getRequiredCCVs', () => {
+  const receiver = getAddress(hexlify(randomBytes(20)))
+
+  it('throws CCIPMethodUnsupportedError before any RPC call for a dest without the view', async () => {
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const offRamp = getAddress(hexlify(randomBytes(20)))
+    const { mockSourceChain, mockDestChain } = createMockChains(onRamp, offRamp)
+
+    await assert.rejects(
+      getRequiredCCVs({
+        source: mockSourceChain as any,
+        dest: mockDestChain as any,
+        routerOrRamp: onRamp,
+        message: { receiver },
+      }),
+      CCIPMethodUnsupportedError,
+    )
+    assert.equal(mockSourceChain.typeAndVersion.mock.callCount(), 0)
+    assert.equal(mockDestChain.typeAndVersion.mock.callCount(), 0)
+  })
+
+  it("discovers the offRamp of the onRamp's own lane version, not a forced 2.0", async () => {
+    // a 1.5 lane: discovery for a forced 2.0 lane would reject its (1.5) offRamp, and fail
+    // before the destination's view could report the lane as unsupported
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const offRamp = getAddress(hexlify(randomBytes(20)))
+    const { mockSourceChain, mockDestChain } = createMockChains(onRamp, offRamp)
+    const result = { requiredCCVs: [], optionalCCVs: [], optionalThreshold: 0 }
+    const destGetRequiredCCVs = mock.fn(async (_opts: { offRamp: string }) => result)
+
+    assert.deepEqual(
+      await getRequiredCCVs({
+        source: mockSourceChain as any,
+        dest: { ...mockDestChain, getRequiredCCVs: destGetRequiredCCVs } as any,
+        routerOrRamp: onRamp,
+        message: { receiver },
+      }),
+      result,
+    )
+    assert.equal(destGetRequiredCCVs.mock.calls[0]!.arguments[0].offRamp, offRamp)
+  })
+})
 
 describe('estimateExecGasForRequest', () => {
   let mockSourceChain: any
@@ -435,6 +479,47 @@ describe('estimateExecGasForRequest', () => {
     // Should not have stateOverrides when no tokens
     const sendCall = mockDestChain.provider.send.mock.calls[0]
     assert.equal(sendCall.arguments[1].length, 2) // Only transaction and block, no stateOverrides
+  })
+
+  it('should use the OffRamp of the lane its default config reports, not the OnRamp version', async () => {
+    // a Solana 2.0 Router sends over its 1.6 lane while the 2.0 lane is in testing; the dest has
+    // a 2.0 OffRamp and a 1.6 OffRamp that both accept it
+    const onRamp = getAddress(hexlify(randomBytes(20)))
+    const offRampV2 = getAddress(hexlify(randomBytes(20)))
+    const offRampV16 = getAddress(hexlify(randomBytes(20)))
+
+    const chains = createMockChains(onRamp, offRampV2)
+    mockSourceChain = chains.mockSourceChain
+    mockDestChain = chains.mockDestChain
+    mockSourceChain.typeAndVersion = mock.fn(async (address: string) =>
+      address === onRamp ? ['Router', '2.0.0', address] : ['Router', '1.0.0', address],
+    )
+    mockSourceChain.getOnRampConfig = mock.fn(async () => ({
+      typeAndVersion: 'Router 2.0.0',
+      laneVersion: '1.6.0',
+    }))
+    mockDestChain.getOffRampsForRouter = mock.fn(async () => [offRampV2, offRampV16])
+    mockDestChain.typeAndVersion = mock.fn(async (address: string) =>
+      address === offRampV2 ? ['OffRamp', '2.0.0', address] : ['OffRamp', '1.6.0', address],
+    )
+    mockDestChain.provider.send = mock.fn(async () => toBeHex(35_000))
+
+    await estimateReceiveExecution({
+      source: mockSourceChain,
+      dest: mockDestChain,
+      routerOrRamp: onRamp,
+      message: {
+        sender: getAddress(hexlify(randomBytes(20))),
+        receiver: getAddress(hexlify(randomBytes(20))),
+        data: '0x',
+        tokenAmounts: [],
+      },
+    })
+
+    assert.equal(
+      mockDestChain.estimateReceiveExecution.mock.calls[0].arguments[0].offRamp,
+      offRampV16,
+    )
   })
 
   it('should resolve dest decimals from the dest pool when the dest token has no decimals()', async () => {

@@ -171,7 +171,7 @@ const requests = await source.getMessagesInTx('0x1234...')
 const request = requests[0]
 
 // discoverOffRamp reads from source + dest RPCs (result is memoized)
-const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+const offRamp = await discoverOffRamp(source, dest, request.lane)
 
 try {
   const verifications = await dest.getVerifications({ offRamp, request })
@@ -245,7 +245,7 @@ async function trackMessage(sourceTxHash: string) {
   console.log('Message ID:', request.message.messageId)
 
   // Discover OffRamp on dest chain (RPC — contract calls, memoized)
-  const offRamp = await discoverOffRamp(source, dest, request.lane.onRamp)
+  const offRamp = await discoverOffRamp(source, dest, request.lane)
 
   // Stage 2: Check commit status (RPC — scan dest chain logs)
   let verifications
@@ -300,7 +300,7 @@ const txUrl = getCCIPExplorerUrl('tx', txHash)
 | `api.searchAllMessages(filters?)` | CCIP API | Yes | `MessageSearchResult` (async generator — see [Searching Messages](/sdk/guides/searching-messages)) |
 | `getVerifications({offRamp, request})` | RPC (log scan) | No | `CCIPVerifications` (commit report or verifier results) |
 | `getExecutionReceipts({offRamp, messageId})` | RPC (log scan) | No | `CCIPExecution` iterator (state, gasUsed, return data) |
-| `discoverOffRamp(source, dest, onRamp)` | RPC (contract calls) | No | OffRamp address (memoized) |
+| `discoverOffRamp(source, dest, lane)` | RPC (contract calls) | No | OffRamp address (memoized) |
 | `getCCIPExplorerUrl(type, value)` | None | No | URL string |
 
 ## Related

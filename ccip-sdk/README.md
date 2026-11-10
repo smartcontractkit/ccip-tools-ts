@@ -134,7 +134,9 @@ Transaction-sending methods require a chain-specific wallet:
 
 ### Unsigned Transactions
 
-For custom signing workflows (e.g., browser wallets, hardware wallets), use the `generateUnsigned*` methods:
+For custom signing workflows (e.g., browser wallets, hardware wallets), use the `generateUnsigned*` methods.
+
+Retries: re-submit the *same* generated transaction rather than regenerating. Command IDs are derived from the command content, and regenerating re-resolves on-ledger contract references (e.g. a TokenConfig recreated between attempts) — the command ID then changes and the ledger no longer dedupes the retry.
 
 ```ts
 // Generate unsigned transaction data

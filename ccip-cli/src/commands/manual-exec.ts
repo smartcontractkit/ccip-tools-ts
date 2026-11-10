@@ -222,7 +222,7 @@ async function manualExec(
 
   let inputs
   if (source) {
-    offRamp ??= await discoverOffRamp(source, dest, request.lane.onRamp, source)
+    offRamp ??= await discoverOffRamp(source, dest, request.lane, source)
     const indexer = resolveIndexer(argv, dest, logger, source)
     const verifications = await dest.getVerifications({
       ...argv,

@@ -57,7 +57,7 @@ const payer = wallet.publicKey // fee payer for unsigned flows
 
 The SDK deploy operation targets the canonical CCIP `burn-mint` and `lock-release` pool programs. It returns the pool state PDA and pool signer PDA.
 
-`poolType` is chosen only here and in `createTokenMultisig`. Operations on an existing pool take its `tokenAddress` and resolve the pool program on-chain from the pool state account that exists for the mint; pass `poolProgramAddress` only for a custom pool program, or when a mint has both a burn-mint and a lock-release pool.
+`poolType` is chosen only here and in `createTokenMultisig`. Operations on an existing pool take its `tokenAddress` and resolve the pool program on-chain from the pool state account that exists for the mint; pass `poolProgramAddress` for a custom pool program, when a mint has both a burn-mint and a lock-release pool, or on clusters where the pool programs are not at their canonical addresses (then to every operation, including `deployTokenPool` and `createTokenMultisig`).
 
 ```typescript
 const result = await cct.deployTokenPool({

@@ -1,6 +1,6 @@
 import type { BytesLike } from 'ethers'
 
-import type { RateLimiterState } from '../chain.ts'
+import type { LaneRecordType, LaneStatus, RateLimiterState } from '../chain.ts'
 import type { FinalityAllowed, FinalityRequested } from '../extra-args.ts'
 import { isTransientHttpStatus } from '../http-status.ts'
 import { type ChainFamily, networkInfo } from '../networks.ts'
@@ -515,7 +515,7 @@ export class CCIPMessageNotVerifiedYetError extends CCIPError {
  * @example
  * ```typescript
  * try {
- *   const offRamp = await discoverOffRamp(source, dest, request)
+ *   const offRamp = await discoverOffRamp(source, dest, request.lane)
  * } catch (error) {
  *   if (error instanceof CCIPOffRampNotFoundError) {
  *     console.log(`No offRamp for ${error.context.onRamp} on ${error.context.destNetwork}`)
@@ -2701,6 +2701,135 @@ export class CCIPTokenPoolInfoNotFoundError extends CCIPError {
 }
 
 /**
+ * Thrown when a pool read needs the local token, but none is given: the pool serves multiple
+ * tokens (a multi-token pool), so the pool address alone does not select one token's
+ * configuration. Matches the pool's own `LocalTokenRequired()` revert.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getTokenPoolConfig(tokenPool)
+ * } catch (error) {
+ *   if (error instanceof CCIPLocalTokenRequiredError) {
+ *     const config = await chain.getTokenPoolConfig(tokenPool, { token })
+ *   }
+ * }
+ * ```
+ */
+export class CCIPLocalTokenRequiredError extends CCIPError {
+  override readonly name = 'CCIPLocalTokenRequiredError'
+  /** Creates a local token required error. */
+  constructor(tokenPool: string, typeAndVersion: string, options?: CCIPErrorOptions) {
+    super(
+      CCIPErrorCode.LOCAL_TOKEN_REQUIRED,
+      `TokenPool ${tokenPool} (${typeAndVersion}) serves multiple tokens; pass the local token`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, tokenPool, typeAndVersion },
+      },
+    )
+  }
+}
+
+/** The lane of a token transfer, in the context of the lane status errors. */
+type TokenTransferLane = {
+  /** The token on the chain that checks the lane: the source token outbound, the destination token inbound. */
+  token: string
+  /** The token pool on the chain that checks the lane. */
+  tokenPool: string
+  /** The source chain of the transfer. */
+  sourceChainSelector: bigint
+  /** The destination chain of the transfer. */
+  destChainSelector: bigint
+}
+
+/**
+ * Thrown when a pause stops a token transfer: a multi-token pool's global pause, or a pause of the
+ * token or of the remote chain in the transfer's direction. `context.scope` gives the pause
+ * (`'global'`, `'token'` or `'chain'`) and `context.direction` the direction (`'outbound'` on the
+ * source, `'inbound'` on the destination). Not transient: only the pool's pause admins can lift it.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getFee({ router, destChainSelector, message })
+ * } catch (error) {
+ *   if (error instanceof CCIPTokenTransferPausedError) {
+ *     console.log(`${error.context.token} is paused (${error.context.scope})`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPTokenTransferPausedError extends CCIPError {
+  override readonly name = 'CCIPTokenTransferPausedError'
+  /** Creates a token transfer paused error. */
+  constructor(
+    status: Extract<LaneStatus, { status: 'paused' }>,
+    lane: TokenTransferLane,
+    options?: CCIPErrorOptions,
+  ) {
+    const source = networkInfo(lane.sourceChainSelector).name
+    const dest = networkInfo(lane.destChainSelector).name
+    super(
+      CCIPErrorCode.TOKEN_TRANSFER_PAUSED,
+      `Token ${lane.token} transfers from "${source}" to "${dest}" are paused: ${status.scope} ${status.direction} pause on tokenPool=${lane.tokenPool}`,
+      {
+        ...options,
+        isTransient: false,
+        context: {
+          ...options?.context,
+          ...lane,
+          scope: status.scope,
+          direction: status.direction,
+        },
+      },
+    )
+  }
+}
+
+/**
+ * Thrown when a token's lane lacks a configuration record that a transfer in that direction
+ * requires, so the transfer would revert (e.g. a multi-token pool's `LaneFeeNotFound` on send).
+ * `context.missing` lists the record types: `'connection'`, `'remotePool'`, `'rateLimit'`, `'fee'`,
+ * `'destOverhead'` or `'security'`. Decoded from a `LaneFeeNotFound` revert, it lists both
+ * `'fee'` and `'destOverhead'`, because the revert does not say which one is missing. Not
+ * transient: the pool's configuration must change.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await chain.getFee({ router, destChainSelector, message })
+ * } catch (error) {
+ *   if (error instanceof CCIPLaneConfigIncompleteError) {
+ *     console.log(`Lane not ready, missing: ${error.context.missing.join(', ')}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPLaneConfigIncompleteError extends CCIPError {
+  override readonly name = 'CCIPLaneConfigIncompleteError'
+  /** Creates a lane config incomplete error. */
+  constructor(
+    missing: readonly LaneRecordType[],
+    lane: Omit<TokenTransferLane, 'tokenPool'> & { tokenPool?: string },
+    options?: CCIPErrorOptions,
+  ) {
+    const source = networkInfo(lane.sourceChainSelector).name
+    const dest = networkInfo(lane.destChainSelector).name
+    super(
+      CCIPErrorCode.LANE_CONFIG_INCOMPLETE,
+      `Token ${lane.token} lane from "${source}" to "${dest}" lacks required config record(s): ${missing.join(', ')}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, ...lane, missing: [...missing] },
+      },
+    )
+  }
+}
+
+/**
  * Thrown when SPL token is invalid or not Token-2022.
  *
  * @example
@@ -3577,7 +3706,7 @@ export type SolanaV2LaneUnavailableReason =
  * Thrown when a Solana message requires a CCIP 2.0 lane (its extraArgs are GenericExtraArgsV3),
  * but the router can't send it over one: the lane isn't configured for 2.0, the router doesn't
  * have 2.0 support yet, or the lane has its sender allowlist enabled, which the SDK doesn't send
- * 2.0 messages over.
+ * 2.0 messages over while the router has a 1.6 lane to fall back to.
  *
  * @example
  * ```typescript
@@ -4085,11 +4214,13 @@ export class CCIPViemAdapterError extends CCIPError {
 // Finality
 
 /**
- * Thrown when a receiver contract rejects the requested finality.
+ * Thrown when a receiver contract, or the token pool of a transferred token, rejects the
+ * requested finality.
  *
- * The receiver either does not support `"safe"` (FCR) finality, or requires a higher
+ * The receiver (or pool) either does not support `"safe"` (FCR) finality, or requires a higher
  * minimum confirmation depth than what was requested. Inspect `context.requested` and
- * `context.allowed` for the exact mismatch.
+ * `context.allowed` for the exact mismatch; a pool rejection also has `context.tokenPool` and
+ * `context.token`.
  *
  * @example
  * ```typescript
@@ -4111,14 +4242,18 @@ export class CCIPFinalityNotAllowedError extends CCIPError {
   /**
    * Creates a finality not allowed error.
    * @param requested - The finality value that was requested (`"safe"` or a block depth number).
-   * @param allowed - The finality config the receiver actually accepts.
-   * @param options - Optional error options.
+   * @param allowed - The finality config the receiver (or token pool) actually accepts.
+   * @param options - Optional error options; a `context.tokenPool` names the pool as the rejecter.
    */
   constructor(requested: FinalityRequested, allowed: FinalityAllowed, options?: CCIPErrorOptions) {
+    const tokenPool = options?.context?.tokenPool
+    const subject = typeof tokenPool === 'string' ? `TokenPool ${tokenPool}` : 'Receiver'
     const detail =
       requested === 'safe'
-        ? `Receiver does not support "safe" finality`
-        : `Receiver requires minimum finality depth of ${allowed.finalityDepth}, but ${requested} was requested`
+        ? `${subject} does not support "safe" finality`
+        : allowed.finalityDepth
+          ? `${subject} requires minimum finality depth of ${allowed.finalityDepth}, but ${requested} was requested`
+          : `${subject} does not support block depth finality, but ${requested} was requested`
     super(CCIPErrorCode.FINALITY_NOT_ALLOWED, detail, {
       ...options,
       isTransient: false,

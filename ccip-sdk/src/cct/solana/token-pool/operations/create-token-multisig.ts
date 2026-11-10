@@ -20,6 +20,7 @@ import {
 } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
 import {
+  parseOptionalPublicKey,
   parsePublicKey,
   validateAuthorityMatchesWallet,
   validateInteger,
@@ -40,6 +41,11 @@ type MintAccount = NonNullable<Parameters<typeof unpackMint>[1]>
 type CreateTokenMultisigParams = {
   tokenAddress: string
   poolType: TokenPoolType
+  /**
+   * Address of the `poolType` program. Defaults to the canonical address for `poolType`; set it
+   * where that program is deployed elsewhere. The pool signer PDA derives from it.
+   */
+  poolProgramAddress?: string
   threshold: number
   /** Extra multisig member addresses in addition to pool signer PDA and mint authority. */
   additionalSigners?: string[]
@@ -154,7 +160,9 @@ export class CreateTokenMultisig extends SolanaOperation<
 
     return {
       tokenMint: parsePublicKey(this.name, 'tokenAddress', params.tokenAddress),
-      poolProgram: resolveTokenPoolProgram(params.poolType),
+      poolProgram:
+        parseOptionalPublicKey(this.name, 'poolProgramAddress', params.poolProgramAddress) ??
+        resolveTokenPoolProgram(params.poolType),
       payer: parsePublicKey(this.name, 'payer', params.payer),
       threshold: params.threshold,
       additionalSigners: (params.additionalSigners ?? []).map((signer, i) =>
