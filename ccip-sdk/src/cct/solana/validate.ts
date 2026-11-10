@@ -19,6 +19,7 @@ import {
 import {
   type TokenPoolConfig,
   type TokenPoolType,
+  SOLANA_TOKEN_POOL_TYPES,
   TOKEN_POOL_PROGRAMS,
   decodeTokenPoolState,
   deriveTokenPoolConfigPda,
@@ -314,28 +315,38 @@ export async function resolveExistingPoolProgram(
   )
 }
 
+/** The type of a canonical token pool program, identified by address; `undefined` for others. */
+function canonicalPoolProgramType(poolProgram: PublicKey): TokenPoolType | undefined {
+  return SOLANA_TOKEN_POOL_TYPES.find((type) => poolProgram.equals(resolveTokenPoolProgram(type)))
+}
+
 /**
- * Identifies a token pool program's type: canonical programs by address, custom programs by their
- * `typeAndVersion`.
- * @returns `undefined` for a custom program without `typeVersion`, or whose type names neither.
+ * Identifies a token pool program's type and CCIP version, e.g. `'1.6.2'` or `'2.0.0'`, from its
+ * `typeVersion`. Canonical programs are typed by address, but their version must still be read:
+ * mainnet and prod testnet run 1.6 and 2.0 under the same program IDs. `typeAndVersion` is memoized
+ * on {@link SolanaChain}, so repeat calls for the same program cost no RPC.
+ * @returns `type` is `undefined` for a custom program whose type names neither pool type; both are
+ * `undefined` for a custom program without `typeVersion`.
+ * @throws if `typeVersion` fails for a canonical program, which always implements it; the failure
+ * is then an RPC error, not a missing instruction.
  */
-export async function resolvePoolProgramType(
+export async function resolvePoolProgramTypeAndVersion(
   chain: SolanaChain,
   poolProgram: PublicKey,
-): Promise<TokenPoolType | undefined> {
-  if (poolProgram.equals(resolveTokenPoolProgram('burn-mint'))) return 'burn-mint'
-  if (poolProgram.equals(resolveTokenPoolProgram('lock-release'))) return 'lock-release'
-
-  let type: string
+): Promise<{ type: TokenPoolType | undefined; version: string | undefined }> {
+  const canonicalType = canonicalPoolProgramType(poolProgram)
+  let type: string, version: string
   try {
-    ;[type] = await chain.typeAndVersion(poolProgram.toBase58())
-  } catch {
+    ;[type, version] = await chain.typeAndVersion(poolProgram.toBase58())
+  } catch (err) {
+    if (canonicalType) throw err
     // Custom pool programs may not implement `typeVersion`.
-    return undefined
+    return { type: undefined, version: undefined }
   }
-  if (/LockRelease/i.test(type)) return 'lock-release'
-  if (/BurnMint/i.test(type)) return 'burn-mint'
-  return undefined
+  if (canonicalType) return { type: canonicalType, version }
+  if (/LockRelease/i.test(type)) return { type: 'lock-release', version }
+  if (/BurnMint/i.test(type)) return { type: 'burn-mint', version }
+  return { type: undefined, version }
 }
 
 /**
@@ -349,7 +360,9 @@ export async function validatePoolProgramType(
   poolProgram: PublicKey,
   poolType: TokenPoolType,
 ): Promise<void> {
-  const type = await resolvePoolProgramType(chain, poolProgram)
+  const type =
+    canonicalPoolProgramType(poolProgram) ??
+    (await resolvePoolProgramTypeAndVersion(chain, poolProgram)).type
   if (type === undefined || type === poolType) return
   throw new CCTParamsInvalidError(
     operation,
@@ -369,7 +382,7 @@ export async function validateLockReleasePoolProgram(
   poolProgram: PublicKey,
   poolProgramAddress?: PublicKey,
 ): Promise<void> {
-  if ((await resolvePoolProgramType(chain, poolProgram)) !== 'burn-mint') return
+  if ((await resolvePoolProgramTypeAndVersion(chain, poolProgram)).type !== 'burn-mint') return
   throw poolProgramAddress
     ? new CCTParamsInvalidError(
         operation,
@@ -504,24 +517,6 @@ export function validateDelegation(
       },
     },
   )
-}
-
-/**
- * Reads a token pool program's CCIP version from its `typeVersion`, e.g. `'1.6.2'` or `'2.0.0'`.
- * The program ID can't tell versions apart: mainnet and prod testnet run 1.6 and 2.0 under the same
- * IDs.
- * @returns `undefined` for a custom program without `typeVersion`.
- */
-export async function resolvePoolProgramVersion(
-  chain: SolanaChain,
-  poolProgram: PublicKey,
-): Promise<string | undefined> {
-  try {
-    return (await chain.typeAndVersion(poolProgram.toBase58()))[1]
-  } catch {
-    // Custom pool programs may not implement `typeVersion`.
-    return undefined
-  }
 }
 
 /** Whether a pool program version is CCIP 2.0 or later; `undefined` (unknown) counts as earlier. */

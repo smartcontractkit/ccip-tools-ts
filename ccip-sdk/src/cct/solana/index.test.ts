@@ -204,6 +204,12 @@ describe('SolanaTokenManager (cct/solana)', () => {
           sendTransaction: async () => PublicKey.default.toBase58(),
           confirmTransaction: async () => ({ value: { err: null } }),
         },
+        // a pre-2.0 pool, so every facade operation, setCanAcceptLiquidity included, can build
+        typeAndVersion: async () => [
+          'lockreleaseTokenPool',
+          '1.6.2',
+          'lockrelease-token-pool 1.6.2',
+        ],
         getTokenAdminRegistryFor: async (address: string) =>
           address === reader ? pool : address === overrideAddress ? overrideRouter : account,
         getSupportedTokens: async () => [mint],

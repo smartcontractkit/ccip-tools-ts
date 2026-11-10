@@ -27,6 +27,8 @@ function chain(): SolanaChain {
       getMultipleAccountsInfo: async () => [null, {}], // only the canonical lock-release pool
       getAccountInfo: async () => ({}), // any custom pool program's state
     },
+    // a pre-2.0 lock-release pool
+    typeAndVersion: async () => ['lockreleaseTokenPool', '1.6.2', 'lockrelease-token-pool 1.6.2'],
   } as unknown as SolanaChain
 }
 
@@ -140,6 +142,21 @@ describe('SetCanAcceptLiquidity (cct/solana)', () => {
           err instanceof CCTOperationUnsupportedError &&
           err.context.operation === 'setCanAcceptLiquidity' &&
           err.context.version === '2.0.0',
+      )
+    })
+
+    it('surfaces typeVersion RPC failures instead of assuming a pre-2.0 pool', async () => {
+      // the canonical program may be 2.0, so building the removed instruction would fail on-chain
+      const rpcError = new Error('429 Too Many Requests')
+      const failing = Object.assign(chain(), { typeAndVersion: () => Promise.reject(rpcError) })
+      await assert.rejects(
+        () =>
+          new SetCanAcceptLiquidity().generate(failing, {
+            tokenAddress: TOKEN,
+            payer: PAYER,
+            allow: ALLOW,
+          }),
+        rpcError,
       )
     })
 

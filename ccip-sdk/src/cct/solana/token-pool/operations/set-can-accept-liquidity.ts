@@ -21,7 +21,7 @@ import {
   parseOptionalPublicKey,
   parsePublicKey,
   resolveExistingLockReleasePoolProgram,
-  resolvePoolProgramVersion,
+  resolvePoolProgramTypeAndVersion,
   validateAuthorityMatchesWallet,
 } from '../../validate.ts'
 
@@ -102,7 +102,7 @@ export class SetCanAcceptLiquidity extends SolanaOperation<
     )
     // CCIP 2.0 removed the instruction: pools always accept liquidity, and inflows stop by setting
     // the rebalancer to the default address instead.
-    const version = await resolvePoolProgramVersion(chain, poolProgram)
+    const { version } = await resolvePoolProgramTypeAndVersion(chain, poolProgram)
     if (isPoolVersionAtLeast2(version)) {
       throw new CCTOperationUnsupportedError(this.name, version, {
         context: {

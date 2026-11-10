@@ -92,6 +92,8 @@ function chain(
             ? tokenAccount(poolSigner, poolBalance)
             : tokenAccount(rebalancer),
     },
+    // a pre-2.0 lock-release pool
+    typeAndVersion: async () => ['lockreleaseTokenPool', '1.6.2', 'lockrelease-token-pool 1.6.2'],
   } as unknown as SolanaChain
 }
 

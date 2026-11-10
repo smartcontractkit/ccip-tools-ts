@@ -50,6 +50,7 @@ describe('GetTokenPoolState (cct/solana)', () => {
             getAccountInfo: async () => account,
             getMultipleAccountsInfo: async () => canonical,
           },
+          typeAndVersion: async () => ['TokenPool', '2.0.0'],
         }) as unknown as SolanaChain
 
       const getTokenPoolState = new GetTokenPoolState()

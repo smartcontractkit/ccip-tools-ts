@@ -24,7 +24,7 @@ import {
   parsePublicKey,
   resolveExistingPoolConfig,
   resolveExistingTokenAccount,
-  resolvePoolProgramVersion,
+  resolvePoolProgramTypeAndVersion,
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateDelegation,
@@ -112,7 +112,7 @@ export class ProvideLiquidity extends SolanaOperation<
       this.name,
       config,
       opts.authority,
-      await resolvePoolProgramVersion(chain, poolProgram),
+      (await resolvePoolProgramTypeAndVersion(chain, poolProgram)).version,
     )
 
     // The rebalancer's source ATA must exist.

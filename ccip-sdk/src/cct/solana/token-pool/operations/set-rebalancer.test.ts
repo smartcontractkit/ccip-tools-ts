@@ -27,6 +27,8 @@ function chain(): SolanaChain {
       getMultipleAccountsInfo: async () => [null, {}], // only the canonical lock-release pool
       getAccountInfo: async () => ({}), // any custom pool program's state
     },
+    // a pre-2.0 lock-release pool
+    typeAndVersion: async () => ['lockreleaseTokenPool', '1.6.2', 'lockrelease-token-pool 1.6.2'],
   } as unknown as SolanaChain
 }
 
