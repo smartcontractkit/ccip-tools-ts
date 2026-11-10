@@ -12,6 +12,7 @@ import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { resolveATA } from '../../solana/utils.ts'
 import {
+  CCTOperationUnsupportedError,
   CCTParamsInvalidError,
   CCTTokenAccountMintMismatchError,
   CCTTxFailedError,
@@ -522,6 +523,28 @@ export function validateDelegation(
 /** Whether a pool program version is CCIP 2.0 or later; `undefined` (unknown) counts as earlier. */
 export function isPoolVersionAtLeast2(version: string | undefined): version is string {
   return version !== undefined && Number.parseInt(version, 10) >= 2
+}
+
+/**
+ * Rejects a pool program that reports a version before CCIP 2.0, which lacks the 2.0-only pool
+ * instructions. A custom program without `typeVersion` is accepted; its transaction fails on-chain
+ * if it lacks them.
+ * @throws {@link CCTOperationUnsupportedError} if the pool program reports a pre-2.0 version.
+ * @throws if `typeVersion` fails for a canonical program; see {@link resolvePoolProgramTypeAndVersion}.
+ */
+export async function validatePoolProgramAtLeast2(
+  operation: string,
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+): Promise<void> {
+  const { version } = await resolvePoolProgramTypeAndVersion(chain, poolProgram)
+  if (version === undefined || isPoolVersionAtLeast2(version)) return
+  throw new CCTOperationUnsupportedError(operation, version, {
+    context: {
+      poolProgram: poolProgram.toBase58(),
+      reason: `${operation} requires a CCIP 2.0 token pool program`,
+    },
+  })
 }
 
 /**

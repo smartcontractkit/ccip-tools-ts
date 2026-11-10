@@ -13,6 +13,7 @@ import {
 import {
   type TokenPoolType,
   createTokenPoolProgram,
+  createTokenPoolV2Program,
   deriveTokenPoolConfigPda,
   deriveTokenPoolGlobalConfigPda,
   deriveTokenPoolProgramDataPda,
@@ -25,6 +26,7 @@ import {
   parseOptionalPublicKey,
   parsePublicKey,
   validateAuthorityMatchesWallet,
+  validatePoolProgramAtLeast2,
   validatePoolProgramType,
   validatePoolType,
   validateUniquePublicKeys,
@@ -70,6 +72,13 @@ type DeployTokenPoolParams = {
    * Defaults to false.
    */
   createPoolSignerATA?: boolean
+  /**
+   * SPL Token multisig that holds the mint authority, to self-serve the pool as one of its signers
+   * (`initialize_by_multisig`). The multisig must be 1-of-N with `authority` among its signers, and
+   * the pool program must be CCIP 2.0 with self-serve enabled. Omit when `authority` is the mint
+   * authority itself or the pool program's upgrade authority.
+   */
+  mintAuthorityMultisig?: string
   /** Pool authority. Defaults to payer for unsigned generation and wallet public key for execute. */
   authority?: string
 }
@@ -85,6 +94,7 @@ type ParsedDeployTokenPoolParams = {
   authority: PublicKey
   allowlist: PublicKey[]
   createPoolSignerATA: boolean
+  mintAuthorityMultisig?: PublicKey
 }
 
 /** Unsigned Solana token pool deploy result plus derived pool PDAs. */
@@ -145,6 +155,11 @@ export class DeployTokenPool extends SolanaOperation<
           : parsePublicKey(this.name, 'authority', params.authority),
       allowlist,
       createPoolSignerATA: params.createPoolSignerATA ?? false,
+      mintAuthorityMultisig: parseOptionalPublicKey(
+        this.name,
+        'mintAuthorityMultisig',
+        params.mintAuthorityMultisig,
+      ),
     }
   }
 
@@ -153,27 +168,39 @@ export class DeployTokenPool extends SolanaOperation<
     chain: SolanaChain,
     opts: ParsedDeployTokenPoolParams,
   ): Promise<GenerateDeployTokenPoolResult> {
-    const { tokenMint, poolType, poolProgram, payer, authority, allowlist, createPoolSignerATA } =
-      opts
+    const {
+      tokenMint,
+      poolType,
+      poolProgram,
+      payer,
+      authority,
+      allowlist,
+      createPoolSignerATA,
+      mintAuthorityMultisig,
+    } = opts
     // An override pointing at the other pool type would deploy that type, ignoring `poolType`.
     await validatePoolProgramType(this.name, chain, poolProgram, poolType)
+    if (mintAuthorityMultisig) await validatePoolProgramAtLeast2(this.name, chain, poolProgram)
     const program = createTokenPoolProgram(chain, poolProgram, payer)
     const state = deriveTokenPoolConfigPda(poolProgram, tokenMint)
     const poolSigner = deriveTokenPoolSignerPda(poolProgram, tokenMint)
+    const initializeAccounts = {
+      state,
+      mint: tokenMint,
+      authority,
+      systemProgram: SystemProgram.programId,
+      program: poolProgram,
+      programData: deriveTokenPoolProgramDataPda(poolProgram),
+      config: deriveTokenPoolGlobalConfigPda(poolProgram),
+    }
 
     const instructions = [
-      await program.methods
-        .initialize()
-        .accountsStrict({
-          state,
-          mint: tokenMint,
-          authority,
-          systemProgram: SystemProgram.programId,
-          program: poolProgram,
-          programData: deriveTokenPoolProgramDataPda(poolProgram),
-          config: deriveTokenPoolGlobalConfigPda(poolProgram),
-        })
-        .instruction(),
+      mintAuthorityMultisig
+        ? await createTokenPoolV2Program(chain, poolProgram, payer)
+            .methods.initializeByMultisig()
+            .accountsStrict({ ...initializeAccounts, mintAuthorityMultisig })
+            .instruction()
+        : await program.methods.initialize().accountsStrict(initializeAccounts).instruction(),
     ]
 
     if (createPoolSignerATA) {

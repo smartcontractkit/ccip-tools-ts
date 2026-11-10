@@ -23,10 +23,14 @@ import {
   type ExecuteOwnerOverridePendingAdministratorResult,
   type ExecuteRegisterAdminParams,
   type ExecuteRegisterAdminResult,
+  type ExecuteSetPoolInterfaceImplementationParams,
+  type ExecuteSetPoolInterfaceImplementationResult,
   type ExecuteSetPoolParams,
   type ExecuteSetPoolResult,
   type ExecuteTransferAdminParams,
   type ExecuteTransferAdminResult,
+  type ExecuteUpgradeTokenAdminRegistryParams,
+  type ExecuteUpgradeTokenAdminRegistryResult,
   type GenerateAcceptAdminParams,
   type GenerateAcceptAdminResult,
   type GenerateAppendToLookupTableParams,
@@ -37,10 +41,14 @@ import {
   type GenerateOwnerOverridePendingAdministratorResult,
   type GenerateRegisterAdminParams,
   type GenerateRegisterAdminResult,
+  type GenerateSetPoolInterfaceImplementationParams,
+  type GenerateSetPoolInterfaceImplementationResult,
   type GenerateSetPoolParams,
   type GenerateSetPoolResult,
   type GenerateTransferAdminParams,
   type GenerateTransferAdminResult,
+  type GenerateUpgradeTokenAdminRegistryParams,
+  type GenerateUpgradeTokenAdminRegistryResult,
   type GetSupportedTokensParams,
   type GetTokenAdminRegistryParams,
   type GetTokenAdminRegistryResult,
@@ -52,7 +60,9 @@ import {
   OwnerOverridePendingAdministrator,
   RegisterAdmin,
   SetPool,
+  SetPoolInterfaceImplementation,
   TransferAdmin,
+  UpgradeTokenAdminRegistry,
 } from './token-admin-registry/operations/index.ts'
 import {
   type ExecuteAcceptPoolOwnershipParams,
@@ -67,12 +77,20 @@ import {
   type ExecuteCreateTokenMultisigResult,
   type ExecuteDeleteChainRemoteConfigParams,
   type ExecuteDeleteChainRemoteConfigResult,
+  type ExecuteDeleteFastFinalityRateLimitParams,
+  type ExecuteDeleteFastFinalityRateLimitResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type ExecuteEditChainConfigV2Params,
+  type ExecuteEditChainConfigV2Result,
   type ExecuteEditChainRemoteConfigParams,
   type ExecuteEditChainRemoteConfigResult,
+  type ExecuteInitChainConfigV2Params,
+  type ExecuteInitChainConfigV2Result,
   type ExecuteInitChainRemoteConfigParams,
   type ExecuteInitChainRemoteConfigResult,
+  type ExecuteInitFastFinalityRateLimitParams,
+  type ExecuteInitFastFinalityRateLimitResult,
   type ExecuteProvideLiquidityParams,
   type ExecuteProvideLiquidityResult,
   type ExecuteRemoveFromAllowlistParams,
@@ -81,12 +99,16 @@ import {
   type ExecuteSetCanAcceptLiquidityResult,
   type ExecuteSetChainRateLimitParams,
   type ExecuteSetChainRateLimitResult,
+  type ExecuteSetFastFinalityRateLimitParams,
+  type ExecuteSetFastFinalityRateLimitResult,
   type ExecuteSetRateLimitAdminParams,
   type ExecuteSetRateLimitAdminResult,
   type ExecuteSetRebalancerParams,
   type ExecuteSetRebalancerResult,
   type ExecuteTransferPoolOwnershipParams,
   type ExecuteTransferPoolOwnershipResult,
+  type ExecuteWithdrawFeeTokensParams,
+  type ExecuteWithdrawFeeTokensResult,
   type ExecuteWithdrawLiquidityParams,
   type ExecuteWithdrawLiquidityResult,
   type GenerateAcceptPoolOwnershipParams,
@@ -101,12 +123,20 @@ import {
   type GenerateCreateTokenMultisigResult,
   type GenerateDeleteChainRemoteConfigParams,
   type GenerateDeleteChainRemoteConfigResult,
+  type GenerateDeleteFastFinalityRateLimitParams,
+  type GenerateDeleteFastFinalityRateLimitResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GenerateEditChainConfigV2Params,
+  type GenerateEditChainConfigV2Result,
   type GenerateEditChainRemoteConfigParams,
   type GenerateEditChainRemoteConfigResult,
+  type GenerateInitChainConfigV2Params,
+  type GenerateInitChainConfigV2Result,
   type GenerateInitChainRemoteConfigParams,
   type GenerateInitChainRemoteConfigResult,
+  type GenerateInitFastFinalityRateLimitParams,
+  type GenerateInitFastFinalityRateLimitResult,
   type GenerateProvideLiquidityParams,
   type GenerateProvideLiquidityResult,
   type GenerateRemoveFromAllowlistParams,
@@ -115,12 +145,16 @@ import {
   type GenerateSetCanAcceptLiquidityResult,
   type GenerateSetChainRateLimitParams,
   type GenerateSetChainRateLimitResult,
+  type GenerateSetFastFinalityRateLimitParams,
+  type GenerateSetFastFinalityRateLimitResult,
   type GenerateSetRateLimitAdminParams,
   type GenerateSetRateLimitAdminResult,
   type GenerateSetRebalancerParams,
   type GenerateSetRebalancerResult,
   type GenerateTransferPoolOwnershipParams,
   type GenerateTransferPoolOwnershipResult,
+  type GenerateWithdrawFeeTokensParams,
+  type GenerateWithdrawFeeTokensResult,
   type GenerateWithdrawLiquidityParams,
   type GenerateWithdrawLiquidityResult,
   type GetTokenPoolRemotesParams,
@@ -133,18 +167,24 @@ import {
   ConfigureAllowlist,
   CreateTokenMultisig,
   DeleteChainRemoteConfig,
+  DeleteFastFinalityRateLimit,
   DeployTokenPool,
+  EditChainConfigV2,
   EditChainRemoteConfig,
   GetTokenPoolRemotes,
   GetTokenPoolState,
+  InitChainConfigV2,
   InitChainRemoteConfig,
+  InitFastFinalityRateLimit,
   ProvideLiquidity,
   RemoveFromAllowlist,
   SetCanAcceptLiquidity,
   SetChainRateLimit,
+  SetFastFinalityRateLimit,
   SetRateLimitAdmin,
   SetRebalancer,
   TransferPoolOwnership,
+  WithdrawFeeTokens,
   WithdrawLiquidity,
 } from './token-pool/operations/index.ts'
 import {
@@ -202,7 +242,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #ownerOverridePendingAdministrator = new OwnerOverridePendingAdministrator()
   readonly #registerAdmin = new RegisterAdmin()
   readonly #setPool = new SetPool()
+  readonly #setPoolInterfaceImplementation = new SetPoolInterfaceImplementation()
   readonly #transferAdmin = new TransferAdmin()
+  readonly #upgradeTokenAdminRegistry = new UpgradeTokenAdminRegistry()
 
   // Token pool operations
   readonly #acceptPoolOwnership = new AcceptPoolOwnership()
@@ -224,6 +266,14 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #setRebalancer = new SetRebalancer()
   readonly #transferPoolOwnership = new TransferPoolOwnership()
   readonly #withdrawLiquidity = new WithdrawLiquidity()
+
+  // CCIP 2.0 token pool operations
+  readonly #deleteFastFinalityRateLimit = new DeleteFastFinalityRateLimit()
+  readonly #editChainConfigV2 = new EditChainConfigV2()
+  readonly #initChainConfigV2 = new InitChainConfigV2()
+  readonly #initFastFinalityRateLimit = new InitFastFinalityRateLimit()
+  readonly #setFastFinalityRateLimit = new SetFastFinalityRateLimit()
+  readonly #withdrawFeeTokens = new WithdrawFeeTokens()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -2371,6 +2421,516 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   getSupportedTokens(opts: GetSupportedTokensParams): Promise<string[]> {
     return this.#getSupportedTokens.query(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that creates a CCIP 2.0 token pool's `ChainConfigV2` for a
+   * remote chain: the lane's allowed finality, token transfer fees, and CCVs. It also creates, if
+   * missing, the fee vault token account where the lane's in-token BPS fee accrues. Pass
+   * `poolProgramAddress` for a non-canonical pool program; `authority` defaults to `payer`.
+   *
+   * @remarks On-chain execution requires `authority` to be the pool owner, who pays the rent. The
+   * config must not exist yet. Omitted fields default to full finality only, no token transfer
+   * fees, and no pool CCVs.
+   *
+   * @see {@link initChainConfigV2}
+   * @see {@link generateUnsignedEditChainConfigV2}
+   *
+   * @throws {@link CCTParamsInvalidError} If a parameter is malformed or the pool program would
+   * reject the config.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedInitChainConfigV2({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   allowedFinality: { finalityDepth: 10 }, // FTF from 10 blocks deep
+   *   ccvConfig: { outboundCCVs: [committeeVerifier], inboundCCVs: [committeeVerifier] },
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedInitChainConfigV2(
+    opts: GenerateInitChainConfigV2Params,
+  ): Promise<GenerateInitChainConfigV2Result> {
+    return this.#initChainConfigV2.generate(this.chain, opts)
+  }
+
+  /**
+   * Creates a CCIP 2.0 token pool's `ChainConfigV2` for a remote chain with the pool owner wallet.
+   *
+   * @remarks The config must not exist yet. Omitted fields default to full finality only, no
+   * token transfer fees, and no pool CCVs.
+   *
+   * @see {@link generateUnsignedInitChainConfigV2}
+   * @see {@link editChainConfigV2}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid or the authority differs from
+   * the executing wallet.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTTxFailedError} If the config already exists, the wallet is not the pool
+   * owner, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.initChainConfigV2({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   allowedFinality: { finalityDepth: 10 },
+   *   wallet,
+   * })
+   * ```
+   */
+  initChainConfigV2(opts: ExecuteInitChainConfigV2Params): Promise<ExecuteInitChainConfigV2Result> {
+    return this.#initChainConfigV2.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that replaces a CCIP 2.0 token pool's `ChainConfigV2` for a
+   * remote chain. Pass `poolProgramAddress` for a non-canonical pool program; `authority`
+   * defaults to `payer`.
+   *
+   * @remarks On-chain execution requires `authority` to be the pool owner. Every field is
+   * replaced and omitted ones reset to their defaults; read the current config with
+   * `chain.getTokenPoolConfig` to change only some. The config must exist.
+   *
+   * @see {@link editChainConfigV2}
+   * @see {@link generateUnsignedInitChainConfigV2}
+   *
+   * @throws {@link CCTParamsInvalidError} If a parameter is malformed or the pool program would
+   * reject the config.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedEditChainConfigV2({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   allowedFinality: { finalityDepth: 10, finalitySafe: true },
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedEditChainConfigV2(
+    opts: GenerateEditChainConfigV2Params,
+  ): Promise<GenerateEditChainConfigV2Result> {
+    return this.#editChainConfigV2.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces a CCIP 2.0 token pool's `ChainConfigV2` for a remote chain with the pool owner
+   * wallet.
+   *
+   * @remarks Every field is replaced and omitted ones reset to their defaults. The config must
+   * exist.
+   *
+   * @see {@link generateUnsignedEditChainConfigV2}
+   * @see {@link initChainConfigV2}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid or the authority differs from
+   * the executing wallet.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTTxFailedError} If the config does not exist, the wallet is not the pool
+   * owner, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.editChainConfigV2({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   allowedFinality: { finalityDepth: 10, finalitySafe: true },
+   *   wallet,
+   * })
+   * ```
+   */
+  editChainConfigV2(opts: ExecuteEditChainConfigV2Params): Promise<ExecuteEditChainConfigV2Result> {
+    return this.#editChainConfigV2.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that creates a CCIP 2.0 token pool's faster-than-finality (FTF)
+   * rate limits for a remote chain, held in its FTF `ChainConfigOverride`. Pass
+   * `poolProgramAddress` for a non-canonical pool program; `authority` defaults to `payer`.
+   *
+   * @remarks On-chain execution requires `authority` to be the pool owner, who pays the rent. The
+   * FTF rate limits must not exist yet. Enabled limits require `rate <= capacity`; disabled limits
+   * default omitted values to zero and reject nonzero values.
+   *
+   * @see {@link initFastFinalityRateLimit}
+   * @see {@link generateUnsignedSetFastFinalityRateLimit}
+   * @see {@link generateUnsignedDeleteFastFinalityRateLimit}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, rate limit, or selector is invalid.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedInitFastFinalityRateLimit({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   inbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   outbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedInitFastFinalityRateLimit(
+    opts: GenerateInitFastFinalityRateLimitParams,
+  ): Promise<GenerateInitFastFinalityRateLimitResult> {
+    return this.#initFastFinalityRateLimit.generate(this.chain, opts)
+  }
+
+  /**
+   * Creates a CCIP 2.0 token pool's faster-than-finality (FTF) rate limits for a remote chain with
+   * the pool owner wallet.
+   *
+   * @remarks The FTF rate limits must not exist yet.
+   *
+   * @see {@link generateUnsignedInitFastFinalityRateLimit}
+   * @see {@link setFastFinalityRateLimit}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or rate limit is invalid, or the
+   * authority differs from the executing wallet.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTTxFailedError} If the FTF rate limits already exist, the wallet is not the
+   * pool owner, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.initFastFinalityRateLimit({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   inbound: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   outbound: { enabled: false },
+   *   wallet,
+   * })
+   * ```
+   */
+  initFastFinalityRateLimit(
+    opts: ExecuteInitFastFinalityRateLimitParams,
+  ): Promise<ExecuteInitFastFinalityRateLimitResult> {
+    return this.#initFastFinalityRateLimit.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that sets a CCIP 2.0 token pool's faster-than-finality (FTF)
+   * rate limits for a remote chain. Pass `poolProgramAddress` for a non-canonical pool program;
+   * `authority` defaults to `payer`.
+   *
+   * @remarks On-chain execution requires `authority` to be the pool owner or rate-limit admin. The
+   * FTF rate limits must already exist. Enabled limits require `rate <= capacity`; disabled limits
+   * default omitted values to zero and reject nonzero values.
+   *
+   * @see {@link setFastFinalityRateLimit}
+   * @see {@link generateUnsignedInitFastFinalityRateLimit}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter, rate limit, or selector is invalid.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetFastFinalityRateLimit({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   inbound: { enabled: true, capacity: 2_000_000n, rate: 2_000n },
+   *   outbound: { enabled: false },
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedSetFastFinalityRateLimit(
+    opts: GenerateSetFastFinalityRateLimitParams,
+  ): Promise<GenerateSetFastFinalityRateLimitResult> {
+    return this.#setFastFinalityRateLimit.generate(this.chain, opts)
+  }
+
+  /**
+   * Sets a CCIP 2.0 token pool's faster-than-finality (FTF) rate limits for a remote chain with
+   * the pool owner or rate-limit admin wallet.
+   *
+   * @remarks The FTF rate limits must already exist.
+   *
+   * @see {@link generateUnsignedSetFastFinalityRateLimit}
+   * @see {@link initFastFinalityRateLimit}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or rate limit is invalid, or the
+   * authority differs from the executing wallet.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTTxFailedError} If the FTF rate limits do not exist, the wallet is neither the
+   * pool owner nor rate-limit admin, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setFastFinalityRateLimit({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   inbound: { enabled: true, capacity: 2_000_000n, rate: 2_000n },
+   *   outbound: { enabled: false },
+   *   wallet,
+   * })
+   * ```
+   */
+  setFastFinalityRateLimit(
+    opts: ExecuteSetFastFinalityRateLimitParams,
+  ): Promise<ExecuteSetFastFinalityRateLimitResult> {
+    return this.#setFastFinalityRateLimit.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that deletes a CCIP 2.0 token pool's faster-than-finality (FTF)
+   * rate limits for a remote chain, closing its FTF `ChainConfigOverride`. Pass
+   * `poolProgramAddress` for a non-canonical pool program; `authority` defaults to `payer`.
+   *
+   * @remarks On-chain execution requires `authority` to be the pool owner, who receives the rent.
+   *
+   * @see {@link deleteFastFinalityRateLimit}
+   * @see {@link generateUnsignedInitFastFinalityRateLimit}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or selector is invalid.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedDeleteFastFinalityRateLimit({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedDeleteFastFinalityRateLimit(
+    opts: GenerateDeleteFastFinalityRateLimitParams,
+  ): Promise<GenerateDeleteFastFinalityRateLimitResult> {
+    return this.#deleteFastFinalityRateLimit.generate(this.chain, opts)
+  }
+
+  /**
+   * Deletes a CCIP 2.0 token pool's faster-than-finality (FTF) rate limits for a remote chain with
+   * the pool owner wallet.
+   *
+   * @see {@link generateUnsignedDeleteFastFinalityRateLimit}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTTxFailedError} If the FTF rate limits do not exist, the wallet is not the
+   * pool owner, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.deleteFastFinalityRateLimit({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   *   wallet,
+   * })
+   * ```
+   */
+  deleteFastFinalityRateLimit(
+    opts: ExecuteDeleteFastFinalityRateLimitParams,
+  ): Promise<ExecuteDeleteFastFinalityRateLimitResult> {
+    return this.#deleteFastFinalityRateLimit.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned instructions that withdraw the fees a CCIP 2.0 token pool accrued in one fee
+   * token, into the `recipient`'s associated token account, which is created first if missing.
+   * Pass `poolProgramAddress` for a non-canonical pool program; `authority` defaults to `payer`.
+   *
+   * @remarks On-chain execution requires `authority` to be the pool owner. The pool's balance in
+   * the fee token must be positive and at least `amount`, which defaults to the whole balance.
+   *
+   * @see {@link withdrawFeeTokens}
+   *
+   * @throws {@link CCTParamsInvalidError} If a public key or the amount is invalid.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedWithdrawFeeTokens({
+   *   tokenAddress: mint,
+   *   feeTokenAddress: linkMint,
+   *   recipient: treasury,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedWithdrawFeeTokens(
+    opts: GenerateWithdrawFeeTokensParams,
+  ): Promise<GenerateWithdrawFeeTokensResult> {
+    return this.#withdrawFeeTokens.generate(this.chain, opts)
+  }
+
+  /**
+   * Withdraws the fees a CCIP 2.0 token pool accrued in one fee token with the pool owner wallet.
+   *
+   * @remarks The pool's balance in the fee token must be positive and at least `amount`, which
+   * defaults to the whole balance.
+   *
+   * @see {@link generateUnsignedWithdrawFeeTokens}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a public key or the amount is invalid, or the
+   * authority differs from the executing wallet.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTTxFailedError} If there are no fees to withdraw, the wallet is not the pool
+   * owner, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.withdrawFeeTokens({
+   *   tokenAddress: mint,
+   *   feeTokenAddress: linkMint,
+   *   recipient: treasury,
+   *   wallet,
+   * })
+   * ```
+   */
+  withdrawFeeTokens(opts: ExecuteWithdrawFeeTokensParams): Promise<ExecuteWithdrawFeeTokensResult> {
+    return this.#withdrawFeeTokens.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that records in a token's CCIP 2.0 TokenAdminRegistry which
+   * pool interface its pool implements, and how the Router resolves the pool's accounts.
+   * `authority` defaults to `payer`.
+   *
+   * @remarks On-chain execution requires `authority` to be the token administrator, and the
+   * registry to be at the Router's latest layout; migrate an older one with
+   * `generateUnsignedUpgradeTokenAdminRegistry`. Account resolution requires interface version 2.
+   *
+   * @see {@link setPoolInterfaceImplementation}
+   * @see {@link generateUnsignedUpgradeTokenAdminRegistry}
+   *
+   * @throws {@link CCTParamsInvalidError} If a public key, the interface version, or the account
+   * resolution is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetPoolInterfaceImplementation({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   interfaceVersion: 2,
+   *   accountResolution: 'Standard',
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedSetPoolInterfaceImplementation(
+    opts: GenerateSetPoolInterfaceImplementationParams,
+  ): Promise<GenerateSetPoolInterfaceImplementationResult> {
+    return this.#setPoolInterfaceImplementation.generate(this.chain, opts)
+  }
+
+  /**
+   * Records in a token's CCIP 2.0 TokenAdminRegistry which pool interface its pool implements,
+   * and how the Router resolves the pool's accounts, with the token administrator wallet.
+   *
+   * @remarks The registry must be at the Router's latest layout; migrate an older one with
+   * {@link upgradeTokenAdminRegistry}.
+   *
+   * @see {@link generateUnsignedSetPoolInterfaceImplementation}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid or the authority differs from
+   * the executing wallet.
+   * @throws {@link CCTTxFailedError} If the wallet is not the token administrator, the registry is
+   * not at the latest layout, or simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setPoolInterfaceImplementation({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   interfaceVersion: 2,
+   *   accountResolution: 'Standard',
+   *   wallet,
+   * })
+   * ```
+   */
+  setPoolInterfaceImplementation(
+    opts: ExecuteSetPoolInterfaceImplementationParams,
+  ): Promise<ExecuteSetPoolInterfaceImplementationResult> {
+    return this.#setPoolInterfaceImplementation.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that migrates a token's TokenAdminRegistry from an older
+   * layout to the CCIP 2.0 Router's latest, keeping its administrator, pool, and account
+   * resolution. `authority` defaults to `payer`.
+   *
+   * @remarks Permissionless: `authority` only pays for the account's growth. The Router rejects a
+   * registry already at the latest layout.
+   *
+   * @see {@link upgradeTokenAdminRegistry}
+   * @see {@link generateUnsignedSetPoolInterfaceImplementation}
+   *
+   * @throws {@link CCTParamsInvalidError} If a public key is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedUpgradeTokenAdminRegistry({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   payer,
+   * })
+   * ```
+   */
+  generateUnsignedUpgradeTokenAdminRegistry(
+    opts: GenerateUpgradeTokenAdminRegistryParams,
+  ): Promise<GenerateUpgradeTokenAdminRegistryResult> {
+    return this.#upgradeTokenAdminRegistry.generate(this.chain, opts)
+  }
+
+  /**
+   * Migrates a token's TokenAdminRegistry to the CCIP 2.0 Router's latest layout, paid by the
+   * wallet.
+   *
+   * @see {@link generateUnsignedUpgradeTokenAdminRegistry}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a public key is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If the registry is already at the latest layout, or
+   * simulation/submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.upgradeTokenAdminRegistry({ tokenAddress: mint, address: router, wallet })
+   * ```
+   */
+  upgradeTokenAdminRegistry(
+    opts: ExecuteUpgradeTokenAdminRegistryParams,
+  ): Promise<ExecuteUpgradeTokenAdminRegistryResult> {
+    return this.#upgradeTokenAdminRegistry.execute(this.chain, opts)
   }
 
   /**

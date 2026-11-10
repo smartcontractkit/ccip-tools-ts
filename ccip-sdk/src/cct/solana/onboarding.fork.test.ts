@@ -2,7 +2,7 @@
  * Token pool onboarding against CCIP 2.0 Solana programs, on a Surfpool fork of prod testnet.
  *
  * Validates that the CCIP 1.6 encoders behind {@link SolanaTokenManager} are accepted by the 2.0
- * pool and router programs.
+ * pool and router programs, and exercises the 2.0-only operations against them.
  *
  * Every onboarding step runs twice: through `execute*` with the wallet signing, and through the
  * external-signer (Squads) path, where `generateUnsigned*` output is serialized with
@@ -14,6 +14,7 @@
 import assert from 'node:assert/strict'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
+import { inspect } from 'node:util'
 
 import { BorshCoder, Wallet as AnchorWallet } from '@coral-xyz/anchor'
 import { getAssociatedTokenAddressSync, getMint } from '@solana/spl-token'
@@ -40,10 +41,15 @@ import {
 import { IDL as CCIP_ROUTER_V2_IDL } from '../../solana/idl/2.0.0/CCIP_ROUTER.ts'
 import { lockReleaseTokenPoolCoder } from '../../solana/idl/token-pool-coder.ts'
 import { SolanaChain } from '../../solana/index.ts'
+import {
+  decodeTokenPoolChainConfigOverride,
+  deriveTokenPoolChainConfigOverridePda,
+} from '../../solana/token-pool.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { CCIPVersion } from '../../types.ts'
 import { CCTOperationUnsupportedError } from '../errors.ts'
 import { refreshAccountState } from './operation.ts'
+import { deriveTokenPoolConfigPda } from './programs/token-pool.ts'
 import type { RateLimitConfig } from './token-pool/operations/set-chain-rate-limit.ts'
 import { SolanaTokenManager } from './index.ts'
 
@@ -71,6 +77,9 @@ const RATE_LIMIT: RateLimitConfig = {
 }
 
 const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isSurfpoolAvailable()
+
+/** Whether a failed send names a program error or log, wherever the SDK or web3.js put the logs. */
+const failsWith = (name: string) => (err: unknown) => inspect(err, { depth: 6 }).includes(name)
 
 const testLogger = new Console(process.stdout, process.stderr)
 if (!VERBOSE) testLogger.debug = () => {}
@@ -450,6 +459,133 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
         assert.deepEqual(await remotePools(), [])
       })
 
+      it('configures the 2.0 lane config, FTF rate limits, fees, and pool interface', async () => {
+        const remoteChainSelector = PROD_TESTNET.remoteSelector
+        const mint = new PublicKey(tokenAddress)
+        const poolProgram = new PublicKey(PROD_TESTNET.burnMintPool)
+        const pool = deriveTokenPoolConfigPda(poolProgram, mint).toBase58()
+        const laneConfig = () => {
+          refreshAccountState(chain)
+          return chain.getTokenPoolConfig(pool, { destChainSelector: remoteChainSelector })
+        }
+        const fee = {
+          destGasOverhead: 90_000,
+          destBytesOverhead: 32,
+          finalityFeeUSDCents: 10,
+          fastFinalityFeeUSDCents: 20,
+          finalityTransferFeeBps: 5,
+          fastFinalityTransferFeeBps: 10,
+          isEnabled: true,
+        }
+        const ccv = Keypair.generate().publicKey.toBase58()
+
+        const init = {
+          tokenAddress,
+          remoteChainSelector,
+          allowedFinality: { finalityDepth: 5 },
+          tokenTransferFeeConfig: fee,
+          ccvConfig: { outboundCCVs: [ccv], inboundCCVs: [ccv] },
+        }
+        await run(
+          (wallet) => cct.initChainConfigV2({ ...init, wallet }),
+          (payer) => cct.generateUnsignedInitChainConfigV2({ ...init, payer }),
+        )
+        let config = await laneConfig()
+        assert.equal(config.finalityDepth, 5)
+        assert.equal(config.finalitySafe, undefined)
+        assert.deepEqual(config.tokenTransferFeeConfig, fee)
+
+        // a full replacement: the omitted fee config resets to disabled
+        const edit = {
+          tokenAddress,
+          remoteChainSelector,
+          allowedFinality: { finalityDepth: 0, finalitySafe: true },
+        }
+        await run(
+          (wallet) => cct.editChainConfigV2({ ...edit, wallet }),
+          (payer) => cct.generateUnsignedEditChainConfigV2({ ...edit, payer }),
+        )
+        config = await laneConfig()
+        assert.equal(config.finalityDepth, 0)
+        assert.equal(config.finalitySafe, true)
+        assert.equal(config.tokenTransferFeeConfig?.isEnabled, false)
+
+        const override = deriveTokenPoolChainConfigOverridePda(
+          poolProgram,
+          remoteChainSelector,
+          mint,
+        )
+        const ftfInboundCapacity = async () => {
+          const { value } = await conn().getAccountInfoAndContext(override)
+          return (
+            value &&
+            decodeTokenPoolChainConfigOverride(value.data).inboundRateLimit.cfg.capacity.toString()
+          )
+        }
+        const limits = {
+          tokenAddress,
+          remoteChainSelector,
+          inbound: RATE_LIMIT,
+          outbound: RATE_LIMIT,
+        }
+        await run(
+          (wallet) => cct.initFastFinalityRateLimit({ ...limits, wallet }),
+          (payer) => cct.generateUnsignedInitFastFinalityRateLimit({ ...limits, payer }),
+        )
+        assert.equal(await ftfInboundCapacity(), RATE_LIMIT.capacity.toString())
+        const doubled = { ...RATE_LIMIT, capacity: RATE_LIMIT.capacity * 2n }
+        const set = { ...limits, inbound: doubled }
+        await run(
+          (wallet) => cct.setFastFinalityRateLimit({ ...set, wallet }),
+          (payer) => cct.generateUnsignedSetFastFinalityRateLimit({ ...set, payer }),
+        )
+        assert.equal(await ftfInboundCapacity(), doubled.capacity.toString())
+        const del = { tokenAddress, remoteChainSelector }
+        await run(
+          (wallet) => cct.deleteFastFinalityRateLimit({ ...del, wallet }),
+          (payer) => cct.generateUnsignedDeleteFastFinalityRateLimit({ ...del, payer }),
+        )
+        assert.equal(await ftfInboundCapacity(), null)
+
+        // initChainConfigV2 created the empty in-token fee vault: the program gets past every
+        // account constraint and stops at the balance check
+        const withdraw = {
+          tokenAddress,
+          feeTokenAddress: tokenAddress,
+          recipient: admin.publicKey.toBase58(),
+        }
+        await assert.rejects(
+          run(
+            (wallet) => cct.withdrawFeeTokens({ ...withdraw, wallet }),
+            (payer) => cct.generateUnsignedWithdrawFeeTokens({ ...withdraw, payer }),
+          ),
+          failsWith('NoFeesToWithdraw'),
+        )
+
+        // registerAdmin created the registry at the router's latest layout, so there is nothing
+        // to migrate, but the router recognizes the instruction
+        const registry = { tokenAddress, address: PROD_TESTNET.router }
+        await assert.rejects(
+          run(
+            (wallet) => cct.upgradeTokenAdminRegistry({ ...registry, wallet }),
+            (payer) => cct.generateUnsignedUpgradeTokenAdminRegistry({ ...registry, payer }),
+          ),
+          failsWith('InvalidInputsTokenAdminRegistryAccounts'),
+        )
+        const iface = {
+          ...registry,
+          interfaceVersion: 2 as const,
+          accountResolution: 'Standard' as const,
+        }
+        await run(
+          (wallet) => cct.setPoolInterfaceImplementation({ ...iface, wallet }),
+          (payer) => cct.generateUnsignedSetPoolInterfaceImplementation({ ...iface, payer }),
+        )
+        const updated = await cct.getTokenAdminRegistry(registry)
+        assert.equal(updated.interfaceVersion, 2)
+        assert.equal(updated.accountResolution, 'Standard')
+      })
+
       it('transfers pool ownership and the token admin role', async () => {
         const newKey = newOwner.publicKey.toBase58()
         const pool = { tokenAddress, newOwner: newKey }
@@ -479,6 +615,35 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
       })
     })
   }
+
+  it('self-serves a pool as a 1-of-N signer of the mint authority multisig', async () => {
+    const wallet = new AnchorWallet(issuer)
+    const tokenAddress = await deployToken()
+    // the pool signer and the issuer, either of which can sign for the mint authority
+    const { multisigAddress } = await cct.createTokenMultisig({
+      tokenAddress,
+      poolType: 'burn-mint',
+      threshold: 1,
+      wallet,
+    })
+    await cct.setTokenAuthority({
+      tokenAddress,
+      newAuthority: multisigAddress,
+      authorityTypes: ['mint'],
+      wallet,
+    })
+
+    const { poolSignerAddress } = await cct.deployTokenPool({
+      tokenAddress,
+      poolType: 'burn-mint',
+      mintAuthorityMultisig: multisigAddress,
+      createPoolSignerATA: true,
+      wallet,
+    })
+    const { config } = await cct.getTokenPoolState({ tokenAddress })
+    assert.equal(config.owner, issuer.publicKey.toBase58())
+    assert.equal(config.poolSigner, poolSignerAddress)
+  })
 
   describe('lock-release liquidity', () => {
     const wallet = () => new AnchorWallet(issuer)

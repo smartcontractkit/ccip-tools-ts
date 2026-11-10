@@ -45,11 +45,15 @@ const TOKEN_ADMIN_REGISTRY_DISCRIMINATOR =
 //   v2 (170B): + supports_auto_derivation: bool
 //   v3 (172B): bool widened to account_resolution: ResolutionType (u8), + bump: u8,
 //              interface_version: u8
+//   v4 (173B): account_resolution narrowed back to account_resolution_enabled: bool, +
+//              skip_lookup_table_additional_entries: bool, set for `WithoutExtendedLookupTable`
+// The Router reads every size but these older ones as the latest layout, and so does this decoder.
 const TOKEN_ADMIN_REGISTRY_V1_SIZE = 169
 const TOKEN_ADMIN_REGISTRY_V2_SIZE = 170
 const TOKEN_ADMIN_REGISTRY_V3_SIZE = 172
 const ACCOUNT_RESOLUTION_OFFSET = 169
 const INTERFACE_VERSION_OFFSET = 171
+const SKIP_LOOKUP_TABLE_ADDITIONAL_ENTRIES_OFFSET = 172
 // Accounts predating the field implement the 1.6-compatible pool interface.
 const DEFAULT_INTERFACE_VERSION = 1
 
@@ -93,7 +97,13 @@ export function decodeTokenAdminRegistryConfig(
 
   let accountResolution: TokenAccountResolution = 'NoResolution'
   let interfaceVersion = DEFAULT_INTERFACE_VERSION
-  if (data.length >= TOKEN_ADMIN_REGISTRY_V3_SIZE) {
+  if (data.length > TOKEN_ADMIN_REGISTRY_V3_SIZE) {
+    if (data[ACCOUNT_RESOLUTION_OFFSET])
+      accountResolution = data[SKIP_LOOKUP_TABLE_ADDITIONAL_ENTRIES_OFFSET]
+        ? 'WithoutExtendedLookupTable'
+        : 'Standard'
+    interfaceVersion = data[INTERFACE_VERSION_OFFSET]!
+  } else if (data.length === TOKEN_ADMIN_REGISTRY_V3_SIZE) {
     const resolution = ACCOUNT_RESOLUTIONS[data[ACCOUNT_RESOLUTION_OFFSET]!]
     if (!resolution) {
       throw new CCIPDataFormatUnsupportedError(
