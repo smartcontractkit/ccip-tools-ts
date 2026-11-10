@@ -18,7 +18,6 @@ import {
   type LaneTokenTransferFeeConfig,
   type LockReleaseTokenPoolType,
   type LockboxConfig,
-  type SiloedLockReleaseTokenPoolStateV2_0_0,
   type TokenBucket,
   type TokenPoolDynamicConfig,
   type TokenPoolFamily,
@@ -26,9 +25,6 @@ import {
   type TokenPoolRateLimiterState,
   type TokenPoolType,
   type TokenPoolVersion,
-  type USDCTokenPoolStateV2_0_0,
-  type USDCTokenPoolType,
-  type USDCTokenPoolVersion,
   EVMTokenManager,
 } from './index.ts'
 
@@ -1126,11 +1122,9 @@ describe('cct/evm entry point', () => {
     assert.deepEqual(Object.keys(cctEvm).sort(), [
       'DEPLOYABLE_TOKEN_POOL_TYPES',
       'EVMTokenManager',
-      'LegacyUSDCTokenPoolVersion',
       'TOKEN_POOL_FAMILIES',
       'TOKEN_POOL_TYPES',
       'TokenPoolVersion',
-      'USDC_TOKEN_POOL_TYPES',
       'deployTokenAndTokenPoolViaFactory',
       'deployTokenAndTokenPoolViaFactoryUnchecked',
       'deployTokenPoolWithExistingTokenViaFactory',
@@ -1140,7 +1134,6 @@ describe('cct/evm entry point', () => {
       'isLockReleaseTokenPoolType',
       'isTokenPoolType',
       'isTokenPoolVersion',
-      'simulateEVMTx',
     ])
   })
 
@@ -1155,7 +1148,6 @@ describe('cct/evm entry point', () => {
       LaneTokenTransferFeeConfig,
       LockReleaseTokenPoolType,
       LockboxConfig,
-      SiloedLockReleaseTokenPoolStateV2_0_0,
       TokenBucket,
       TokenPoolDynamicConfig,
       TokenPoolFamily,
@@ -1163,11 +1155,8 @@ describe('cct/evm entry point', () => {
       TokenPoolRateLimiterState,
       TokenPoolType,
       TokenPoolVersion,
-      USDCTokenPoolStateV2_0_0,
-      USDCTokenPoolType,
-      USDCTokenPoolVersion,
     ]
-    const count: Exported['length'] = 19
-    assert.equal(count, 19)
+    const count: Exported['length'] = 15
+    assert.equal(count, 15)
   })
 })

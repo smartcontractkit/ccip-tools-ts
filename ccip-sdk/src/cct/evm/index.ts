@@ -134,6 +134,10 @@ import {
   type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
   type GetTokenPoolStateResult,
+  type GetTokenPoolTokenDecimalsParams,
+  type GetTokenPoolTokenDecimalsResult,
+  type GetTokenPoolTokenParams,
+  type GetTokenPoolTokenResult,
   type GetTokenTransferFeeConfigParams,
   type GetTokenTransferFeeConfigResult,
   type IsSiloedParams,
@@ -185,6 +189,8 @@ import {
   GetTokenPoolOwner,
   GetTokenPoolRemotes,
   GetTokenPoolState,
+  GetTokenPoolToken,
+  GetTokenPoolTokenDecimals,
   GetTokenTransferFeeConfig,
   IsSiloed,
   IsSupportedToken,
@@ -300,6 +306,8 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   readonly #getTokenPoolState = new GetTokenPoolState()
   readonly #getTokenPoolRemotes = new GetTokenPoolRemotes()
   readonly #getTokenPoolOwner = new GetTokenPoolOwner()
+  readonly #getTokenPoolToken = new GetTokenPoolToken()
+  readonly #getTokenPoolTokenDecimals = new GetTokenPoolTokenDecimals()
   readonly #isSupportedToken = new IsSupportedToken()
   readonly #setRemotePool = new SetRemotePool()
   readonly #addRemotePool = new AddRemotePool()
@@ -4312,9 +4320,47 @@ export class EVMTokenManager extends TokenManager<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Reads the token a pool was deployed for, from its `getToken()`.
+   * @remarks Works at every pool version. The token is set in the pool's constructor and is
+   * immutable thereafter. To check a candidate token instead, use {@link isSupportedToken}.
+   * @returns The token address, checksummed.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const token = await cct.getTokenPoolToken({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getTokenPoolToken(opts: GetTokenPoolTokenParams): Promise<GetTokenPoolTokenResult> {
+    return this.#getTokenPoolToken.query(this.chain, opts)
+  }
+
+  /**
+   * Reads the local token decimals a **v1.5.1+** pool was deployed with, from its
+   * `getTokenDecimals()`: the decimals it scales cross-chain amounts by.
+   * @remarks v1.5.0 pools do not declare `getTokenDecimals()`; read the token's own `decimals()`
+   * there, as {@link getTokenPoolState} does.
+   * @returns The pool's configured token decimals.
+   * @throws {@link CCTParamsInvalidError} if `poolAddress` is not a valid address
+   * @throws {@link CCTContractTypeInvalidError} if the pool's reported type is not supported
+   * @throws {@link CCTOperationUnsupportedError} on a v1.5.0 pool
+   * @throws {@link CCTContractVersionUnsupportedError} if the pool reports an unknown version
+   * @example
+   * ```typescript
+   * const decimals = await cct.getTokenPoolTokenDecimals({ poolAddress: '0xPool...' })
+   * ```
+   */
+  getTokenPoolTokenDecimals(
+    opts: GetTokenPoolTokenDecimalsParams,
+  ): Promise<GetTokenPoolTokenDecimalsResult> {
+    return this.#getTokenPoolTokenDecimals.query(this.chain, opts)
+  }
+
+  /**
    * Reads whether a token pool serves `tokenAddress`, from its `isSupportedToken(token)`.
    * @remarks Works at every pool version. `true` only for the one token set in the pool's
-   * constructor, the `token` that {@link getTokenPoolState} returns.
+   * constructor, the one {@link getTokenPoolToken} returns.
    * @returns `true` if `tokenAddress` is the pool's token.
    * @throws {@link CCTParamsInvalidError} if `poolAddress` or `tokenAddress` is not a valid
    * address
@@ -4747,16 +4793,12 @@ export type {
   TokenPoolFee,
   TokenPoolRateLimiterState,
   TokenPoolType,
-  USDCTokenPoolType,
-  USDCTokenPoolVersion,
 } from './token-pool/contracts.ts'
 export {
   DEPLOYABLE_TOKEN_POOL_TYPES,
-  LegacyUSDCTokenPoolVersion,
   TOKEN_POOL_FAMILIES,
   TOKEN_POOL_TYPES,
   TokenPoolVersion,
-  USDC_TOKEN_POOL_TYPES,
   getTokenPoolFamily,
   isDeployableTokenPoolType,
   isLockReleaseTokenPoolType,
@@ -4780,7 +4822,6 @@ export type {
   FactoryRemoteTokenPool,
   FactoryTokenPoolType,
 } from './token-pool-factory/deploy.ts'
-export type { FactoryPoolFamily } from './token-pool-factory/predict.ts'
 export {
   deployTokenAndTokenPoolViaFactory,
   deployTokenAndTokenPoolViaFactoryUnchecked,

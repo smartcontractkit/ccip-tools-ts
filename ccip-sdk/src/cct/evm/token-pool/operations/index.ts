@@ -113,11 +113,19 @@ export {
   type GetTokenPoolStateResult,
   type LegacyTokenPoolState,
   type LockReleaseTokenPoolStateV2_0_0,
-  type SiloedLockReleaseTokenPoolStateV2_0_0,
   type TokenPoolStateV2_0_0,
-  type USDCTokenPoolStateV2_0_0,
   GetTokenPoolState,
 } from './get-token-pool-state.ts'
+export {
+  type GetTokenPoolTokenDecimalsParams,
+  type GetTokenPoolTokenDecimalsResult,
+  GetTokenPoolTokenDecimals,
+} from './get-token-pool-token-decimals.ts'
+export {
+  type GetTokenPoolTokenParams,
+  type GetTokenPoolTokenResult,
+  GetTokenPoolToken,
+} from './get-token-pool-token.ts'
 export {
   type GetTokenTransferFeeConfigParams,
   type GetTokenTransferFeeConfigResult,

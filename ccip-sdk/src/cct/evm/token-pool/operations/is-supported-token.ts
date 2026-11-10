@@ -1,6 +1,6 @@
 /**
  * isSupportedToken: reads whether a token pool serves a given token, at every supported version.
- * Mirrors `get-token-pool-owner.ts`.
+ * Mirrors `get-token-pool-token.ts`.
  *
  * @packageDocumentation
  */
@@ -23,7 +23,7 @@ export type IsSupportedTokenResult = boolean
 
 /**
  * Reads a token pool's `isSupportedToken(token)`: `true` only for the one token set in its
- * constructor (see `getTokenPoolState().token`).
+ * constructor (see `getTokenPoolToken`).
  */
 export class IsSupportedToken extends EVMQuery<IsSupportedTokenParams, IsSupportedTokenResult> {
   readonly name = 'isSupportedToken'
