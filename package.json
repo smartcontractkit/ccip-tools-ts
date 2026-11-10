@@ -1,6 +1,6 @@
 {
   "name": "@chainlink/ccip-tools-ts",
-  "version": "1.16.1",
+  "version": "1.17.0",
   "description": "CLI and library to interact with CCIP",
   "author": "Chainlink devs",
   "license": "MIT",
@@ -27,21 +27,18 @@
   },
   "devDependencies": {
     "@chainlink/contracts-ccip": "2.0.0",
-    "@types/node": "26.6.5",
+    "@types/node": "26.6.6",
     "@typescript/native": "npm:typescript@7.0.2",
     "brace-expansion": "5.0.12",
     "c8": "^12.0.0",
-    "fill-range": "^7.1.1",
-    "oxfmt": "0.74.0",
-    "oxlint": "1.89.0",
+    "oxfmt": "0.75.0",
+    "oxlint": "1.90.0",
     "oxlint-tsgolint": "7.0.2005",
     "typescript": "npm:@typescript/typescript6@6.0.2",
     "yaml": "2.9.1"
   },
   "overrides": {
-    "braces": "file:scripts/vendor/braces-depth-guard",
     "bigint-buffer": "npm:@trufflesuite/bigint-buffer@1.1.10",
-    "image-size": "npm:@localnerve/image-size@^2.1.4",
     "postman-collection": {
       "@faker-js/faker": "file:../../scripts/vendor/faker-postman-stub"
     },
@@ -49,6 +46,7 @@
     "@ledgerhq/hw-app-canton": {
       "protobufjs": "^8.8.1"
     },
+    "@ledgerhq/hw-transport": "6.37.0",
     "postcss": "8.5.30",
     "uuid": "^11.1.1",
     "yaml@1": "^1.10.3",

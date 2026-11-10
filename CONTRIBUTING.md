@@ -37,79 +37,75 @@ this bridge can be removed when TypeDoc supports TypeScript 7.
 
 ### Dependency overrides and accepted advisories
 
-The root `package.json` `overrides` block pins transitive dependencies. Keep it minimal:
-each entry must still be doing something, and `npm audit` plus `npm ls` are the test for
-that — an entry whose package already resolves to a patched release on its own only keeps
-the tree semver-inconsistent (`npm ls` then reports `invalid`). Entries come in three kinds:
+The root `package.json` `overrides` block pins transitive dependencies. Keep it minimal.
+Each entry must still change resolution. Use `npm audit` and `npm ls` to test that. An
+entry that no longer changes resolution only makes the tree semver-inconsistent; `npm ls`
+then reports `invalid`.
 
-- **Version pins** — the dependents' ranges allow (or resolve to) a release inside an
-  advisory, and the patched release is outside what they ask for (`tar`, `protobufjs`,
-  `postcss`, `uuid`, `yaml@1`, `serialize-javascript`, `toml`, `lodash-es`,
-  `http-cache-semantics`, `postcss-selector-parser`, and `js-yaml` for
-  `openapi-to-postmanv2`: that one pins the 4.x line from `4.3.2`, the first patched
-  release). Prefer a range over an exact pin so later patches flow in by themselves, and
-  bump them when `npm audit` reports a newer fix (`katex` was briefly pinned exact at
-  `0.18.9` for this reason; it is a range again now that the later 0.18.x releases aged
-  past the 7-day supply-chain hold).
-- **Line swaps** — two entries do not pin a vulnerable package to a patched release but
-  swap a whole dependency line, because no patched release exists on the old line:
-  `@changesets/cli` moves the release tooling of `@chainlink/contracts` to the 3.x line,
-  which dropped the old `@manypkg/get-packages` → `read-yaml-file` → `js-yaml@3` →
-  `argparse@1` → `sprintf-js` chain; `sprintf-js` has no patched release, so removing the
-  only path to it is the fix. `tinypool` forces the 2.x line over `@docusaurus/core`'s
-  `^1` (the advisory covers all of 1.x; the fix landed in `2.1.2`); the docs build
-  exercises the swap.
-- **Fork swaps** — advisories with no version to pin to, where the fix lives in a
-  maintained fork of the same code: `bigint-buffer` → `@trufflesuite/bigint-buffer`
-  (`<=1.1.5`, buffer overflow — and the original's native build no longer compiles) and
-  `image-size` → `@localnerve/image-size` (`<=2.0.2`, parser DoS). `braces`
-  (GHSA-vfj7-8cjw-p6xm, stack exhaustion) has no fixed release at all, so it is vendored
-  instead: [`scripts/vendor/braces-depth-guard`](scripts/vendor/braces-depth-guard) is
-  pristine `3.0.3` plus a `MAX_DEPTH: 100` guard in `parse`/`compile`/`expand`, packaged
-  as `3.0.4` — a synthetic version on purpose, because the CI Dependency Review workflow
-  compares versions naively and rejected the prerelease-versioned
-  `@dieub/braces-depth-guard` fork that inspired the patch (`npm audit` itself accepts
-  prereleases; the vendored copy clears both scanners). The root `fill-range`
-  devDependency exists for the vendored copy: npm does not install the dependencies of
-  `file:` forks. Its README documents the provenance, the verification, and how to
-  retire the override once upstream ships the fix — docusaurus 4 also drops the whole
-  braces chain natively.
-- **The faker stub** — `postman-collection` (the docs toolchain's OpenAPI→Postman
-  converter, via `docusaurus-plugin-openapi-docs`) is the last release of its line: it
-  pins `@faker-js/faker@5.5.3` exactly and reads the pre-v8 API off it at import time,
-  while every version that patches GHSA-qxc2-j82w-r537 (`>= 10.5`) dropped that API — the
-  two cannot coexist. Forcing a patched faker to clear the finding therefore means
-  patching postman-collection, which is what the override does: it points that one
-  dependency at [`scripts/vendor/faker-postman-stub`](scripts/vendor/faker-postman-stub),
-  a no-op stand-in. The docs pipeline only runs OpenAPI → Postman → static pages and never
-  evaluates a Postman dynamic variable (`{{$randomCity}}`, the only consumer of those
-  generators), so the stub is inert there.
+Prefer stable releases that are at least 10 days old. Permit a newer release only when it
+carries an audit fix. Record the reason for each exception.
 
-Three findings cannot be pinned away and are accepted (each was re-checked against the
-advisory ranges, not just `npm audit` output):
+**Retained overrides**
 
-- `elliptic` (GHSA-848j-6mx2-7j84) — `6.6.1` is the newest release, so there is no patched
-  version to pin. It reaches the CLI through `ethers` v5
+- **Version pins** — `tar`, `protobufjs` (under `@ledgerhq/hw-app-canton`), `postcss`,
+  `uuid`, `yaml@1`, `serialize-javascript`, `toml`, `ws@8`, `tmp`, `jayson`,
+  `postcss-selector-parser`, and `test-exclude` (`glob`, `minimatch`).
+  `openapi-to-postmanv2` pins `js-yaml` to the 4.x line from `4.3.2`, the first patched
+  release. Prefer a range over an exact pin so later patches flow in.
+- **Ledger compatibility** — `@ledgerhq/hw-transport` forces `6.37.0` across the CLI's Ledger dependencies.
+  The current app releases pin `6.36.1`; the deprecated HID transport pins `6.35.5`.
+  Those versions select incompatible `LocalTracer` types through different `@ledgerhq/logs` versions.
+  The override aligns all transports with `logs@6.20.0`. Do not replace it with type casts.
+  The CLI uses Aptos `6.40.0`, Canton `0.16.0`, and Solana `7.13.0` Ledger apps.
+  These apps and transport `6.37.0` are approved exceptions to the 10-day preference.
+  Remove the override when compatible upstream releases no longer pin older transports.
+- **Line swap** — `tinypool` forces the 2.x line over `@docusaurus/core`'s `^1`. The
+  advisory covers all of 1.x, and the fix landed in `2.1.2`. The docs build exercises the
+  swap.
+- **Fork swap** — `bigint-buffer` maps to `@trufflesuite/bigint-buffer@1.1.10`. The
+  original `<=1.1.5` has a buffer overflow, and its native build no longer compiles.
+- **The faker stub** — `postman-collection` pins `@faker-js/faker@5.5.3` and reads the
+  pre-v8 API at import time. Every release that fixes GHSA-qxc2-j82w-r537 (`>=10.5`)
+  dropped that API. The override points that one dependency at
+  [`scripts/vendor/faker-postman-stub`](scripts/vendor/faker-postman-stub), a no-op
+  stand-in. The docs pipeline never evaluates a Postman dynamic variable, so the stub is
+  inert.
+
+**Removed overrides**
+
+- `braces`: GHSA-vfj7-8cjw-p6xm was withdrawn on 2026-10-23. Upstream `3.0.3` replaces
+  the vendored guard. The root `fill-range` devDependency is no longer necessary.
+- `image-size`: Docusaurus accepts patched upstream releases without an override.
+  The lockfile selects `2.0.4`, which provides the CJS `./fromFile` entry.
+  Release `2.0.3` and later fix the parser DoS. The fork is no longer necessary.
+
+The old `stream-json` acceptance is also gone; that advisory is not in the current audit.
+
+**Accepted advisories**
+
+A clean install on 2026-11-10 reports 37 audit findings: 23 low, 10 moderate, and 4 high.
+The baseline reports 41 findings, including four additional Zod peer-dependency findings.
+The regenerated dependency graph no longer reports those four findings. Zod itself remains vulnerable.
+
+- `elliptic` (low, GHSA-848j-6mx2-7j84) — `6.6.1` is the newest release, so no patched
+  version exists. It reaches the CLI through `ethers` v5
   (`@ethers-ext/signer-ledger` → `@ledgerhq/hw-app-eth` → `@ethersproject/*`).
-- `@openzeppelin/contracts` / `@openzeppelin/contracts-upgradeable` (GHSA-93hq-5wgc-jc82
-  and friends) — no fix is available inside the version-named OpenZeppelin packages
-  (`@openzeppelin/contracts-4.7.3`, `-4.8.3`, `-5.3.0`) that `@chainlink/contracts-ccip`
-  → `@chainlink/contracts` depend on, and those version-named packages are not bumped.
-  This repo consumes only vendored ABIs from them; it never compiles or deploys the
-  affected Solidity code.
-- `@solana/web3.js` → `jayson` → `stream-json` — `stream-json` is fixed in `3.6.0`,
-  a pure-ESM rewrite that CJS `jayson` cannot load (and would need `require(esm)` support
-  from every consumer's Node), and `1.99.0` is the last `web3.js` 1.x — the v1-transaction
-  support the CLI relies on. npm's suggested "fix" downgrades to `1.98.4`, which would drop
-  that support. The vulnerable API (`pick`/`ignore`/`filter`/`replace`) is not used by
-  jayson, which only takes `StreamValues` and `Verifier`.
+- `@openzeppelin/contracts` and `@openzeppelin/contracts-upgradeable`
+  (GHSA-93hq-5wgc-jc82 and related) — no fix exists inside the version-named OZ packages
+  that `@chainlink/contracts-ccip` → `@chainlink/contracts` use. Do not bump those
+  packages. This repo consumes only vendored ABIs and never compiles or deploys the
+  affected Solidity.
+- `zod@3.25.76` under `@ton/ton@16.3.0` — the fix is `>=4.6.6`. Zod 4 requires two
+  arguments for `z.record`, and `@ton/ton@16.3.0` uses the one-argument form. A forced
+  Zod 4 breaks TON support.
+- `typedoc@0.28.20` → `minimatch@10.2.6` (GHSA-g3hv-75wg-m249) — the fix is `11.0.1`, but
+  it removes the public `Minimatch#matchOne` API. Wait for a compatible upstream release.
+- `deepmerge@4.3.1` — no fix is available.
 
-To retire the `braces` fork swap once upstream patches GHSA-vfj7-8cjw-p6xm: check the
-advisory page for a fixed range, confirm with `npm view braces version time --json` that
-a stable release at least 7 days old exists and carries the depth cap (pack the tarball
-and look for the guard in `lib/parse.js`), then re-point the override at that upstream
-release — or delete it outright if `micromatch`/`chokidar` resolve the fixed release on
-their own — and confirm `npm audit` and `npm ls` stay clean.
+`npm ls --all` still reports the intentional faker stub as `invalid`.
+It also reports two optional-peer mismatches: Solana codecs expect TypeScript 5, and `ws@7` expects `utf-8-validate@5`.
+The root provides TypeScript 6 and `utf-8-validate@6`. No required dependency is missing.
+Typechecks, unit tests, and the documentation build pass with this tree.
 
 ## Test Suite Layout
 

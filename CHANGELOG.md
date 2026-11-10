@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-11-10
+
 - Solana: a CCIP 2.0 lane with its sender allowlist enabled is in testing, and every method treats it as a 1.6 lane, as `getFee` and `sendMessage` already did. `getLaneFeatures` reports no fast finality (`FINALITY_FAST`/`FINALITY_SAFE`) for it. `getOnRampConfig` without `opts.version` reads its 1.6 lane config, and returns `laneVersion` with it. `getRequiredCCVs` and `estimateReceiveExecution` discover its 1.6 OffRamp, and the CLI `lane` command shows that 1.6 lane by default. A router without a 1.6 lane to the destination (a 2.0-only deployment) still uses its allowlisted 2.0 lane. A `SolanaChain` instance reuses each lane's `observe_dest_chain_v2` result for 10 min, so these methods agree on the lane version. After the allowlist is lifted, they use 2.0 with no SDK update
 - CLI: `send --wait` and `show --wait` poll pending token attestations. When the first execution appears, they wait up to 5 s for commit, attestation and executor data that is ready, then cancel the unfinished waits.
 - SDK: `getOffchainTokenData(request, { watch })` polls pending USDC and LBTC attestations until they are ready or `watch` aborts. Issuer requests time out after 30 s; in watch mode, dropped connections, 429/5xx responses and bodies that are not JSON are polled again.
