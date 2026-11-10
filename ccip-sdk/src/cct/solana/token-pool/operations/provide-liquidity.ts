@@ -24,6 +24,7 @@ import {
   parsePublicKey,
   resolveExistingPoolConfig,
   resolveExistingTokenAccount,
+  resolvePoolProgramTypeAndVersion,
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateDelegation,
@@ -106,8 +107,13 @@ export class ProvideLiquidity extends SolanaOperation<
       opts.poolProgramAddress,
     )
     await validateLockReleasePoolProgram(this.name, chain, poolProgram, opts.poolProgramAddress)
-    // The caller must be the configured rebalancer and the pool must accept deposits.
-    validatePoolLiquidityConfig(this.name, config, opts.authority)
+    // The caller must be the configured rebalancer; a pre-2.0 pool must also accept deposits.
+    validatePoolLiquidityConfig(
+      this.name,
+      config,
+      opts.authority,
+      (await resolvePoolProgramTypeAndVersion(chain, poolProgram)).version,
+    )
 
     // The rebalancer's source ATA must exist.
     const {

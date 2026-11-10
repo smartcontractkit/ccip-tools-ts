@@ -7,7 +7,7 @@ import {
   parseOptionalPublicKey,
   parsePublicKey,
   resolveExistingPoolConfig,
-  resolvePoolProgramType,
+  resolvePoolProgramTypeAndVersion,
 } from '../../validate.ts'
 
 export type { PoolProgramRef } from '../../programs/token-pool.ts'
@@ -128,7 +128,7 @@ export class GetTokenPoolState extends SolanaQuery<
     }
     const baseConfig = serializeBaseConfig(config)
 
-    if ((await resolvePoolProgramType(chain, poolProgram)) === 'lock-release') {
+    if ((await resolvePoolProgramTypeAndVersion(chain, poolProgram)).type === 'lock-release') {
       return {
         ...result,
         config: {

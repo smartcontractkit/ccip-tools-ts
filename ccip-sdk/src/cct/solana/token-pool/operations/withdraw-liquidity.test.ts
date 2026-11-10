@@ -92,6 +92,8 @@ function chain(
             ? tokenAccount(poolSigner, poolBalance)
             : tokenAccount(rebalancer),
     },
+    // a pre-2.0 lock-release pool
+    typeAndVersion: async () => ['lockreleaseTokenPool', '1.6.2', 'lockrelease-token-pool 1.6.2'],
   } as unknown as SolanaChain
 }
 
@@ -179,6 +181,55 @@ describe('WithdrawLiquidity (cct/solana)', () => {
       assert.equal(
         (decoded.data as { amount: { toString(): string } }).amount.toString(),
         '1000000',
+      )
+    })
+
+    it('ignores canAcceptLiquidity on CCIP 2.0 pools, which no longer enforce it', async () => {
+      const pool = Object.assign(
+        chain(resolveTokenPoolProgram('lock-release'), new PublicKey(AUTHORITY), false),
+        {
+          typeAndVersion: async () => [
+            'lockreleaseTokenPool',
+            '2.0.0',
+            'lockrelease-token-pool 2.0.0',
+          ],
+        },
+      )
+      const unsigned = await new WithdrawLiquidity().generate(pool, {
+        tokenAddress: TOKEN,
+        payer: PAYER,
+        authority: AUTHORITY,
+        amount: 1n,
+      })
+
+      assert.equal(
+        lockReleaseTokenPoolCoder.instruction.decode(unsigned.instructions.at(-1)!.data)?.name,
+        'withdrawLiquidity',
+      )
+    })
+
+    it('still requires a pre-2.0 pool to accept liquidity', async () => {
+      const pool = Object.assign(
+        chain(resolveTokenPoolProgram('lock-release'), new PublicKey(AUTHORITY), false),
+        {
+          typeAndVersion: async () => [
+            'lockreleaseTokenPool',
+            '1.6.2',
+            'lockrelease-token-pool 1.6.2',
+          ],
+        },
+      )
+      await assert.rejects(
+        () =>
+          new WithdrawLiquidity().generate(pool, {
+            tokenAddress: TOKEN,
+            payer: PAYER,
+            authority: AUTHORITY,
+            amount: 1n,
+          }),
+        (error: unknown) =>
+          error instanceof CCTTxFailedError &&
+          error.message.includes('setCanAcceptLiquidity(true)'),
       )
     })
 

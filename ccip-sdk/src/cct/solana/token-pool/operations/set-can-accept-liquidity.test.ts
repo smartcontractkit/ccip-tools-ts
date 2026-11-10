@@ -6,7 +6,7 @@ import { Keypair, PublicKey } from '@solana/web3.js'
 import { ChainFamily } from '../../../../networks.ts'
 import { lockReleaseTokenPoolCoder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import { deriveTokenPoolConfigPda, resolveTokenPoolProgram } from '../../programs/token-pool.ts'
 import { SetCanAcceptLiquidity } from './set-can-accept-liquidity.ts'
 
@@ -27,6 +27,8 @@ function chain(): SolanaChain {
       getMultipleAccountsInfo: async () => [null, {}], // only the canonical lock-release pool
       getAccountInfo: async () => ({}), // any custom pool program's state
     },
+    // a pre-2.0 lock-release pool
+    typeAndVersion: async () => ['lockreleaseTokenPool', '1.6.2', 'lockrelease-token-pool 1.6.2'],
   } as unknown as SolanaChain
 }
 
@@ -118,6 +120,59 @@ describe('SetCanAcceptLiquidity (cct/solana)', () => {
           (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
         )
       }
+    })
+  })
+
+  describe('CCIP 2.0', () => {
+    const withVersion = (typeAndVersion: string[]) =>
+      Object.assign(chain(), { typeAndVersion: async () => typeAndVersion })
+
+    it('rejects 2.0 pools, which removed the instruction, before building', async () => {
+      await assert.rejects(
+        () =>
+          new SetCanAcceptLiquidity().generate(
+            withVersion(['lockreleaseTokenPool', '2.0.0', 'lockrelease-token-pool 2.0.0']),
+            {
+              tokenAddress: TOKEN,
+              payer: PAYER,
+              allow: ALLOW,
+            },
+          ),
+        (err: unknown) =>
+          err instanceof CCTOperationUnsupportedError &&
+          err.context.operation === 'setCanAcceptLiquidity' &&
+          err.context.version === '2.0.0',
+      )
+    })
+
+    it('surfaces typeVersion RPC failures instead of assuming a pre-2.0 pool', async () => {
+      // the canonical program may be 2.0, so building the removed instruction would fail on-chain
+      const rpcError = new Error('429 Too Many Requests')
+      const failing = Object.assign(chain(), { typeAndVersion: () => Promise.reject(rpcError) })
+      await assert.rejects(
+        () =>
+          new SetCanAcceptLiquidity().generate(failing, {
+            tokenAddress: TOKEN,
+            payer: PAYER,
+            allow: ALLOW,
+          }),
+        rpcError,
+      )
+    })
+
+    it('still builds for pre-2.0 pools', async () => {
+      const unsigned = await new SetCanAcceptLiquidity().generate(
+        withVersion(['lockreleaseTokenPool', '1.6.2', 'lockrelease-token-pool 1.6.2']),
+        {
+          tokenAddress: TOKEN,
+          payer: PAYER,
+          allow: ALLOW,
+        },
+      )
+      assert.equal(
+        lockReleaseTokenPoolCoder.instruction.decode(unsigned.instructions[0]!.data)?.name,
+        'setCanAcceptLiquidity',
+      )
     })
   })
 

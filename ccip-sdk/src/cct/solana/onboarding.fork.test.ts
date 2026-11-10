@@ -42,7 +42,7 @@ import { lockReleaseTokenPoolCoder } from '../../solana/idl/token-pool-coder.ts'
 import { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { CCIPVersion } from '../../types.ts'
-import { CCTTxFailedError } from '../errors.ts'
+import { CCTOperationUnsupportedError } from '../errors.ts'
 import { refreshAccountState } from './operation.ts'
 import type { RateLimitConfig } from './token-pool/operations/set-chain-rate-limit.ts'
 import { SolanaTokenManager } from './index.ts'
@@ -74,22 +74,6 @@ const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isSurfpoolAvailable()
 
 const testLogger = new Console(process.stdout, process.stderr)
 if (!VERBOSE) testLogger.debug = () => {}
-
-/** Everything an error carries that could name the on-chain failure: messages, logs, context. */
-function errorText(err: unknown): string {
-  const parts: string[] = []
-  for (let e: unknown = err; e; e = (e as { cause?: unknown }).cause) {
-    if (e instanceof Error) parts.push(e.message)
-    const { logs, context } = e as { logs?: unknown; context?: unknown }
-    if (logs || context)
-      parts.push(
-        JSON.stringify({ logs, context }, (_, v: unknown) =>
-          typeof v === 'bigint' ? v.toString() : v,
-        ),
-      )
-  }
-  return parts.join('\n')
-}
 
 describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600_000 }, () => {
   useResourceForDescribe(['solana-devnet'])
@@ -559,31 +543,26 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
       assert.equal(await poolBalance(), 0n)
     })
 
-    // Known gaps: these pin today's behaviour and fail once the SDK is fixed.
+    // A pool upgraded from 1.6 keeps its stored flag, but 2.0 neither sets nor enforces it
 
-    it('GAP: setCanAcceptLiquidity targets an instruction 2.0 removed', async () => {
+    it('rejects setCanAcceptLiquidity before sending, since 2.0 removed the instruction', async () => {
       await assert.rejects(
         cct.setCanAcceptLiquidity({ tokenAddress, allow: true, wallet: wallet() }),
         (err: unknown) =>
-          err instanceof CCTTxFailedError &&
-          /InstructionFallbackNotFound|Fallback/i.test(errorText(err)),
+          err instanceof CCTOperationUnsupportedError && err.context.version === '2.0.0',
       )
     })
 
-    it('GAP: liquidity ops refuse a pool flagged closed, though 2.0 ignores the flag', async () => {
-      // A pool upgraded from 1.6 keeps its stored flag; 2.0 no longer enforces it
+    it('moves liquidity on a pool flagged closed, since 2.0 ignores the flag', async () => {
       await setCanAcceptLiquidityFlag(false)
       try {
-        await assert.rejects(
-          cct.provideLiquidity({
-            tokenAddress,
-            amount: 1n,
-            includeApproval: true,
-            wallet: wallet(),
-          }),
-          (err: unknown) =>
-            err instanceof CCTTxFailedError && /does not accept liquidity/.test(err.message),
-        )
+        await cct.provideLiquidity({
+          tokenAddress,
+          amount: 1n,
+          includeApproval: true,
+          wallet: wallet(),
+        })
+        await cct.withdrawLiquidity({ tokenAddress, amount: 1n, wallet: wallet() })
       } finally {
         await setCanAcceptLiquidityFlag(true)
       }

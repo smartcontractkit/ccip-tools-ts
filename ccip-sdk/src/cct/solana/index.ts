@@ -1258,10 +1258,11 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * have the canonical lock-release `provideLiquidity` instruction and account layout. `authority`
    * defaults to `payer`. `amount` is a positive u64 in base units.
    *
-   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
-   * transaction authority. The authority's ATA for `tokenAddress` must exist, hold at least `amount`,
-   * and delegate at least `amount` to the pool signer PDA. Set `includeApproval: true` to bundle
-   * that approval before the liquidity instruction in this transaction.
+   * @remarks The pool config must have a `rebalancer` equal to the transaction authority, and on
+   * pools before CCIP 2.0 also `canAcceptLiquidity: true`. The authority's ATA for `tokenAddress`
+   * must exist, hold at least `amount`, and delegate at least `amount` to the pool signer PDA. Set
+   * `includeApproval: true` to bundle that approval before the liquidity instruction in this
+   * transaction.
    *
    * @see {@link provideLiquidity}
    * @see {@link generateUnsignedApproveToken}
@@ -1297,9 +1298,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * have the canonical lock-release `provideLiquidity` instruction and account layout. The wallet's
    * associated token account must exist and hold the positive u64 `amount` in base units.
    *
-   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
-   * transaction authority. Before this operation, the rebalancer ATA must delegate at least `amount`
-   * to the pool signer PDA, unless `includeApproval: true` bundles that approval in this transaction.
+   * @remarks The pool config must have a `rebalancer` equal to the transaction authority, and on
+   * pools before CCIP 2.0 also `canAcceptLiquidity: true`. Before this operation, the rebalancer
+   * ATA must delegate at least `amount` to the pool signer PDA, unless `includeApproval: true`
+   * bundles that approval in this transaction.
    *
    * @see {@link generateUnsignedProvideLiquidity}
    * @see {@link approveToken}
@@ -1314,8 +1316,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPTokenPoolStateNotFoundError} If the token pool state is missing.
    * @throws {@link CCIPTokenAccountNotFoundError} If the rebalancer or pool vault ATA is missing; create it first.
    * @throws {@link CCTTxFailedError} If the source ATA does not delegate enough tokens to the pool
-   * signer and `includeApproval` is false, the pool rejects the rebalancer, liquidity is disabled,
-   * the token account lacks funds, or simulation/submission fails.
+   * signer and `includeApproval` is false, the pool rejects the rebalancer, a pre-2.0 pool has
+   * liquidity disabled, the token account lacks funds, or simulation/submission fails.
    *
    * @example Approve and provide liquidity in one transaction
    * ```ts
@@ -1338,8 +1340,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * a custom program must have the canonical lock-release `withdrawLiquidity` instruction and account
    * layout. `authority` defaults to `payer`. `amount` is a positive u64 in base units.
    *
-   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
-   * transaction authority. The rebalancer's associated token account must already exist.
+   * @remarks The pool config must have a `rebalancer` equal to the transaction authority, and on
+   * pools before CCIP 2.0 also `canAcceptLiquidity: true`. The rebalancer's associated token
+   * account must already exist.
    *
    * @see {@link withdrawLiquidity}
    * @see {@link generateUnsignedSetRebalancer}
@@ -1371,8 +1374,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * program must have the canonical lock-release `withdrawLiquidity` instruction and account layout.
    * The wallet's associated token account must exist. `amount` is a positive u64 in base units.
    *
-   * @remarks The pool config must have `canAcceptLiquidity: true` and a `rebalancer` equal to the
-   * transaction authority.
+   * @remarks The pool config must have a `rebalancer` equal to the transaction authority, and on
+   * pools before CCIP 2.0 also `canAcceptLiquidity: true`.
    *
    * @see {@link generateUnsignedWithdrawLiquidity}
    * @see {@link setRebalancer}
@@ -1383,8 +1386,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * the authority differs from the executing wallet.
    * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   * @throws {@link CCTTxFailedError} If the pool rejects the rebalancer, liquidity is disabled,
-   * lacks liquidity, the token account does not exist, or simulation/submission fails.
+   * @throws {@link CCTTxFailedError} If the pool rejects the rebalancer, a pre-2.0 pool has
+   * liquidity disabled, the pool lacks liquidity, the token account does not exist, or
+   * simulation/submission fails.
    *
    * @example Withdraw liquidity
    * ```ts
@@ -1406,6 +1410,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * `poolProgramAddress` only for a custom program; `authority` defaults to `payer`.
    *
    * @remarks
+   * CCIP 2.0 lock-release pools removed this setting: they always accept liquidity, and this
+   * operation throws {@link CCTOperationUnsupportedError} for them. To stop rebalancing on a 2.0
+   * pool, set the rebalancer to the default address with {@link setRebalancer}.
+   *
    * ⚠️ **Consequence:** Setting `allow` to `true` lets the rebalancer both `provideLiquidity` and
    * `withdrawLiquidity`. Setting `allow` to `false` **disables both** — liquidity already in the pool cannot be
    * withdrawn until `allow` is re-enabled. Verify the current liquidity balance before flipping to `false`.
@@ -1414,6 +1422,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedSetRebalancer}
    *
    * @throws {@link CCTParamsInvalidError} If `allow`, a pool parameter, or public key is invalid.
+   * @throws {@link CCTOperationUnsupportedError} If the pool is CCIP 2.0 or later.
    *
    * @example
    * ```ts
@@ -1437,6 +1446,10 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * and `withdrawLiquidity` transfers using the pool owner wallet.
    *
    * @remarks
+   * CCIP 2.0 lock-release pools removed this setting: they always accept liquidity, and this
+   * operation throws {@link CCTOperationUnsupportedError} for them. To stop rebalancing on a 2.0
+   * pool, set the rebalancer to the default address with {@link setRebalancer}.
+   *
    * ⚠️ **Consequence:** Setting `allow` to `true` lets the rebalancer both `provideLiquidity` and
    * `withdrawLiquidity`. Setting `allow` to `false` **disables both** — liquidity already in the pool cannot be
    * withdrawn until `allow` is re-enabled. Verify the current liquidity balance before flipping to `false`.
@@ -1447,6 +1460,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If `allow` or a pool parameter is invalid, or the authority differs
    * from the executing wallet.
+   * @throws {@link CCTOperationUnsupportedError} If the pool is CCIP 2.0 or later.
    * @throws {@link CCTTxFailedError} If the wallet is not the pool owner or simulation/submission fails.
    *
    * @example

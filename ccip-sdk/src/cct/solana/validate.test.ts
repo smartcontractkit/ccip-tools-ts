@@ -21,13 +21,14 @@ import {
   isSolanaTokenPoolType,
 } from './programs/token-pool.ts'
 import {
+  isPoolVersionAtLeast2,
   parseOptionalPublicKey,
   parsePublicKey,
   resolveExistingLockReleasePoolProgram,
   resolveExistingPoolProgram,
   resolveExistingPoolState,
   resolveExistingTokenAccount,
-  resolvePoolProgramType,
+  resolvePoolProgramTypeAndVersion,
   validateAuthorityMatchesWallet,
   validateBigInt,
   validateDelegation,
@@ -173,7 +174,8 @@ describe('Validate (cct/solana)', () => {
         getMultipleAccountsInfo: mock.fn(async (addresses: PublicKey[]) => addresses.map(account)),
       }
       // without a `type`, the program does not implement `typeVersion`
-      const typeAndVersion = async () => (type ? [type] : Promise.reject(new Error('typeVersion')))
+      const typeAndVersion = async () =>
+        type ? [type, '1.6.2'] : Promise.reject(new Error('typeVersion'))
       /** Call counts of `[getAccountInfo, getMultipleAccountsInfo]`. */
       const reads = () => Object.values(connection).map((rpc) => rpc.mock.callCount())
       return { chain: { connection, typeAndVersion } as unknown as SolanaChain, reads, states }
@@ -232,16 +234,23 @@ describe('Validate (cct/solana)', () => {
       assert.deepEqual(reads(), [1, 2])
     })
 
-    it('identifies pool program types', async () => {
+    it('identifies pool program types and versions', async () => {
+      // the prod pool program IDs run 1.6 on mainnet and 2.0 on prod testnet; ask the program
       for (const [program, type, expected] of [
-        [BURN_MINT, undefined, 'burn-mint'],
-        [LOCK_RELEASE, undefined, 'lock-release'],
-        [CUSTOM, 'LockReleaseTokenPool', 'lock-release'],
-        [CUSTOM, 'BurnMintTokenPool', 'burn-mint'],
-        [CUSTOM, 'CustomTokenPool', undefined],
-        [CUSTOM, undefined, undefined],
+        [BURN_MINT, 'burnmintTokenPool', { type: 'burn-mint', version: '2.0.0' }],
+        [LOCK_RELEASE, 'lockreleaseTokenPool', { type: 'lock-release', version: '2.0.0' }],
+        // canonical programs are typed by address, whatever their typeVersion says
+        [LOCK_RELEASE, 'BurnMintTokenPool', { type: 'lock-release', version: '2.0.0' }],
+        [CUSTOM, 'LockReleaseTokenPool', { type: 'lock-release', version: '2.0.0' }],
+        [CUSTOM, 'BurnMintTokenPool', { type: 'burn-mint', version: '2.0.0' }],
+        [CUSTOM, 'CustomTokenPool', { type: undefined, version: '2.0.0' }],
+        [CUSTOM, undefined, { type: undefined, version: undefined }],
       ] as const) {
-        assert.equal(await resolvePoolProgramType(poolChain([], type).chain, program), expected)
+        const chain = {
+          typeAndVersion: async () =>
+            type ? [type, '2.0.0'] : Promise.reject(new Error('typeVersion')),
+        } as unknown as SolanaChain
+        assert.deepEqual(await resolvePoolProgramTypeAndVersion(chain, program), expected)
       }
     })
 
@@ -271,13 +280,38 @@ describe('Validate (cct/solana)', () => {
       }
     })
 
+    it('rethrows typeVersion failures for canonical pool programs', async () => {
+      // canonical programs implement typeVersion, so a failure is an RPC error, not a missing
+      // instruction; treating it as pre-2.0 would pick the wrong instruction set
+      const rpcError = new Error('429 Too Many Requests')
+      const failing = {
+        typeAndVersion: () => Promise.reject(rpcError),
+      } as unknown as SolanaChain
+      for (const program of [BURN_MINT, LOCK_RELEASE]) {
+        await assert.rejects(resolvePoolProgramTypeAndVersion(failing, program), rpcError)
+      }
+    })
+
+    it('tells CCIP 2.0 pool versions apart from earlier and unknown ones', () => {
+      for (const [version, expected] of [
+        ['2.0.0', true],
+        ['2.1.0', true],
+        ['10.0.0', true],
+        ['1.6.2', false],
+        ['0.1.0', false],
+        [undefined, false],
+      ] as const) {
+        assert.equal(isPoolVersionAtLeast2(version), expected, String(version))
+      }
+    })
+
     it('rejects burn-mint pools for lock-release operations', async () => {
-      // [programs holding a pool state, poolProgramAddress, custom program type, rejected param]
+      // [programs holding a pool state, poolProgramAddress, typeVersion type, rejected param]
       for (const [programs, override, type, param] of [
-        [[BURN_MINT], undefined, undefined, 'tokenAddress'],
-        [[BURN_MINT], BURN_MINT, undefined, 'poolProgramAddress'],
+        [[BURN_MINT], undefined, 'burnmintTokenPool', 'tokenAddress'],
+        [[BURN_MINT], BURN_MINT, 'burnmintTokenPool', 'poolProgramAddress'],
         [[CUSTOM], CUSTOM, 'BurnMintTokenPool', 'poolProgramAddress'],
-        [[LOCK_RELEASE], undefined, undefined, undefined],
+        [[LOCK_RELEASE], undefined, 'lockreleaseTokenPool', undefined],
         [[CUSTOM], CUSTOM, undefined, undefined],
       ] as const) {
         const { chain } = poolChain([...programs], type)
