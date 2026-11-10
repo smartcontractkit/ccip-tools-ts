@@ -444,18 +444,18 @@ export const SOLANA_DEVNET_EXEC_INPUT_TEST_MSG: ForkTestMessage = {
 }
 
 export const SOLANA_DEVNET_TO_SEPOLIA: ForkTestMessage[] = [
-  // FAILED — ready for manual exec; API reports version "1.6.2" which does not match
+  // FAILED — ready for manual exec; API reported version "1.6.2" which does not match
   // the CCIPVersion enum values ("1.6.0" etc.), causing the API-driven manual-exec
   // codepath to mishandle the lane version in ccip-sdk versions prior to 1.7.1.
-  // Since the 2026-11 upgrade of its router (Ccip842…) to ccip-router 2.0.0, the API reports
-  // "2.0.0" for it and its execution-inputs answer HTTP 500 (see fork.test.ts, TEMPORARY note).
+  // After the 2026-11 upgrade of its router (Ccip842…) to ccip-router 2.0.0, the API
+  // reported "2.0.0" and HTTP 500 on execution-inputs until 2026-11-09; now "1.6.0".
   {
     messageId: '0xacb7f265a4d02eb1b902c6f171655aabd4b6c7c1d5b4519bee0b261fc2a88c5f',
     txHash:
       'ZHKdh1vcqUVedGtF38feWhKq46kB3d8j3SNTZYXUBDF51bArDVmhDuSSod9oBvwYKEjrm2PqtjDDXpsBvbfbA85',
     status: MessageStatus.Failed,
     version: '1.6',
-    description: 'failed from Solana Devnet, ready for manual exec — API reports version "1.6.2"',
+    description: 'failed from Solana Devnet, ready for manual exec — API-driven exec test pin',
   },
   SOLANA_DEVNET_EXEC_TEST_MSG,
   SOLANA_DEVNET_EXEC_INPUT_TEST_MSG,

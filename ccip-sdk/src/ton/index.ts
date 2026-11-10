@@ -11,7 +11,7 @@ import {
   type ChainStatic,
   type GetBalanceOpts,
   type LogFilter,
-  type TokenTransferFeeOpts,
+  type TokenPoolConfigOpts,
   Chain,
   withSinceStart,
 } from '../chain.ts'
@@ -2194,7 +2194,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * {@inheritDoc Chain.getTokenPoolConfig}
    * @throws {@link CCIPNotImplementedError} always (not implemented for TON)
    */
-  async getTokenPoolConfig(_tokenPool: string, _feeOpts?: TokenTransferFeeOpts): Promise<never> {
+  async getTokenPoolConfig(_tokenPool: string, _opts?: TokenPoolConfigOpts): Promise<never> {
     return Promise.reject(new CCIPNotImplementedError('getTokenPoolConfig'))
   }
 

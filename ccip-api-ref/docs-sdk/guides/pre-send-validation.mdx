@@ -1,7 +1,7 @@
 ---
 id: pre-send-validation
 title: 'Validating a Transfer Before Sending'
-description: 'estimateReceiveExecution runs a point-in-time destination pool-leg check — not only a gas estimate — so you can catch a would-be-stuck transfer before ccipSend.'
+description: 'Check both legs of a token transfer before ccipSend: the source pool through getLaneFeatures, getFee and the send methods, and the destination pool through estimateReceiveExecution.'
 sidebar_label: Pre-Send Validation
 sidebar_position: 7
 ---
@@ -9,6 +9,47 @@ sidebar_position: 7
 # Validating a Transfer Before Sending
 
 `estimateReceiveExecution` is often described as a gas helper, but it does more than return a gas number. Before it estimates gas it runs a **destination-side preflight**: a point-in-time check of the _token-pool leg_ of destination execution. Calling it before `ccipSend` lets you catch many conditions that would otherwise strand the transfer on the destination — where the tokens are not lost, but require a later manual execution once the cause is fixed.
+
+## Recommended pattern
+
+A transfer has two pool legs, and each chain's pool keeps its own state. The source pool cannot see the destination pool: for example, an ETH pool can allow an outbound transfer while the ARB pool pauses inbound transfers from ETH. The burn on ETH then succeeds, and execution on ARB reverts until ARB unpauses. So check each leg on its own chain:
+
+| Step | Call | Chain | Catches |
+| ---- | ---- | ----- | ------- |
+| 1. Show lane state (poll) | `source.getLaneFeatures({ router, destChainSelector, token })` | Source | Outbound pauses and missing config records (`LANE_STATUS`), finality, outbound rate limits |
+| 2. Validate the destination | `estimateReceiveExecution({ source, dest, routerOrRamp, message })` | Both | Destination inbound pauses and missing records, inbound rate limits, liquidity, the `releaseOrMint` simulation; with `message.sender`, the source `lockOrBurn` simulation too |
+| 3. Quote | `source.getFee(...)` or `source.getTotalFeesEstimate(...)` | Source | Outbound pauses, missing records, finality, and the outbound bucket for the amount after token fees |
+| 4. Send | `source.sendMessage(...)` or `source.generateUnsignedSendMessage(...)` | Source | The checks of step 3 again, and the source pool's `lockOrBurn` simulation with the sender (hooks, blocklists, RMN curse), also when you pass a `fee` |
+
+`LANE_STATUS` (step 1) only reports the source leg. Step 2 is the only step that reads the destination pool, so run it before you enable sending, and again right before signing. Steps 3 and 4 run their checks themselves: you do not call a separate check method. Every block is a typed error (see [below](#typed-errors)).
+
+```typescript
+import { estimateReceiveExecution, CCIPTokenTransferPausedError } from '@chainlink/ccip-sdk'
+
+const features = await source.getLaneFeatures({ router, destChainSelector, token })
+if (features.LANE_STATUS && features.LANE_STATUS.status !== 'ok') {
+  return disableSend(features.LANE_STATUS) // source leg: paused or incomplete
+}
+
+try {
+  await estimateReceiveExecution({
+    source,
+    dest,
+    routerOrRamp: router,
+    message: { sender, receiver, data: '0x', tokenAmounts: [{ token, amount }] },
+  })
+} catch (error) {
+  if (error instanceof CCIPTokenTransferPausedError) {
+    // error.context.direction === 'inbound': the destination pool pauses this transfer
+  }
+  return disableSend(error) // or handle CCIPDestSimulationUnavailableError as inconclusive
+}
+
+const { ccipFee } = await source.getTotalFeesEstimate({ router, destChainSelector, message })
+await source.sendMessage({ router, destChainSelector, message: { ...message, fee: ccipFee }, wallet })
+```
+
+The CLI is the reference implementation: `ccip-cli send` runs steps 2, 3 and 4 in this order (see [CLI behavior](#cli-behavior)).
 
 ## Why this matters
 
@@ -26,7 +67,7 @@ When you pass both `source` and `dest` chain instances, `estimateReceiveExecutio
 
 1. Resolves the destination OffRamp for the lane and checks its **source-lane gates**: lane enabled, and (when the message names its OnRamp) the sending OnRamp allowed.
 2. Checks the receiver accepts the requested finality (for data-carrying messages).
-3. Checks the generic pool-config layer: inbound rate limits (typed `CCIPRateLimitExceededError`) and LockRelease pool/lockbox liquidity (typed `CCIPInsufficientBalanceError`).
+3. Checks the generic pool-config layer: inbound rate limits (typed `CCIPRateLimitExceededError`), LockRelease pool/lockbox liquidity (typed `CCIPInsufficientBalanceError`) and, for multi-token pools, the destination's inbound pauses (typed `CCIPTokenTransferPausedError`) and missing config records (typed `CCIPLaneConfigIncompleteError`).
 4. For each token transfer, first simulates the **source** pool's `lockOrBurn` — with the message's `tokenArgs` and `tokenReceiver`, obtaining the exact `destPoolData` and the **post-fee `destTokenAmount`** the OnRamp would write into the emitted message (see [below](#how-source-pool-data-is-obtained)) — then simulates the **destination** pool's `releaseOrMint` directly (an `eth_call` with `from` set to the registered OffRamp), running the real release path: liquidity, inbound rate limit, RMN curse, mint authority, source-pool wiring, pool compatibility, and pool hooks.
 5. Returns the `ccipReceive` gas limit (unchanged from a gas-only estimate).
 
@@ -35,7 +76,8 @@ This is a **point-in-time pool-leg check**, not a full destination execution. It
 - **CCV quorum and verifier results** (v2.0): required/optional CCVs and their inbound implementations are not resolved or checked. (`OffRamp.getCCVsForMessage` is the canonical resolver; a follow-up will route the preflight through it now that the simulated message matches the emitted one.)
 - **CCV-managed minting**: for pools like `CCTPThroughCCVTokenPool` (USDC v2.0), the pool leg intentionally does nothing — the real mint happens in the verifier. A passing simulation there validates wiring and gating, not the mint itself.
 - **The receiver's `ccipReceive`** logic (only its finality config is read).
-- **State races**: a check that passes now can still fail at execution time if liquidity, limits, curses, or configs change in between.
+- **State races**: a check that passes now can still fail at execution time if liquidity, limits, curses, pauses, or configs change in between.
+- **Multi-token destination pools without real source pool data**: such a pool checks the source token and its identity metadata, which only the source pool's real pool data carries. When that data is not available (a non-EVM source, or a source simulation that cannot run), the `releaseOrMint` simulation is skipped; the read checks of step 3 still run.
 
 ## Attestation-consuming pools (USDC/CCTP v1.x, Lombard v1.x)
 
@@ -97,6 +139,8 @@ A single error models a destination-pool revert. Rather than classify the revert
 | `CCIPFinalityNotAllowedError`        | the receiver does not accept the requested finality                                                                                                                                                                                                                                                                                                   | no        |
 | `CCIPSourceChainUnsupportedError`    | the OffRamp's source lane is disabled, or the sending OnRamp is not allowed (`context.reason`)                                                                                                                                                                                                                                                        | no        |
 | `CCIPRateLimitExceededError`         | the transfer exceeds the inbound rate limit currently available                                                                                                                                                                                                                                                                                       | yes       |
+| `CCIPTokenTransferPausedError`       | a multi-token pool pauses the transfer: on the source (`context.direction: 'outbound'`, from `getFee`, `getTotalFeesEstimate` and the send methods) or on the destination (`'inbound'`, from `estimateReceiveExecution`). `context.scope` is `global`, `chain` or `token` | no |
+| `CCIPLaneConfigIncompleteError`      | a multi-token pool's lane lacks a config record that the transfer needs (`context.missing`)                                                                                                                                                                                                                                                         | no        |
 | `CCIPInsufficientBalanceError`       | a LockRelease destination pool (or its lockbox) lacks liquidity                                                                                                                                                                                                                                                                                       | no        |
 | `CCIPContractTypeInvalidError`       | the registered pool is not a CCIP-compatible pool                                                                                                                                                                                                                                                                                                     | no        |
 | `CCIPSourcePoolRevertError`          | the **source** pool's `lockOrBurn` simulation reverts with a genuine gate (sender allowlist, outbound rate limit, finality gate) — `ccipSend` would revert the same way. `context.revert` carries the raw revert                                                                                                                                      | varies    |
@@ -162,7 +206,7 @@ For advanced flows the same building blocks are exported directly:
 
 ## CLI behavior
 
-`ccip-cli send` runs this preflight by default. **Definitive verdicts block the send** (any of the typed block errors above). **Inconclusive checks warn and continue**: a `CCIPDestSimulationUnavailableError` (destination RPC unreachable, or an attestation-consuming pool pre-send) is logged as a warning and the send proceeds with the default gas limit. Passing `--estimate-gas-limit`/`--only-estimate` makes every preflight error fatal — you asked for the estimate explicitly. `--estimate-gas-limit -100` skips the preflight entirely.
+`ccip-cli send` is the reference for the [recommended pattern](#recommended-pattern): it runs `estimateReceiveExecution` with both chains (step 2), then `getFee` (step 3), then `sendMessage` with the wallet's address as the sender (step 4). It runs the destination preflight by default. **Definitive verdicts block the send** (any of the typed block errors above). **Inconclusive checks warn and continue**: a `CCIPDestSimulationUnavailableError` (destination RPC unreachable, or an attestation-consuming pool pre-send) is logged as a warning and the send proceeds with the default gas limit. Passing `--estimate-gas-limit`/`--only-estimate` makes every preflight error fatal — you asked for the estimate explicitly. `--estimate-gas-limit -100` skips the preflight entirely.
 
 `ccip-cli manual-exec --estimate-gas-limit` fetches the message's real offchain token data (attestations) first, so attestation lanes are estimable post-send; if the check is unavailable it warns and proceeds with the original gas limit.
 

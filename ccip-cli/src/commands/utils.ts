@@ -11,11 +11,13 @@ import {
   CCIPError,
   CCIPErrorCode,
   CCIPInteractiveRequiredError,
+  CCIPLocalTokenRequiredError,
   CCIPTokenDecimalsUnavailableError,
   ChainFamily,
   ExecutionState,
   getCCIPExplorerUrl,
   getDataBytes,
+  getSourceTokenFromExtraData,
   networkInfo,
   resolveTokenDecimals,
   supportedChains,
@@ -225,11 +227,15 @@ export function prettyFormat(
   return format(value)
 }
 
-async function formatToken(
+/**
+ * Formats a token amount for display, with its symbol and decimals when they resolve.
+ * @internal
+ */
+export async function formatToken(
   source: Chain | undefined,
   ta: { amount: bigint } & (
     | { token: string }
-    | { sourceTokenAddress?: string; sourcePoolAddress: string }
+    | { sourceTokenAddress?: string; sourcePoolAddress: string; extraData?: string }
   ),
   family?: ChainFamily,
 ): Promise<string> {
@@ -243,7 +249,17 @@ async function formatToken(
   let token
   if ('token' in ta) token = ta.token
   else if (ta.sourceTokenAddress) token = ta.sourceTokenAddress
-  else token = await source.getTokenForTokenPool(ta.sourcePoolAddress)
+  else {
+    // a multi-token source pool sends the source token in its pool data; a pool address alone
+    // does not select one of its tokens
+    token = getSourceTokenFromExtraData(ta.extraData, source.network.family)
+    try {
+      token ??= await source.getTokenForTokenPool(ta.sourcePoolAddress)
+    } catch (err) {
+      if (!(err instanceof CCIPLocalTokenRequiredError)) throw err
+      return `${ta.amount} (raw units) ${formatDisplayAddress(ta.sourcePoolAddress, family ?? ChainFamily.EVM)}`
+    }
+  }
   try {
     const { symbol, decimals } = await source.getTokenInfo(token)
     return `${formatUnits(ta.amount, decimals)} ${symbol}`

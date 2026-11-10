@@ -74,16 +74,27 @@ export async function rankExecFixtures(opts: {
   return fixtures
 }
 
-/** Upstream trouble seen through the forks: SDK transient errors, 429s, and the
- * empty revert an anvil fork reports when its upstream rate-limits it. */
+/**
+ * Upstream trouble seen through the forks: SDK transient errors, 429s, the empty
+ * revert an anvil fork reports when its upstream rate-limits it, and the
+ * `Fork Error: Transport(...)` it reports when its upstream RPC drops a connection.
+ */
 const isTransient = (err: unknown) =>
-  shouldRetry(err) || /\b429\b|missing revert data/i.test((err as Error | null)?.message ?? '')
+  shouldRetry(err) ||
+  /\b429\b|missing revert data|fork error|connection reset|econnreset|socket hang up/i.test(
+    (err as Error | null)?.message ?? '',
+  )
+
+/** Retries for a transient failure, per fixture; each waits `RETRY_DELAY_MS` longer. */
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 2_000
 
 /**
  * Runs `attempt` on each fixture not in `usedIds` until one succeeds. Each tried id
  * joins `usedIds`: a message executed (or found unusable) by one test is not tried
- * again by the next. A transient failure is retried once; an assertion failure
- * rethrows at once. When no fixture executes, fails with every fixture's error.
+ * again by the next. A transient failure is retried up to `MAX_RETRIES` times, with
+ * a growing delay; an assertion failure rethrows at once. When no fixture executes,
+ * fails with every fixture's error.
  */
 export async function tryExecFixtures(
   fixtures: readonly ExecFixture[],
@@ -99,7 +110,10 @@ export async function tryExecFixtures(
         return await attempt(fixture)
       } catch (err) {
         if (err instanceof Error && err.name === 'AssertionError') throw err
-        if (retry === 0 && isTransient(err)) continue
+        if (retry < MAX_RETRIES && isTransient(err)) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * (retry + 1)))
+          continue
+        }
         errors.push(`${fixture.messageId}: ${err instanceof Error ? err.message : String(err)}`)
         break
       }
