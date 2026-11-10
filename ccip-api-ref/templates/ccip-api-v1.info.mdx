@@ -14,8 +14,9 @@ import { DeprecationBanner } from '@site/src/components'
 # CCIP API v1 (Deprecated)
 
 <DeprecationBanner
-  message="API v1 is deprecated and will be removed in a future release."
-  alternative="Please migrate to [API v2](/api/) which includes additional endpoints and improved response formats."
+  message="API v1 will be disabled on November 11, 2026 and permanently retired on November 30, 2026."
+  migrationLink="/api/migrate-from-v1"
+  linkLabel="Read the migration guide"
 />
 
 REST API for querying cross-chain message data and lane information on the Chainlink Cross-Chain Interoperability Protocol.
@@ -51,10 +52,4 @@ REST API for querying cross-chain message data and lane information on the Chain
 
 ## Migration to v2
 
-API v2 includes:
-
-- **New endpoints**: `/messages` search, `/verifiers` list
-- **Improved responses**: More detailed message status information
-- **Better documentation**: Interactive playground and code samples
-
-[View API v2 Documentation →](/api/)
+See [Migrate from API v1](/api/migrate-from-v1) for the endpoint mapping and response changes.

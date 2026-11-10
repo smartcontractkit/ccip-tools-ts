@@ -68,7 +68,7 @@ All endpoints return standardized HTTP status codes:
 ```bash
 # Example: Check response status in scripts
 curl -s -o /dev/null -w "%{http_code}" \
-  "https://api.ccip.chain.link/v2/message/0x..."
+  "https://api.ccip.chain.link/v2/messages/0x..."
 ```
 
 ## Authentication
@@ -76,6 +76,8 @@ curl -s -o /dev/null -w "%{http_code}" \
 Most CCIP API endpoints are **publicly accessible** and do not require authentication. However, **Intent-related endpoints** may require an `x-api-key` header for validation. Please be mindful of rate limits when integrating into production applications.
 
 ## Next Steps
+
+- [Migrate from API v1](/api/migrate-from-v1) - Move a v1 integration to v2
 
 - [Retrieve a Message](/api/get-message-by-id) - Track your first cross-chain message
 - [Get Lane Latency](/api/get-lane-latency) - Check lane performance metrics
