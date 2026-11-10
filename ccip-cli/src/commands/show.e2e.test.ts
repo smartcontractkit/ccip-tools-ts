@@ -16,6 +16,7 @@ import {
   SOLANA_DEVNET_RPCS,
   TON_TESTNET_RPCS,
   spawnCLI,
+  spawnCLIRetryingTransient,
 } from './e2e-helpers.test.ts'
 
 // Locks are held per describe block (useResourceForDescribe) and each
@@ -378,7 +379,8 @@ describe('e2e command show EVM', () => {
 
     it(
       'should show complete CCIP transaction details EVM to Solana',
-      { timeout: 120000 },
+      // two attempts of 90 s, plus the wait between them
+      { timeout: 200000 },
       async () => {
         // Fixture seeded from CCIP API v2 messages (sourceChainSelector=10344971235874465080,
         // destChainSelector=16423721717087811551); refreshed periodically, as devnet public
@@ -394,7 +396,9 @@ describe('e2e command show EVM', () => {
         const OFFRAMP = 'offqSMQWgQud6WJz694LRzkeN5kMYpCHTpXQr3Rkcjm'
 
         const args = buildShowArgs(TX_HASH, [...BASE_SEPOLIA_RPCS, ...SOLANA_DEVNET_RPCS])
-        const result = await spawnCLI(args, 90000)
+        // the dest OffRamp lookup reads solana-devnet program accounts and history, which the
+        // public RPCs rate-limit (CI run 42867940482): a transient failure is retried once
+        const result = await spawnCLIRetryingTransient(args, 90000)
 
         assert.equal(result.exitCode, 0, result.stdout + result.stderr)
         const output = result.stdout

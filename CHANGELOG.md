@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-11-10
+
+- SDK (EVM): `getLogs` and receipt searches ignore a `0x0` `blockTimestamp` placeholder in RPC logs (`eth_getLogs` on Arbitrum Nitro chains, e.g. Arbitrum Sepolia and Robinhood Chain testnet) and read the block's timestamp instead. Before, such logs were dated 1970 and dropped by `startTime`, so `show --no-api` found no execution on these chains
+- SDK: `discoverOffRamp` (`show`, `manual-exec`) reports the lookups that failed on its way in `CCIPOffRampNotFoundError.context.skipped`, and the error is transient when one of them failed transiently (e.g. a rate-limited RPC), instead of a permanent not-found. `shouldRetry` also treats HTTP 429 / "Too Many Requests" errors as transient
 - Solana: a CCIP 2.0 lane with its sender allowlist enabled is in testing, and every method treats it as a 1.6 lane, as `getFee` and `sendMessage` already did. `getLaneFeatures` reports no fast finality (`FINALITY_FAST`/`FINALITY_SAFE`) for it. `getOnRampConfig` without `opts.version` reads its 1.6 lane config, and returns `laneVersion` with it. `getRequiredCCVs` and `estimateReceiveExecution` discover its 1.6 OffRamp, and the CLI `lane` command shows that 1.6 lane by default. A router without a 1.6 lane to the destination (a 2.0-only deployment) still uses its allowlisted 2.0 lane. A `SolanaChain` instance reuses each lane's `observe_dest_chain_v2` result for 10 min, so these methods agree on the lane version. After the allowlist is lifted, they use 2.0 with no SDK update
 - CLI: `send --wait` and `show --wait` poll pending token attestations. When the first execution appears, they wait up to 5 s for commit, attestation and executor data that is ready, then cancel the unfinished waits.
 - SDK: `getOffchainTokenData(request, { watch })` polls pending USDC and LBTC attestations until they are ready or `watch` aborts. Issuer requests time out after 30 s; in watch mode, dropped connections, 429/5xx responses and bodies that are not JSON are polled again.

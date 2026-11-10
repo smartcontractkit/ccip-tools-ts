@@ -533,7 +533,8 @@ export class CCIPOffRampNotFoundError extends CCIPError {
       `No matching offRamp found for "${onRamp}" on "${destNetwork}"`,
       {
         ...options,
-        isTransient: false,
+        // transient only when a lookup on the way failed transiently (e.g. a rate-limited RPC)
+        isTransient: options?.isTransient ?? false,
         context: { ...options?.context, onRamp, destNetwork },
       },
     )

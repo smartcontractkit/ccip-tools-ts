@@ -45,7 +45,7 @@ All transient — wait and retry.
 
 | Error | Code | When Thrown | Recovery |
 |-------|------|-------------|----------|
-| `CCIPOffRampNotFoundError` | `OFFRAMP_NOT_FOUND` | No OffRamp for source→dest lane | Verify lane exists on CCIP |
+| `CCIPOffRampNotFoundError` | `OFFRAMP_NOT_FOUND` | No OffRamp for source→dest lane | Verify lane exists on CCIP. When `isTransient` is true, a lookup failed on the way (see `context.skipped`): retry |
 | `CCIPLaneNotFoundError` | `LANE_NOT_FOUND` | Lane doesn't exist | Check CCIP lane configuration |
 | `CCIPLaneLatencyInsufficientDataError` | `LANE_LATENCY_INSUFFICIENT_DATA` | Too little history to estimate lane latency | Retry without `sourceTokenAddress` for the lane-wide estimate |
 | `CCIPOnRampRequiredError` | `ONRAMP_REQUIRED` | OnRamp address needed but not provided | Provide OnRamp address |

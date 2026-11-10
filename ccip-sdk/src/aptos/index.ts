@@ -653,9 +653,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     }
     if (!data_.blessed_merkle_roots) return
     let commits = (
-      convertKeysToCamelCase(
-        data_.blessed_merkle_roots.concat(data_.unblessed_merkle_roots),
-        (v) => (typeof v === 'string' && v.match(/^\d+$/) ? BigInt(v) : v),
+      convertKeysToCamelCase(data_.blessed_merkle_roots.concat(data_.unblessed_merkle_roots), (v) =>
+        typeof v === 'string' && v.match(/^\d+$/) ? BigInt(v) : v,
       ) as CommitReport[]
     ).map((c) => ({
       ...c,
