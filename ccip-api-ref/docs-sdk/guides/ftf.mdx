@@ -167,7 +167,7 @@ if (features.RATE_LIMITS) {
   console.log('Standard — available:', features.RATE_LIMITS.tokens, '/', features.RATE_LIMITS.capacity)
 }
 
-// FTF rate limits (only when FTF is enabled)
+// FTF rate limits (only when FTF and its bucket are enabled; otherwise FTF uses RATE_LIMITS)
 if (features.FAST_RATE_LIMITS) {
   const ftf = features.FAST_RATE_LIMITS
   console.log('FTF — available:', ftf.tokens, '/', ftf.capacity)

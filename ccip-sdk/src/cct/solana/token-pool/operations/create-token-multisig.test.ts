@@ -102,6 +102,20 @@ describe('CreateTokenMultisig (cct/solana)', () => {
       )
     })
 
+    it('derives the pool signer from poolProgramAddress', async () => {
+      const poolProgram = Keypair.generate().publicKey
+      const unsigned = await generate({ threshold: 1, poolProgramAddress: poolProgram.toBase58() })
+      const keys = unsigned.instructions[1]!.keys
+      const poolSigner = deriveTokenPoolSignerPda(poolProgram, new PublicKey(MINT))
+      const canonicalPoolSigner = deriveTokenPoolSignerPda(
+        new PublicKey(POOL_PROGRAM),
+        new PublicKey(MINT),
+      )
+
+      assert.equal(keys.filter((key) => key.pubkey.equals(poolSigner)).length, 1)
+      assert.ok(!keys.some((key) => key.pubkey.equals(canonicalPoolSigner)))
+    })
+
     it('adds additional signers', async () => {
       const signer = Keypair.generate().publicKey
       const unsigned = await generate({ additionalSigners: [signer.toBase58()] })
@@ -154,6 +168,16 @@ describe('CreateTokenMultisig (cct/solana)', () => {
           err instanceof CCTParamsInvalidError &&
           err.context.operation === 'createTokenMultisig' &&
           err.context.param === 'poolType',
+      )
+    })
+
+    it('rejects an invalid poolProgramAddress', async () => {
+      await assert.rejects(
+        () => generate({ threshold: 1, poolProgramAddress: 'not-a-pubkey' }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError &&
+          err.context.operation === 'createTokenMultisig' &&
+          err.context.param === 'poolProgramAddress',
       )
     })
 

@@ -20,6 +20,10 @@ export {
   ConfigureSiloedLockboxes,
 } from './configure-siloed-lockboxes.ts'
 export {
+  type DeployCrossChainPoolTokenParams,
+  DeployCrossChainPoolToken,
+} from './deploy-cross-chain-pool-token.ts'
+export {
   type DeployBurnToAddressTokenPoolParams,
   type DeployTokenPoolParams,
   type DeployableTokenPoolType,

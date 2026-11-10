@@ -212,6 +212,33 @@ describe('GetTokenPoolState (cct/evm token-pool query)', () => {
     assert.ok(!seen.includes(noArgLockBox), 'getLockBox() is not implemented by a siloed pool')
   })
 
+  it('reads a CrossChainPoolToken as its own token, with no lockbox', async () => {
+    const chain = stubChain({
+      typeAndVersion: 'CrossChainPoolToken 2.0.0',
+      reads: { ...READS, getToken: [POOL] },
+    })
+
+    const state = await new GetTokenPoolState().query(chain, { poolAddress: POOL })
+
+    assert.deepEqual(state, {
+      poolAddress: POOL,
+      version: '2.0.0',
+      type: 'CrossChainPoolToken',
+      token: POOL,
+      tokenDecimals: 18,
+      router: ROUTER,
+      owner: OWNER,
+      rmnProxy: RMN_PROXY,
+      rateLimitAdmin: RATE_LIMIT_ADMIN,
+      feeAdmin: FEE_ADMIN,
+      supportedChains: CHAINS,
+      finalityDepth: 10,
+      finalitySafe: false,
+    })
+    // burns and mints its own supply: no lockbox, so the field is absent rather than zeroed
+    assert.ok(!('lockBox' in state))
+  })
+
   it('reads router and both admin roles from the single getDynamicConfig call', async () => {
     let calls = 0
     const chain = stubChain({ reads: READS })

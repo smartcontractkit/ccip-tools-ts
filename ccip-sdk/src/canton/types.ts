@@ -103,6 +103,8 @@ export interface CantonActiveContract {
   signatories: string[]
   /** Raw Daml `createArgument` record (decode lazily with field helpers). */
   createArgument: unknown
+  /** Ledger offset at creation, when the source response provides it. */
+  createdAtOffset?: number
 }
 
 /**

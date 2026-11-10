@@ -11,6 +11,8 @@ import {
 import SILOED_LOCK_RELEASE_TOKEN_POOL_V2_0_0_BYTECODE from '../artifacts/bytecode/V2_0_0/siloed-lock-release-token-pool.ts'
 import * as cctEvm from '../index.ts'
 import {
+  type BurnMintTokenPoolType,
+  type LockReleaseTokenPoolType,
   type TokenPoolType,
   DEPLOYABLE_TOKEN_POOL_TYPES,
   TOKEN_POOL_INTERFACES,
@@ -49,6 +51,7 @@ describe('pool types', () => {
         'BurnMintWithLockReleaseFlagTokenPool',
         'BurnToAddressTokenPool',
         'BurnWithFromMintTokenPool',
+        'CrossChainPoolToken',
         'LockReleaseTokenPool',
         'SiloedLockReleaseTokenPool',
       ].sort(),
@@ -89,6 +92,8 @@ describe('pool types', () => {
     assert.equal(isLockReleaseTokenPoolType('BurnMintTokenPool'), false)
     // the anchored ^Burn rule: a burn pool naming lock-release is still BurnMint
     assert.equal(isLockReleaseTokenPoolType('BurnMintWithLockReleaseFlagTokenPool'), false)
+    // burns on lockOrBurn and mints on releaseOrMint, so every liquidity guard rejects it
+    assert.equal(isLockReleaseTokenPoolType('CrossChainPoolToken'), false)
     // the predicate must agree with getTokenPoolFamily for every supported type: every family but
     // BurnMint escrows liquidity, siloed included
     for (const type of TOKEN_POOL_TYPES)
@@ -100,8 +105,17 @@ describe('pool types', () => {
     assert.equal(getTokenPoolFamily('BurnWithFromMintTokenPool'), 'BurnMint')
     assert.equal(getTokenPoolFamily('BurnToAddressTokenPool'), 'BurnMint')
     assert.equal(getTokenPoolFamily('BurnMintWithLockReleaseFlagTokenPool'), 'BurnMint')
+    assert.equal(getTokenPoolFamily('CrossChainPoolToken'), 'BurnMint')
     assert.equal(getTokenPoolFamily('LockReleaseTokenPool'), 'LockRelease')
     assert.equal(getTokenPoolFamily('SiloedLockReleaseTokenPool'), 'SiloedLockRelease')
+  })
+
+  // `npm run typecheck` enforces it: the `@ts-expect-error` fails the build if
+  // LockReleaseTokenPoolType ever starts accepting CrossChainPoolToken.
+  it('types CrossChainPoolToken as a burn/mint pool, never a lock/release one', () => {
+    const _burn: BurnMintTokenPoolType = 'CrossChainPoolToken'
+    // @ts-expect-error -- it burns and mints its own supply, escrowing nothing
+    const _lockRelease: LockReleaseTokenPoolType = 'CrossChainPoolToken'
   })
 })
 
@@ -267,6 +281,25 @@ describe('parseTokenPoolVersion', () => {
             contractType: 'SiloedLockReleaseTokenPool',
             version,
           }),
+        (error: unknown) =>
+          error instanceof CCTContractVersionUnsupportedError && error.context.address === ADDR,
+        version,
+      )
+  })
+
+  it('gates CrossChainPoolToken on 2.0.0, the only version it shipped at', () => {
+    assert.deepEqual(
+      parseTokenPoolVersion({
+        address: ADDR,
+        contractType: 'CrossChainPoolToken',
+        version: '2.0.0',
+      }),
+      { type: 'CrossChainPoolToken', version: TokenPoolVersion.V2_0_0 },
+    )
+    for (const version of ['1.5.0', '1.5.1', '1.6.1'])
+      assert.throws(
+        () =>
+          parseTokenPoolVersion({ address: ADDR, contractType: 'CrossChainPoolToken', version }),
         (error: unknown) =>
           error instanceof CCTContractVersionUnsupportedError && error.context.address === ADDR,
         version,
@@ -699,7 +732,7 @@ describe('assertSiloedLockReleasePool', () => {
 
   it('rejects every other type, naming the operation', () => {
     const others = TOKEN_POOL_TYPES.filter((t) => t !== 'SiloedLockReleaseTokenPool')
-    assert.equal(others.length, 6)
+    assert.equal(others.length, 7)
     for (const type of others)
       assert.throws(
         () => assertSiloedLockReleasePool('isSiloed', ADDR, type),
@@ -825,6 +858,16 @@ describe('getTokenPoolInterface', () => {
         iface,
         version,
       )
+  })
+
+  it('resolves CrossChainPoolToken to its own Interface, only at 2.0.0', () => {
+    assert.notEqual(
+      getTokenPoolInterface('CrossChainPoolToken', TokenPoolVersion.V2_0_0),
+      getTokenPoolInterface('BurnMintTokenPool', TokenPoolVersion.V2_0_0),
+    )
+    assert.deepEqual(Object.keys(TOKEN_POOL_INTERFACES.CrossChainPoolToken), [
+      TokenPoolVersion.V2_0_0,
+    ])
   })
 
   it('resolves LockRelease to a different Interface than the BurnMint family', () => {
