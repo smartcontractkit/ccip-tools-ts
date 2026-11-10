@@ -60,6 +60,23 @@ const customErrors = [
 
 export const VersionedContractABI = parseAbi(['function typeAndVersion() view returns (string)'])
 export const TokenPoolAndProxyABI = parseAbi(['function getPreviousPool() view returns (address)'])
+/**
+ * ERC-8056 (Scaled UI Amount): the core `IScaledUIAmount` view, the required pending-multiplier
+ * extension, and the ERC-165 probe for detection.
+ */
+export const ScaledUIAmountABI = parseAbi([
+  'function supportsInterface(bytes4 interfaceId) view returns (bool)',
+  'function uiMultiplier() view returns (uint256)',
+  'function newUIMultiplier() view returns (uint256)',
+  'function effectiveAt() view returns (uint256)',
+])
+/** ERC-165 interface id of ERC-8056's `IScaledUIAmount`. */
+export const SCALED_UI_AMOUNT_INTERFACE_ID = '0xa60bf13d'
+/**
+ * ERC-165 interface id of ERC-8056's `IScaledUIAmountNewUIMultiplier` (`newUIMultiplier()` and
+ * `effectiveAt()`), which a token can leave out of `supportsInterface`.
+ */
+export const SCALED_UI_AMOUNT_PENDING_INTERFACE_ID = '0x4bd27648'
 /** The 4-byte tag a CCIP v2.0 verifier implementation's `ccvData` must start with. */
 export const VerifierABI = parseAbi(['function versionTag() view returns (bytes4)'])
 

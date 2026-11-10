@@ -15,6 +15,7 @@ import {
   convertKeysToCamelCase,
   decodeAddress,
   decodeOnRampAddress,
+  fromUIAmount,
   getAddressBytes,
   getBlockNumberAtOrAfter,
   getDataBytes,
@@ -31,6 +32,7 @@ import {
   sleep,
   snakeToCamel,
   toLeArray,
+  toUIAmount,
   withRetry,
 } from './utils.ts'
 import { type Logger, ChainFamily } from './index.ts'
@@ -1529,6 +1531,17 @@ describe('getSourceDecimalsFromExtraData', () => {
       for (const extraData of [undefined, '0x', word(6n), long(6n) + word(1n).slice(2)])
         assert.equal(getSourceTokenFromExtraData(extraData, ChainFamily.EVM), undefined)
     })
+  })
+})
+
+describe('toUIAmount / fromUIAmount', () => {
+  const ONE = 10n ** 18n
+  it('converts with an 18-decimal multiplier and rounds down', () => {
+    assert.equal(toUIAmount(10n, 2n * ONE), 20n)
+    assert.equal(fromUIAmount(20n, 2n * ONE), 10n)
+    assert.equal(toUIAmount(5n, ONE / 2n), 2n) // 2.5 rounds down
+    assert.equal(fromUIAmount(5n, 3n * ONE), 1n) // 1.66 rounds down: never above the balance
+    assert.equal(toUIAmount(fromUIAmount(5n, 3n * ONE), 3n * ONE) <= 5n, true)
   })
 })
 

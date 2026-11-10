@@ -39,6 +39,8 @@ import { type Ctx, Format } from './types.ts'
 import {
   formatDisplayAddress,
   formatDuration,
+  formatTokenAmount,
+  formatUIMultiplier,
   getCtx,
   logParsedError,
   omit,
@@ -233,6 +235,7 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
     symbol: info.symbol,
     name: info.name,
     decimals: info.decimals,
+    ...(info.uiMultiplier && { uiMultiplier: formatUIMultiplier(info.uiMultiplier) }),
     tokenPool: formatDisplayAddress(tokenPool, source.network.family),
     typeAndVersion: poolConfig.typeAndVersion,
     router: formatDisplayAddress(poolConfig.router, source.network.family),
@@ -287,7 +290,7 @@ async function listTokens(
   jsonFeeTokens?: unknown,
 ) {
   const tokens = await source.getSupportedTokens(registry)
-  const infos: { token: string; symbol: string; decimals: number; name?: string }[] = []
+  const infos: (TokenInfo & { token: string })[] = []
   const batch = 500
   for (let i = 0; i < tokens.length; i += batch) {
     const infos_ = (
@@ -354,13 +357,11 @@ async function listTokens(
   })
 }
 
-function prettyRateLimiter(
-  state: RateLimiterState,
-  { decimals, symbol }: { decimals: number; symbol: string },
-) {
+function prettyRateLimiter(state: RateLimiterState, info: TokenInfo) {
   if (!state) return null
+  const { decimals } = info
   return {
-    capacity: formatUnits(state.capacity, decimals) + ' ' + symbol,
+    capacity: formatTokenAmount(state.capacity, info),
     tokens: `${formatUnits(state.tokens, decimals)} (${Math.round((Number(state.tokens) / Number(state.capacity)) * 100)}%)`,
     rate: `${formatUnits(state.rate, decimals)}/s (0-to-full in ${formatDuration(Number(state.capacity / state.rate))})`,
     ...(state.tokens < state.capacity && {

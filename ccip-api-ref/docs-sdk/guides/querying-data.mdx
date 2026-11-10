@@ -91,6 +91,29 @@ const display = formatUnits(balance, tokenInfo.decimals)
 console.log(`${display} ${tokenInfo.symbol}`)
 ```
 
+#### Scaled UI amounts (ERC-8056)
+
+Some tokens, such as tokenized equities, show amounts scaled by a UI multiplier (ERC-8056), for example after a stock split. For these tokens on EVM chains, `getTokenInfo` also returns `uiMultiplier`. The multiplier has 18 decimals (`10n ** 18n` is 1x), and `next` is a scheduled change that has not taken effect yet. The token's constants are cached; the multiplier is read on every call.
+
+Transfers, fees and rate limits stay in raw units. Convert with `toUIAmount` and `fromUIAmount`; both round down, so a converted send never exceeds the raw balance:
+
+```typescript
+import { fromUIAmount, toUIAmount } from '@chainlink/ccip-sdk'
+import { formatUnits, parseUnits } from 'viem'
+
+const { decimals, uiMultiplier } = await chain.getTokenInfo(tokenAddress)
+if (uiMultiplier) {
+  // shares typed by the user -> raw amount to send
+  const amount = fromUIAmount(parseUnits('10', decimals), uiMultiplier.uiMultiplier)
+  // raw balance -> shares to display
+  const shares = formatUnits(toUIAmount(balance, uiMultiplier.uiMultiplier), decimals)
+  // read the token info again after a scheduled change takes effect
+  if (uiMultiplier.next) console.log('Multiplier changes at', uiMultiplier.next.effectiveAt)
+}
+```
+
+A multiplier that is zero or above 1e24 throws `CCIPUIMultiplierInvalidError`.
+
 ### Supported Tokens
 
 Query which tokens are configured for cross-chain transfers on a given router:
@@ -460,7 +483,8 @@ async function getTransferInfo(
 | Method | Called on | Data source | Purpose |
 |--------|----------|-------------|---------|
 | `networkInfo(selectorOrIdOrName)` | — (standalone) | Built-in registry | Resolve chain names, IDs, and selectors |
-| `getTokenInfo(token)` | Chain | RPC | Get token symbol, decimals, and name |
+| `getTokenInfo(token)` | Chain | RPC | Get token symbol, decimals, name, and ERC-8056 `uiMultiplier` |
+| `toUIAmount(amount, uiMultiplier)` / `fromUIAmount(uiAmount, uiMultiplier)` | — (standalone) | None | Convert between raw and ERC-8056 UI amounts |
 | `getSupportedTokens(registry)` | Chain | RPC | List tokens configured in TokenAdminRegistry |
 | `getTokenAdminRegistryFor(address)` | Chain | RPC | Resolve TokenAdminRegistry from Router/OnRamp/OffRamp |
 | `getFeeTokens(router)` | Chain | RPC | List accepted fee tokens with metadata |

@@ -96,6 +96,7 @@ export {
   CCIPTokenNotInRegistryError,
   CCIPTokenNotRegisteredError,
   CCIPTokenTransferPausedError,
+  CCIPUIMultiplierInvalidError,
 } from './specialized.ts'
 
 // Specialized errors - Contract Type

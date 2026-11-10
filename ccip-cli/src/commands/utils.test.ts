@@ -17,6 +17,8 @@ import {
   formatDisplayAddress,
   formatDisplayTxHash,
   formatToken,
+  formatTokenAmount,
+  formatUIMultiplier,
   parseTokenAmounts,
   prettyFormat,
   yieldResolved,
@@ -216,6 +218,31 @@ describe('formatToken', () => {
         ChainFamily.EVM,
       ),
       `7 (raw units) ${POOL}`,
+    )
+  })
+})
+
+describe('ERC-8056 UI amount formatting', () => {
+  const ONE = 10n ** 18n
+  const info = { symbol: 'TSLA', decimals: 6 }
+
+  it('formats the multiplier and a scheduled change', () => {
+    assert.equal(formatUIMultiplier({ uiMultiplier: 2n * ONE }), '2x')
+    assert.equal(formatUIMultiplier({ uiMultiplier: ONE / 2n }), '0.5x')
+    assert.equal(
+      formatUIMultiplier({
+        uiMultiplier: ONE,
+        next: { uiMultiplier: 3n * ONE, effectiveAt: 1_800_000_000 },
+      }),
+      '1x (3x from 2027-01-15 08:00:00)',
+    )
+  })
+
+  it('adds the UI amount at the current multiplier for ERC-8056 tokens only', () => {
+    assert.equal(formatTokenAmount(1_500_000n, info), '1.5 TSLA')
+    assert.equal(
+      formatTokenAmount(1_500_000n, { ...info, uiMultiplier: { uiMultiplier: 2n * ONE } }),
+      '1.5 TSLA (3.0 UI @ 2x)',
     )
   })
 })
