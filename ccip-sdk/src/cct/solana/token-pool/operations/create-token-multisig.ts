@@ -157,6 +157,7 @@ export async function deriveTokenMultisigAddress(
  * Creates an SPL Token multisig with threshold pool signer slots and independent signers.
  *
  * The multisig account is derived with `createAccountWithSeed`, so no new signer keypair is needed.
+ * An account someone funded at that address beforehand is topped up and allocated instead.
  */
 export class CreateTokenMultisig extends SolanaOperation<
   CreateTokenMultisigParams,
@@ -219,15 +220,40 @@ export class CreateTokenMultisig extends SolanaOperation<
       tokenProgram,
     )
     const lamports = await chain.connection.getMinimumBalanceForRentExemption(MULTISIG_SIZE)
-    const createIx = SystemProgram.createAccountWithSeed({
-      fromPubkey: payer,
-      newAccountPubkey: multisig,
-      basePubkey: authority,
-      seed,
-      space: MULTISIG_SIZE,
-      lamports,
-      programId: tokenProgram,
-    })
+    // anyone can fund a derived address first, which createAccountWithSeed then rejects: top up
+    // such an account and allocate it instead
+    const funded = await chain.connection.getAccountInfo(multisig)
+    const createIxs =
+      funded?.owner.equals(SystemProgram.programId) && !funded.data.length
+        ? [
+            ...(funded.lamports < lamports
+              ? [
+                  SystemProgram.transfer({
+                    fromPubkey: payer,
+                    toPubkey: multisig,
+                    lamports: lamports - funded.lamports,
+                  }),
+                ]
+              : []),
+            SystemProgram.allocate({
+              accountPubkey: multisig,
+              basePubkey: authority,
+              seed,
+              space: MULTISIG_SIZE,
+              programId: tokenProgram,
+            }),
+          ]
+        : [
+            SystemProgram.createAccountWithSeed({
+              fromPubkey: payer,
+              newAccountPubkey: multisig,
+              basePubkey: authority,
+              seed,
+              space: MULTISIG_SIZE,
+              lamports,
+              programId: tokenProgram,
+            }),
+          ]
     const initIx = createInitializeMultisigInstruction(
       multisig,
       signers,
@@ -237,8 +263,8 @@ export class CreateTokenMultisig extends SolanaOperation<
 
     return {
       family: ChainFamily.Solana,
-      instructions: [createIx, initIx],
-      mainIndex: 0,
+      instructions: [...createIxs, initIx],
+      mainIndex: createIxs.length - 1,
       multisigAddress: multisig.toBase58(),
     }
   }
