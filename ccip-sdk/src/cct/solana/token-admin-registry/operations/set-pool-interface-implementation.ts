@@ -2,7 +2,10 @@ import { PublicKey } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import type { TokenAccountResolution } from '../../../../solana/token-admin-registry.ts'
+import {
+  type TokenAccountResolution,
+  TOKEN_ACCOUNT_RESOLUTIONS,
+} from '../../../../solana/token-admin-registry.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
@@ -26,7 +29,6 @@ const ACCOUNT_RESOLUTION_ARGS = {
   Standard: { standard: {} },
   WithoutExtendedLookupTable: { withoutExtendedLookupTable: {} },
 } as const satisfies Record<TokenAccountResolution, object>
-const ACCOUNT_RESOLUTIONS = Object.keys(ACCOUNT_RESOLUTION_ARGS) as TokenAccountResolution[]
 
 /** Parameters shared by Solana TokenAdminRegistry `setPoolInterfaceImplementation`. */
 type SetPoolInterfaceImplementationParams = {
@@ -95,11 +97,11 @@ export class SetPoolInterfaceImplementation extends SolanaOperation<
     if (!([1, 2] as unknown[]).includes(params.interfaceVersion))
       throw new CCTParamsInvalidError(this.name, 'interfaceVersion', 'must be 1 or 2')
     const accountResolution = params.accountResolution ?? 'NoResolution'
-    if (!ACCOUNT_RESOLUTIONS.includes(accountResolution))
+    if (!TOKEN_ACCOUNT_RESOLUTIONS.includes(accountResolution))
       throw new CCTParamsInvalidError(
         this.name,
         'accountResolution',
-        `must be one of ${ACCOUNT_RESOLUTIONS.join(', ')}`,
+        `must be one of ${TOKEN_ACCOUNT_RESOLUTIONS.join(', ')}`,
       )
     if (accountResolution !== 'NoResolution' && params.interfaceVersion < 2)
       throw new CCTParamsInvalidError(

@@ -14,7 +14,8 @@ import { CCIPDataFormatUnsupportedError, CCIPTokenNotConfiguredError } from '../
  */
 export type TokenAccountResolution = 'NoResolution' | 'Standard' | 'WithoutExtendedLookupTable'
 
-const ACCOUNT_RESOLUTIONS: readonly TokenAccountResolution[] = [
+/** Every {@link TokenAccountResolution}, in `ResolutionType` variant order. */
+export const TOKEN_ACCOUNT_RESOLUTIONS: readonly TokenAccountResolution[] = [
   'NoResolution',
   'Standard',
   'WithoutExtendedLookupTable',
@@ -104,7 +105,7 @@ export function decodeTokenAdminRegistryConfig(
         : 'Standard'
     interfaceVersion = data[INTERFACE_VERSION_OFFSET]!
   } else if (data.length === TOKEN_ADMIN_REGISTRY_V3_SIZE) {
-    const resolution = ACCOUNT_RESOLUTIONS[data[ACCOUNT_RESOLUTION_OFFSET]!]
+    const resolution = TOKEN_ACCOUNT_RESOLUTIONS[data[ACCOUNT_RESOLUTION_OFFSET]!]
     if (!resolution) {
       throw new CCIPDataFormatUnsupportedError(
         `unknown TokenAdminRegistry account resolution ${data[ACCOUNT_RESOLUTION_OFFSET]}`,
