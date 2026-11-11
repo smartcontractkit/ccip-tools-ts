@@ -44,8 +44,9 @@ export type ExecuteEditChainConfigV2Result = TransactionResult
  * Replaces a CCIP 2.0 token pool's `ChainConfigV2` for a remote chain: the lane's allowed
  * finality, token transfer fees, and CCVs.
  *
- * @remarks Every field is replaced, and omitted ones reset to their defaults; read the current
- * config with `getTokenPoolConfig` to change only some. `authority` must be the pool owner and pays
+ * @remarks Every field is replaced, and omitted ones reset to their defaults, so pass `ccvConfig`
+ * again in full, or the pool's CCVs on the lane are cleared: `getTokenPoolConfig` returns the
+ * lane's allowed finality and fees, but not its CCVs. `authority` must be the pool owner and pays
  * for any growth of the account. The config must exist; create it with `initChainConfigV2`.
  */
 export class EditChainConfigV2 extends SolanaOperation<
