@@ -11,6 +11,14 @@ import type { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
+import {
+  type ExecuteOnboardTokenParams,
+  type ExecuteOnboardTokenResult,
+  type GenerateOnboardTokenParams,
+  type GenerateOnboardTokenResult,
+  type TokenOnboardingPlan,
+  OnboardToken,
+} from './onboarding/onboard-token.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
 import {
   type ExecuteAcceptAdminParams,
@@ -274,6 +282,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   readonly #initFastFinalityRateLimit = new InitFastFinalityRateLimit()
   readonly #setFastFinalityRateLimit = new SetFastFinalityRateLimit()
   readonly #withdrawFeeTokens = new WithdrawFeeTokens()
+  // Onboarding
+  readonly #onboardToken = new OnboardToken()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -2811,6 +2821,141 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Plans the CCIP 2.0 onboarding steps a token still needs, from on-chain state, without building
+   * any transaction. See {@link onboardToken} for the steps.
+   *
+   * @remarks Before the pool is deployed, the plan reads the token's registry under the Router
+   * the pool program assigns new pools.
+   *
+   * @see {@link generateUnsignedOnboardToken}
+   *
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid, or `authority` is not the mint
+   * authority, pool owner, token administrator, or (for a pool program without self-served pools)
+   * the program's upgrade authority where a remaining step needs it.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const { steps } = await cct.getTokenOnboardingPlan({ ...onboarding, payer: vault })
+   * console.log(steps.map(({ name }) => name)) // e.g. ['applyChainUpdates', 'initChainConfigV2', …]
+   * ```
+   */
+  getTokenOnboardingPlan(opts: GenerateOnboardTokenParams): Promise<TokenOnboardingPlan> {
+    return this.#onboardToken.plan(this.chain, opts)
+  }
+
+  /**
+   * Builds the unsigned transactions of the next CCIP 2.0 onboarding step, for an external signer
+   * such as a Squads vault. Land every returned transaction in order, then call again with the same
+   * params, until `step` is `undefined`. See {@link onboardToken} for the steps.
+   *
+   * @remarks Each call plans from on-chain state, so it returns the step after the last one that
+   * landed; one step at a time, since each operation validates the state the previous ones leave.
+   * `authority` (defaulting to `payer`) must be the token's mint authority: it deploys and
+   * registers the pool and becomes its owner and token administrator. A lookup table is created
+   * from a recent slot that Solana accepts for about 3 minutes, so for a vault awaiting approvals,
+   * pass a hot wallet as `lookupTablePayer`: it creates the table in a `createLookupTable` step it
+   * signs alone (the result's `payer`), and the vault fills and sets it in `setPool`. Whenever a
+   * result has a `lookupTableAddress`, pass it as `poolLookupTableAddress` from then on.
+   *
+   * @see {@link onboardToken}
+   * @see {@link getTokenOnboardingPlan}
+   *
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid, a precondition fails, or the
+   * next step's operation rejects the current state.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const onboarding: GenerateOnboardTokenParams = {
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChains: [{
+   *     remoteChainSelector: 16015286601757825753n,
+   *     remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *     remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *     remoteTokenDecimals: 18,
+   *     inboundRateLimiterConfig: { enabled: false },
+   *     outboundRateLimiterConfig: { enabled: false },
+   *     ccvConfig: { outboundCCVs: [committeeVerifier], inboundCCVs: [committeeVerifier] },
+   *   }],
+   *   payer: vault, // the Squads vault: mint authority, payer, and future pool owner
+   *   lookupTablePayer: hotWallet, // creates the pool lookup table, without the vault's delay
+   * }
+   * for (;;) {
+   *   const { step, transactions, payer, lookupTableAddress } =
+   *     await cct.generateUnsignedOnboardToken(onboarding)
+   *   if (!step) break
+   *   for (const tx of transactions) {
+   *     const serialized = await cct.serializeUnsignedTx(tx, payer)
+   *     // createLookupTable: sign with the hot wallet and send it now;
+   *     // otherwise: propose `serialized` to Squads and wait until it executes
+   *   }
+   *   if (lookupTableAddress) onboarding.poolLookupTableAddress = lookupTableAddress
+   * }
+   * ```
+   */
+  generateUnsignedOnboardToken(
+    opts: GenerateOnboardTokenParams,
+  ): Promise<GenerateOnboardTokenResult> {
+    return this.#onboardToken.generate(this.chain, opts)
+  }
+
+  /**
+   * Onboards a token on CCIP 2.0 with its mint authority's wallet, running every remaining step:
+   * 1. `deployTokenPool`, with the pool signer's token account (and `allowlist`, if any)
+   * 2. `registerAdmin` and `acceptAdmin`, making the wallet the token administrator, with
+   *    `upgradeTokenAdminRegistry` first for a registry an older Router created
+   * 3. `setPool`, after creating the pool's lookup table; it also replaces another pool the
+   *    registry points at
+   * 4. `applyChainUpdates`, connecting each remote chain with its pools and rate limits
+   * 5. `initChainConfigV2` per remote chain: allowed finality, fees and CCVs
+   * 6. `initFastFinalityRateLimit` per remote chain with `fastFinalityRateLimits`
+   * 7. `setPoolInterfaceImplementation` to the 2.0 interface, with `accountResolution`
+   * 8. `createTokenMultisig` and `setTokenAuthority` (burn-mint only), making the mint authority a
+   *    1-of-2 SPL multisig of the pool signer, which mints through it alone, and the wallet, which
+   *    keeps its own path to mint or move the mint authority
+   *
+   * @remarks Plans from on-chain state before every step, so a re-run after a failure resumes where
+   * it stopped. Steps already done are skipped; remote chains the pool already has are left as they
+   * are. The wallet must be the token's mint authority, and stays the pool owner and token
+   * administrator.
+   *
+   * @see {@link generateUnsignedOnboardToken}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid or a precondition fails.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTTxFailedError} If a step fails. Once the steps start, every error carries
+   * the steps that landed before it in `context.executedSteps`, and a failed `setPool` the lookup
+   * table it created in `context.lookupTableAddress`: pass it as `poolLookupTableAddress` to
+   * resume with it.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const { steps, poolAddress } = await cct.onboardToken({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   remoteChains: [{
+   *     remoteChainSelector: 16015286601757825753n,
+   *     remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *     remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *     remoteTokenDecimals: 18,
+   *     inboundRateLimiterConfig: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *     outboundRateLimiterConfig: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   }],
+   *   wallet,
+   * })
+   * ```
+   */
+  onboardToken(opts: ExecuteOnboardTokenParams): Promise<ExecuteOnboardTokenResult> {
+    return this.#onboardToken.execute(this.chain, opts)
+  }
+
+  /**
    * Reads an SPL token mint's metadata, program, supply, initialization state, and mint/freeze
    * authorities.
    *
@@ -2972,3 +3117,15 @@ export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'
 export type * from './token-pool/operations/index.ts'
 export type * from './token-admin-registry/operations/index.ts'
+export {
+  type ExecuteOnboardTokenParams,
+  type ExecuteOnboardTokenResult,
+  type ExecutedTokenOnboardingStep,
+  type GenerateOnboardTokenParams,
+  type GenerateOnboardTokenResult,
+  type TokenOnboardingPlan,
+  type TokenOnboardingRemoteChain,
+  type TokenOnboardingStep,
+  type TokenOnboardingStepName,
+  TOKEN_ONBOARDING_STEPS,
+} from './onboarding/onboard-token.ts'

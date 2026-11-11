@@ -43,6 +43,7 @@ const sidebars: SidebarsConfig = {
             'guides/cct/overview',
             'guides/cct/evm',
             'guides/cct/solana',
+            'guides/cct/solana-onboarding',
             'guides/cct/canton',
             {
               type: 'category',

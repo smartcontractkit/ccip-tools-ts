@@ -17,6 +17,8 @@ const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 const cct = SolanaTokenManager.fromChain(chain)
 ```
 
+To run the whole setup on CCIP 2.0 in one call, resuming where it stopped, see [Onboard a Token on Solana](./solana-onboarding). This guide runs each operation separately.
+
 The signed operations below take a `wallet`, an Anchor-compatible `Wallet` whose `publicKey` is the fee payer. See [Multi-Chain](../multi-chain) to construct `chain` and `wallet`.
 
 ## Required configuration
