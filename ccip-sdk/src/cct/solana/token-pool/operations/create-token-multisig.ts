@@ -136,6 +136,24 @@ function getMintAuthority(
 }
 
 /**
+ * Derives the multisig account `createTokenMultisig` creates for a seed: an account with seed
+ * under the mint authority (`base`), so the same seed always yields the same address.
+ * @returns The multisig address, and the account seed (the seed hashed with the mint).
+ */
+export async function deriveTokenMultisigAddress(
+  base: PublicKey,
+  seed: string,
+  tokenMint: PublicKey,
+  tokenProgram: PublicKey,
+): Promise<{ address: PublicKey; accountSeed: string }> {
+  const accountSeed = sha256(concat([toUtf8Bytes(seed), tokenMint.toBuffer()])).slice(2, 34)
+  return {
+    address: await PublicKey.createWithSeed(base, accountSeed, tokenProgram),
+    accountSeed,
+  }
+}
+
+/**
  * Creates an SPL Token multisig with threshold pool signer slots and independent signers.
  *
  * The multisig account is derived with `createAccountWithSeed`, so no new signer keypair is needed.
@@ -194,12 +212,12 @@ export class CreateTokenMultisig extends SolanaOperation<
     const signers = [...Array.from({ length: opts.threshold }, () => poolSigner), ...nonPoolSigners]
     validatePoolMultisigConfig(this.name, signers, poolSigner, opts.threshold)
 
-    const seedMaterial = opts.seed ?? hexlify(randomBytes(16)).slice(2)
-    const seedInput = concat([toUtf8Bytes(seedMaterial), tokenMint.toBuffer()])
-    const seedHash = sha256(seedInput)
-    const seed = seedHash.slice(2, 34)
-
-    const multisig = await PublicKey.createWithSeed(authority, seed, tokenProgram)
+    const { address: multisig, accountSeed: seed } = await deriveTokenMultisigAddress(
+      authority,
+      opts.seed ?? hexlify(randomBytes(16)).slice(2),
+      tokenMint,
+      tokenProgram,
+    )
     const lamports = await chain.connection.getMinimumBalanceForRentExemption(MULTISIG_SIZE)
     const createIx = SystemProgram.createAccountWithSeed({
       fromPubkey: payer,
