@@ -2037,7 +2037,8 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       return { ccipFee }
     }
 
-    const useCustom = finality !== 0
+    // 'finalized' encodes to 0 like a 0 depth: only a depth or 'safe' takes the fast-finality fee
+    const useCustom = encodeFinality(finality) !== 0
     const bps = useCustom
       ? tokenTransferFeeConfig.fastFinalityTransferFeeBps
       : tokenTransferFeeConfig.finalityTransferFeeBps
