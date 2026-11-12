@@ -163,6 +163,15 @@ describe('setObservers', () => {
     assert.deepEqual(exercise(tx).choiceArgument, { observers: [RL_ADMIN] })
   })
 
+  it('detaches the caller-owned observers array after validation', () => {
+    // Validation runs in prepare while encoding happens after ledger reads —
+    // the prepared params must not retain the caller's array.
+    const params = { ...POOL, ...SENDER, observers: [RL_ADMIN] }
+    const prepared = (op as unknown as { prepare(p: unknown): typeof params }).prepare(params)
+    params.observers.push('mallory::1220' + 'ff'.repeat(32))
+    assert.deepEqual(prepared.observers, [RL_ADMIN])
+  })
+
   it('rejects an empty list and malformed parties', async () => {
     await assert.rejects(
       op.generate(mockChain(), { ...POOL, ...SENDER, observers: [] }),
