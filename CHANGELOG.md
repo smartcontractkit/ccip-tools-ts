@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK: export `encodeAddressToAny` from the package root, next to `decodeAddress`. It encodes an address of any chain family the way CCIP messages carry it, e.g. a Canton party as `keccak256(partyId)`
+
 ## [1.17.0] - 2026-11-10
 
 - SDK (EVM): `getLogs` and receipt searches ignore a `0x0` `blockTimestamp` placeholder in RPC logs (`eth_getLogs` on Arbitrum Nitro chains, e.g. Arbitrum Sepolia and Robinhood Chain testnet) and read the block's timestamp instead. Before, such logs were dated 1970 and dropped by `startTime`, so `show --no-api` found no execution on these chains

@@ -122,6 +122,7 @@ export {
   UI_MULTIPLIER_ONE,
   bytesToBuffer,
   decodeAddress,
+  encodeAddressToAny,
   fromUIAmount,
   getDataBytes,
   getSourceTokenFromExtraData,
