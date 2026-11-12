@@ -361,7 +361,14 @@ function v3Url(baseUrl: string, path: string): URL {
 
 async function fetchV3Messages(
   ctx: TonV3Context & { v3BaseUrl: string },
-  q: { source: string; startUtime: number; startLt?: bigint; limit: number; offset?: number },
+  q: {
+    source: string
+    startUtime: number
+    startLt?: bigint
+    limit: number
+    offset?: number
+    opcode?: string
+  },
 ): Promise<TonV3Message[]> {
   const url = v3Url(ctx.v3BaseUrl, '/messages')
   url.searchParams.set('source', q.source)
@@ -369,6 +376,7 @@ async function fetchV3Messages(
   url.searchParams.set('direction', 'out')
   if (q.startUtime > 0) url.searchParams.set('start_utime', String(q.startUtime))
   if (q.startLt != null) url.searchParams.set('start_lt', q.startLt.toString())
+  if (q.opcode) url.searchParams.set('opcode', q.opcode)
   url.searchParams.set('sort', 'asc') // the index orders rows by created_at; page turns use start_utime (see generateV3Events)
   url.searchParams.set('limit', String(q.limit))
   if (q.offset) url.searchParams.set('offset', String(q.offset))
@@ -474,6 +482,17 @@ export async function openV3EventStream(
   cutoff: number,
   /** Resume strictly after this account message lt (a hint's `index`). */
   startLt?: bigint,
+  /**
+   * Read only the rows whose body starts with these 32 bits (`0x` + 8 hex digits):
+   * the index keeps them per message as `opcode` and filters on them server-side. A
+   * CCIP event body has no opcode (its topic is the ext-out destination, which the
+   * index drops), so they are the head of the event's FIRST FIELD — a usable filter
+   * for an event that starts with a known constant, e.g. `ExecutionStateChanged`
+   * and its uint64 `sourceChainSelector`. The scan then skips the account's other
+   * traffic instead of hydrating it. A wrong layout assumption LOSES rows silently:
+   * callers gate this on contract versions whose layout is verified.
+   */
+  opcode?: string,
 ): Promise<{ stream: AsyncGenerator<TonV3Event, void, undefined>; cutoff: number } | null> {
   const { v3BaseUrl } = ctx
   if (!v3BaseUrl) return null // fast path explicitly disabled by the caller
@@ -492,6 +511,7 @@ export async function openV3EventStream(
       source: acct.toRawString(),
       startUtime,
       ...(startLt != null ? { startLt } : {}),
+      ...(opcode ? { opcode } : {}),
       limit,
     })
     indexedTip = await ctx.getIndexedTip()
@@ -519,13 +539,16 @@ export async function openV3EventStream(
   // next poll. The probe tip is cached ~30s, so the clamp may sit below rows the
   // index would already serve — safe, just a slightly shorter prefix. No truncated
   // marker here: the completeness claim is bounded by construction.
+  cutoff = Math.min(cutoff, indexedTip)
   return {
     stream: generateV3Events(ctxV3, acct, firstPage, {
       startUtime,
       limit,
+      cutoff,
       ...(startLt != null ? { startLt } : {}),
+      ...(opcode ? { opcode } : {}),
     }),
-    cutoff: Math.min(cutoff, indexedTip),
+    cutoff,
   }
 }
 
@@ -533,7 +556,9 @@ async function* generateV3Events(
   ctx: TonV3Context & { v3BaseUrl: string },
   acct: Address,
   firstPage: TonV3Message[],
-  q: { startUtime: number; limit: number; startLt?: bigint },
+  /** `opcode` is carried on EVERY query (seed and turns alike), so the offset drain
+   * below counts the same result set it skips over. */
+  q: { startUtime: number; limit: number; cutoff: number; startLt?: bigint; opcode?: string },
 ): AsyncGenerator<TonV3Event, void, undefined> {
   // The index orders /messages rows by created_at, NOT by created_lt — lts can
   // regress across rows of the same second (parallel shards). Page turns therefore
@@ -555,18 +580,40 @@ async function* generateV3Events(
   // by the window's tx count (a few thousand entries at most).
   const metaStream = streamV3TxMeta(ctx, acct, q.startUtime)
   const metaByHash = new Map<string, TonV3Transaction>()
+  // The oracle's rows in the order served (account lt, ascending) and each one's
+  // position: its rank in the account's tx chain, i.e. how many consecutive txs a v2
+  // page must span to reach it from another (see hydrate).
+  const metaOrder: TonV3Transaction[] = []
+  const metaPos = new Map<string, number>()
   let metaDone = false
+  let metaFailure: { cause: unknown } | undefined
+  /** Loads the oracle's next row; false once it is exhausted. A failure ends the
+   * underlying stream for good, so it is kept and rethrown on every later pull: the
+   * row that then lacks its meta reports the real cause. */
+  const metaPull = async (): Promise<boolean> => {
+    if (metaFailure) throw metaFailure.cause
+    if (metaDone) return false
+    let next
+    try {
+      next = await metaStream.next()
+    } catch (err) {
+      metaFailure = { cause: err }
+      throw err
+    }
+    if (next.done) {
+      metaDone = true
+      return false
+    }
+    metaByHash.set(next.value.hash, next.value)
+    metaPos.set(next.value.hash, metaOrder.length)
+    metaOrder.push(next.value)
+    return true
+  }
   const metaLookup = async (hash: string): Promise<TonV3Transaction | undefined> => {
     for (;;) {
       const hit = metaByHash.get(hash)
       if (hit) return hit
-      if (metaDone) return undefined
-      const next = await metaStream.next()
-      if (next.done) {
-        metaDone = true
-        return undefined
-      }
-      metaByHash.set(next.value.hash, next.value)
+      if (!(await metaPull())) return undefined
     }
   }
   // The caller (openV3EventStream) already clamped the seal boundary to the
@@ -582,6 +629,67 @@ async function* generateV3Events(
   // and trips a mid-stream rewind. They must NOT be added to `seen` — it is keyed
   // by tx hash, and the hinted tx's own followers share that hash and must flow.
   const belowFloor = (msg: TonV3Message) => q.startLt != null && BigInt(msg.created_lt) < q.startLt
+  // Raw txs read ahead by hydrate, by tx hash; each is taken by its own row.
+  const rawByHash = new Map<string, Transaction>()
+  /**
+   * The raw transaction of an event row's tx (`meta`), which the row loop needs
+   * because the index drops the ext-out destination, i.e. the topic. One v2 call per
+   * event tx makes a busy account's scan cost one paced RPC per tx (a ton-testnet
+   * OffRamp: ~200 event txs among ~300 account txs a day), so this reads AHEAD: the
+   * account's tx chain is contiguous in v2, and one page anchored at a tx returns it
+   * with its predecessors. The page's later event txs that sit within
+   * {@link WALK_CHUNK} positions of this one, and at or below the seal boundary, come
+   * in the SAME page (anchored and inclusive, like streamAccountTxsByMeta's) and wait
+   * in `rawByHash` for their rows. A tx with no such follower keeps its single
+   * (lt, hash) fetch — a page would cost the same call for more bytes.
+   *
+   * Reading ahead needs the oracle to have served those positions: at most one more
+   * index page, which the scan reads anyway unless its consumer stops at this tx.
+   * It is strictly an optimization — on any failure, or when the page lacks this tx,
+   * the single fetch below answers, and that call owns the truncation contract.
+   */
+  const hydrate = async (
+    meta: TonV3Transaction,
+    rows: TonV3Message[],
+  ): Promise<Transaction | null> => {
+    const ready = rawByHash.get(meta.hash)
+    if (rawByHash.delete(meta.hash)) return ready!
+    try {
+      const pos = metaPos.get(meta.hash)!
+      while (metaOrder.length < pos + WALK_CHUNK) if (!(await metaPull())) break
+      const ahead = new Set<string>()
+      let last = pos
+      for (const row of rows) {
+        const hash = row.out_msg_tx_hash
+        if (!hash || seen.has(hash) || belowFloor(row)) continue
+        const at = metaPos.get(hash)
+        if (at === undefined || at <= pos || at >= pos + WALK_CHUNK) continue
+        if (metaOrder[at]!.mc_block_seqno > q.cutoff) continue
+        ahead.add(hash)
+        if (at > last) last = at
+      }
+      if (ahead.size) {
+        const anchor = metaOrder[last]!
+        let own: Transaction | undefined
+        // `to_lt` is exclusive server-side, so this tx is the page's oldest.
+        for (const tx of await ctx.provider.getTransactions(acct, {
+          limit: last - pos + 1,
+          lt: anchor.lt,
+          hash: anchor.hash,
+          to_lt: (BigInt(meta.lt) - 1n).toString(),
+          inclusive: true,
+        })) {
+          const hash = tx.hash().toString('base64')
+          if (hash === meta.hash) own = tx
+          else if (ahead.has(hash)) rawByHash.set(hash, tx)
+        }
+        if (own) return own
+      }
+    } catch (err) {
+      ctx.logger?.debug('TON v3 event stream: read-ahead failed, hydrating one tx:', err)
+    }
+    return ctx.provider.getTransaction(acct, meta.lt, meta.hash)
+  }
   let page = firstPage
   for (;;) {
     // The index sorts rows by created_at; restore lt/block order within the page.
@@ -607,7 +715,7 @@ async function* generateV3Events(
       let meta: TonV3Transaction | undefined, raw: Transaction | null | undefined
       try {
         meta = await metaLookup(txHash)
-        raw = meta ? await ctx.provider.getTransaction(acct, meta.lt, txHash) : undefined
+        raw = meta ? await hydrate(meta, page) : undefined
       } catch (err) {
         ctx.logger?.warn(`TON v3 event stream truncated (tx ${txHash}):`, err)
         yield { truncated: true }
@@ -654,6 +762,7 @@ async function* generateV3Events(
         startUtime,
         limit: q.limit,
         ...(q.startLt != null ? { startLt: q.startLt } : {}),
+        ...(q.opcode ? { opcode: q.opcode } : {}),
         ...(offset ? { offset } : {}),
       })
     // A hash-less row always counts as fresh: it must reach the loop above, which

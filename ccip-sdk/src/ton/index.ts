@@ -77,11 +77,29 @@ import {
   streamV3TxMeta,
   tonV3BaseUrl,
 } from './logs.ts'
+import { fetchDeployerCode, locateExecutionTxs, merkleRootAddress } from './merkle-root.ts'
 import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import { boundTonClientCaches } from './ton-cache.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import { crc32, lookupTxByRawHash, parseJettonContent, tonRateLimitProfile } from './utils.ts'
 export type { TONWallet, UnsignedTONTx } from './types.ts'
+
+/**
+ * How {@link TONChain.getExecutionReceipts} hands its v3 row filter (see
+ * openV3EventStream's `opcode`) to {@link TONChain.getLogs} through the base class:
+ * a module-private key, so it is not part of the public {@link LogFilter} and no
+ * other caller can set it.
+ */
+const TON_V3_OPCODE = Symbol('ccip.ton.v3Opcode')
+
+/**
+ * OffRamp versions whose `ExecutionStateChanged` layout (it starts with the uint64
+ * `sourceChainSelector`) and MerkleRoot message flow are verified: 1.6.0-1.6.2 and
+ * 1.7.0 in source, 1.6.2 on live ton-testnet. The execution-scan shortcuts depend on
+ * both, and a wrong assumption would LOSE receipts silently, so any other version
+ * keeps the plain scan until it is checked and added here.
+ */
+const EXEC_SHORTCUT_OFFRAMPS = /^OffRamp 1\.(6\.[0-2]|7\.0)$/
 
 /**
  * Type guard to check if an error is a TVM error with an exit code.
@@ -1189,6 +1207,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         },
         cutoff,
         sinceIndexLt != null ? sinceIndexLt + 1n : undefined,
+        // Set by getExecutionReceipts for its own ExecutionStateChanged-only filter.
+        opts.topics?.length === 1 && opts.topics[0] === 'ExecutionStateChanged'
+          ? (opts as { [TON_V3_OPCODE]?: string })[TON_V3_OPCODE]
+          : undefined,
       )
       if (v3) {
         // The returned cutoff is the scan's seal boundary: the requested cutoff
@@ -2121,6 +2143,98 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       family: ChainFamily.TON,
       ...unsigned,
     })
+  }
+
+  /** Deployable stub code per OffRamp (raw address), for derived contract addresses. */
+  private readonly deployerCode_ = new Map<string, Promise<Cell | undefined>>()
+
+  /**
+   * The OffRamp transactions that changed the execution state of a message under
+   * `merkleRoot`, found through the root's own MerkleRoot contract (see
+   * merkle-root.ts) instead of a scan of the OffRamp's history.
+   * @returns the transactions, oldest first (empty: nothing under the root was
+   *   executed yet), or undefined when the route cannot answer and the caller scans.
+   */
+  private async executionTxsViaMerkleRoot(
+    offRamp: string,
+    merkleRoot: string,
+  ): Promise<ChainTransaction[] | undefined> {
+    const acct = Address.parse(offRamp)
+    const key = acct.toRawString()
+    try {
+      let code$ = this.deployerCode_.get(key)
+      if (!code$) this.deployerCode_.set(key, (code$ = fetchDeployerCode(this, acct)))
+      const deployer = await code$
+      const txs =
+        deployer &&
+        (await locateExecutionTxs(this, acct, merkleRootAddress(acct, merkleRoot, deployer)))
+      // An unusable answer may mean the OffRamp's deployables were updated since the
+      // code was cached (addresses then derive from the new stub): re-read next time.
+      if (!txs) this.deployerCode_.delete(key)
+      else {
+        // In turn: neighbours share a masterchain block, whose lookup is then reused.
+        const out: ChainTransaction[] = []
+        for (const tx of txs) out.push(await this.buildChainTransaction(tx, acct))
+        return out
+      }
+    } catch (err) {
+      this.deployerCode_.delete(key)
+      this.logger.debug('TON MerkleRoot route unavailable, scanning instead:', err)
+    }
+    return undefined
+  }
+
+  /**
+   * {@inheritDoc Chain.getExecutionReceipts}
+   *
+   * On OffRamp versions whose layout is verified ({@link EXEC_SHORTCUT_OFFRAMPS}), TON
+   * avoids scanning the OffRamp's whole history where it can:
+   * - one-shot (no `watch`, no `since`) with `verifications` carrying the commit
+   *   report, the executions are read through the report's MerkleRoot contract — a
+   *   constant handful of RPCs, and an immediate answer for a message not executed
+   *   yet. These transactions are already committed to the account's chain, so they
+   *   are returned without the scan's one-block sealing delay;
+   * - otherwise, with a `sourceChainSelector`, an index-served scan asks the index
+   *   for that source chain's execution rows only.
+   * Anything else, and any failure of the first shortcut, is the plain scan.
+   */
+  override async *getExecutionReceipts(
+    opts: Parameters<Chain['getExecutionReceipts']>[0],
+  ): AsyncIterableIterator<CCIPExecution> {
+    const { verifications, sourceChainSelector, messageId, sequenceNumber } = opts
+    let verified = false
+    try {
+      verified = EXEC_SHORTCUT_OFFRAMPS.test((await this.typeAndVersion(opts.offRamp))[2])
+    } catch (err) {
+      this.logger.debug('TON getExecutionReceipts: OffRamp version unknown, plain scan:', err)
+    }
+    if (verified && !opts.watch && !opts.since && verifications && 'report' in verifications) {
+      const txs = await this.executionTxsViaMerkleRoot(
+        opts.offRamp,
+        verifications.report.merkleRoot,
+      )
+      for (const tx of txs ?? []) {
+        if (opts.startBlock != null && tx.blockNumber < opts.startBlock) continue
+        if (opts.startTime != null && tx.timestamp < opts.startTime) continue
+        for (const exec of await this.getExecutionReceiptsInTx(tx, {
+          sourceChainSelector,
+          messageId,
+          sequenceNumber,
+        })) {
+          yield exec
+          if (exec.receipt.state === ExecutionState.Success) return
+        }
+      }
+      if (txs) return
+    }
+    yield* super.getExecutionReceipts(
+      verified && sourceChainSelector
+        ? ({
+            ...opts,
+            [TON_V3_OPCODE]: `0x${(sourceChainSelector >> 32n).toString(16).padStart(8, '0')}`,
+          } as typeof opts)
+        : opts,
+    )
   }
 
   /**

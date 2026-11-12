@@ -643,10 +643,18 @@ const SEPOLIA_SELECTOR = 16015286601757825753n
 
 // Every TON fixture below is selected at RUNTIME through the same default CCIP API
 // the CLI resolves ids with: the pinned Jan-2026 sends are gone, and `show` needs a
-// recent send on each direction to print the request and receipt sections (the
-// EVM-to-TON direction also prints the commit). TON sends can be days apart; Sepolia
-// retains receipts beyond the 48h base-sepolia limit.
-const TON_FIXTURE_MAX_AGE_MS = 72 * 3600_000
+// send on each direction to print the request and receipt sections (the EVM-to-TON
+// direction also prints the commit).
+//
+// How old a fixture may be depends on what `show` reads from TON. EVM to TON, it
+// scans the TON OffRamp for the commit and the receipt, and the public TON v2
+// endpoint serves a transaction for about two days (reads start failing with
+// "lt not in db" after that). TON to EVM by message id, the request comes from the
+// API and the receipt from Sepolia by hash, so nothing is read from old TON
+// transactions — and TON testnet sends can be many days apart (a 72h bound left the
+// suite without a fixture whenever the lane paused longer).
+const EVM_TO_TON_FIXTURE_MAX_AGE_MS = 72 * 3600_000
+const TON_TO_EVM_FIXTURE_MAX_AGE_MS = 30 * 24 * 3600_000
 
 /**
  * Picks a recent executed send on a TON testnet lane. Only SUCCESS messages qualify
@@ -654,7 +662,11 @@ const TON_FIXTURE_MAX_AGE_MS = 72 * 3600_000
  * multi-message tx takes `show`'s "display all" early return, which never prints the
  * commit/receipt sections these tests assert on).
  */
-async function selectFreshTonFixture(sourceChainSelector: bigint, destChainSelector: bigint) {
+async function selectFreshTonFixture(
+  sourceChainSelector: bigint,
+  destChainSelector: bigint,
+  maxAgeMs: number,
+) {
   const api = CCIPAPIClient.fromUrl(undefined, {
     // keep the test output clean; real problems still surface
     logger: { debug: () => {}, info: () => {}, warn: console.warn, error: console.error },
@@ -662,7 +674,7 @@ async function selectFreshTonFixture(sourceChainSelector: bigint, destChainSelec
   const page = await api.searchMessages({ sourceChainSelector, destChainSelector }, { limit: 50 })
   for (const msg of page.data) {
     if (msg.status !== MessageStatus.Success) continue
-    if (Date.now() - Date.parse(msg.sendTimestamp) > TON_FIXTURE_MAX_AGE_MS) continue
+    if (Date.now() - Date.parse(msg.sendTimestamp) > maxAgeMs) continue
     const inTx = await api.searchMessages(
       { sourceTransactionHash: msg.sendTransactionHash },
       { limit: 2 },
@@ -672,7 +684,7 @@ async function selectFreshTonFixture(sourceChainSelector: bigint, destChainSelec
     return { txHash, messageId, origin, sender, receiver }
   }
   throw new Error(
-    `no single-message SUCCESS send younger than 72h among the CCIP API's ${page.data.length} ` +
+    `no single-message SUCCESS send younger than ${maxAgeMs / 3600_000}h among the CCIP API's ${page.data.length} ` +
       `newest ${sourceChainSelector} -> ${destChainSelector} messages`,
   )
 }
@@ -683,9 +695,17 @@ describe('e2e command show TON', () => {
   let tonToEvm$: ReturnType<typeof selectFreshTonFixture> | undefined
   let evmToTon$: ReturnType<typeof selectFreshTonFixture> | undefined
   const tonToEvmFixture = () =>
-    (tonToEvm$ ??= selectFreshTonFixture(TON_TESTNET_SELECTOR, SEPOLIA_SELECTOR))
+    (tonToEvm$ ??= selectFreshTonFixture(
+      TON_TESTNET_SELECTOR,
+      SEPOLIA_SELECTOR,
+      TON_TO_EVM_FIXTURE_MAX_AGE_MS,
+    ))
   const evmToTonFixture = () =>
-    (evmToTon$ ??= selectFreshTonFixture(SEPOLIA_SELECTOR, TON_TESTNET_SELECTOR))
+    (evmToTon$ ??= selectFreshTonFixture(
+      SEPOLIA_SELECTOR,
+      TON_TESTNET_SELECTOR,
+      EVM_TO_TON_FIXTURE_MAX_AGE_MS,
+    ))
 
   it('should show complete CCIP transaction details TON to EVM', { timeout: 210000 }, async () => {
     const fixture = await tonToEvmFixture()

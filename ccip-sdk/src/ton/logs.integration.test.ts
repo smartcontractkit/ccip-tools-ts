@@ -1,52 +1,62 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 
-import { Address } from '@ton/core'
-
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
-import { CCIPError, CCIPLogsStreamInconsistentError } from '../errors/index.ts'
-import { createRateLimitedFetch } from '../fetch.ts'
-import { isTransientHttpStatus } from '../http-status.ts'
 import { NetworkType } from '../networks.ts'
 import type { ChainLog } from '../types.ts'
-import { sleep } from '../utils.ts'
-import { fetchV3IndexedTip, tonV3BaseUrl } from './logs.ts'
-import { crc32, tonRateLimitProfile } from './utils.ts'
+import {
+  type TonIndex,
+  newestLogRows,
+  patientIndexFetch,
+  txBlock,
+} from './live-fixtures.integration.test.ts'
+import { tonV3BaseUrl } from './logs.ts'
+import { crc32 } from './utils.ts'
 import { TONChain } from './index.ts'
 
 await useResource(['ton-testnet'])
 
 /**
- * Live-testnet coverage of the three getLogs scan shapes the ccip-o11y Temporal
- * pollers actually drive (pollConfigs/pollRequests:ton-testnet, observed 2026-08):
+ * Live-testnet coverage of the getLogs scan shapes the ccip-o11y Temporal pollers
+ * drive (pollConfigs/pollRequests:ton-testnet), on the lane's active OffRamp:
  *
- *  A. startTime-only (the scan window, watermark 0) on a busy address with unmatched
- *     topics — the cold backfill. Must take the TonCenter v3 index fast path: one
- *     /messages page + cached /masterchainInfo tip + paged /transactions meta — never
- *     the per-tx v2 chain walk.
- *  A2. startTime-only with a MATCHING topic — same fast path, and it actually yields:
- *     real logs hydrated from v2 by (lt, hash) after the sparse index seeding.
- *  B. startBlock at the window floor, no hint — the v2 walk: paginates the account's tx chain
- *     over the window and streams matches progressively (first yield in seconds).
- *     Deep windows (floor older than ~4h, estimated live from the account's lt rate)
- *     hydrate in bounded ≤100-tx v2 pages driven by the index's ordered lt list —
- *     memory stays O(batch) at any depth; shallow scans stay on plain v2 pagination.
- *  C. A `since` hint from earlier in the window — the walk resumes exclusively off the cursor; the
- *     hinted transaction is not re-streamed (the exclusive lt cursor reaches the wire
- *     as `to_lt`). The lt list itself is one paged index read; hydration stays on v2.
- *  D. A quiet (dormant) address — the v3 seed answers "no events since T" in exactly
- *     one /messages call (plus the cached tip), never touching the v2 walk.
+ *  A.  startTime-only, topics that match nothing — the cold backfill. Served by the
+ *      TonCenter v3 index (the fast path): /messages rows, the tx list for block
+ *      numbers, batched v2 hydration — never a walk of the account's tx chain.
+ *  A2. startTime-only with a MATCHING topic — same path, and it yields real logs.
+ *  B.  startBlock floor — the v2 walk; on a deep window it is driven by the index's
+ *      ordered tx list (bounded pages, index-stamped block numbers).
+ *  C.  `since` hint without its per-log index — resumes on the walk, tx-exclusive.
+ *  C2. `since` hint with its index — resumes on the index, message-granular.
+ *  D.  A dormant address — "no events since T" in exactly one index call.
  *
- * The source OnRamp can be quiet for days; its active destination OffRamp supplies fresh
- * execution events for these generic scan-shape assertions. The deep-walk window is
- * anchored at RUNTIME: the pollers' 24h lookback, widened (bounded) to end shortly
- * after the newest on-chain event, because organic testnet activity pauses for days
- * and a fixed day window then holds no log to shape the hydration assertions on. The
- * `since` cursor comes from a short slice near the newest event, read through the
- * SDK's own startTime scan. Assertions are on shapes and call patterns, not exact
- * counts. A scan that never comes back clean within the retry budget fails with the
- * last error and the wire counters.
+ * WINDOW. Every scan on the OffRamp runs over ONE window pinned around known log
+ * transactions of the account, found in a single index call (see
+ * live-fixtures.integration.test.ts). Two facts of ton-testnet bound its age:
+ *  - the public v2 endpoint serves a transaction for about two days (measured: every
+ *    read fine up to 48h, about half failing with "lt not in db" from 60h, all of
+ *    them after a week), and the SDK needs v2 for a log's topic;
+ *  - the SDK takes B's deep-window path for floors it ESTIMATES to be over ~4h old,
+ *    from the account's recent lt rate, and that estimate can be a few times off.
+ * So the window is the newest activity between 25h and 48h old: deep for sure, still
+ * served, and ended by a block the index ingested long ago — the scans see the same
+ * rows on every run of the day, with no near-tip race and no retry loop. A scan that
+ * misbehaves fails the test with what it returned and what it put on the wire.
+ * Without activity in that band the window is the newest activity of any age (B then
+ * asserts results only, not the deep path's wire shape); activity older than what v2
+ * serves cannot be scanned at all, and the suite says so.
+ *
+ * The scans match on every log an OffRamp emits while it commits and executes, not
+ * on one lane's executions: the lane can be quiet for days, while price commits
+ * alone keep the account active.
+ *
+ * Because A2, B, C and C2 read the SAME window through different paths, B/C/C2 are
+ * asserted against A2's result log for log, not just on their shape.
+ *
+ * Throttling: the v3 index calls go through a fetch that waits out 429s request by
+ * request (see patientIndexFetch); the wire counters below count ANSWERED requests,
+ * so a throttled-and-retried request counts once.
  *
  * Run against any TON v2 endpoint; defaults to the public index (paced, so slow):
  *   node --test src/ton/logs.integration.test.ts
@@ -60,6 +70,7 @@ const VERBOSE = !!process.env.VERBOSE
 const LOGGER = VERBOSE ? console : { ...console, debug: () => {} }
 
 const ONRAMP = 'EQDioi9PI32Wo1oBwkUp0pj1AhwvAHiKiZCfgrr0iDqu3lTA'
+const SEPOLIA_SELECTOR = 16015286601757825753n
 const CONFIG_TOPICS = [
   'ConfigSet',
   'DestChainSelectorAdded',
@@ -68,42 +79,49 @@ const CONFIG_TOPICS = [
   'SourceChainConfigUpdated',
   'DynamicConfigSet',
 ]
-const EVENT_TOPIC = 'ExecutionStateChanged'
-const EVENT_TOPIC_HASH = crc32(EVENT_TOPIC)
+/** What an OffRamp emits while it commits and executes (a commit transaction emits
+ * the first two). */
+const EVENT_TOPICS = ['OCR3Base_Transmitted', 'CommitReportAccepted', 'ExecutionStateChanged']
+const EVENT_TOPIC_HASHES = EVENT_TOPICS.map((topic) => crc32(topic))
 const HOUR_S = 3_600
-const DAY_S = 86_400
-/** Deepest the scan window is widened to when the lane has been quiet for days. */
-const MAX_LOOKBACK_S = 3 * DAY_S
-/** The widened window ends this long after the newest event the index knows. */
-const ACTIVITY_MARGIN_S = 6 * HOUR_S
+const DAY_S = 24 * HOUR_S
+/** Age band of the preferred window (see WINDOW above): at least this old ... */
+const DEEP_AGE_S = 25 * HOUR_S
+/** ... and not past the age the public v2 endpoint serves transactions reliably. */
+const V2_RETENTION_S = 48 * HOUR_S
+/** The window spans this many log-carrying transactions. */
+const WINDOW_TXS = 4
 
 // A dormant testnet OffRamp (from the older skipped integration suite): no
 // external-out messages in months — the "quiet address" case. Test D fails with a
 // clear message if it ever wakes up.
 const QUIET_ADDR = 'EQBoGLxL52YDV1OwcaDLcNHyGVOxtcHQDxFb0WqVUQeyRHBd'
 
-/** Counts requests by class, observing the SDK's own rate-limited fetches at the
- * globalThis.fetch seam (createRateLimitedFetch calls through it). */
+/** Counts ANSWERED requests by class, observing the SDK's own rate-limited fetches
+ * at the globalThis.fetch seam (createRateLimitedFetch calls through it). A request
+ * answered 429 is retried by the SDK and counted only once it is served. */
 function spyFetch() {
   const calls = {
     v3messages: 0,
     v3transactions: 0,
     v3tip: 0,
-    /** v2 getTransactions carrying a `to_lt` floor = tx-chain WALK pages. NB
-     * `@ton/ton`'s getTransaction(lt, hash) hydration hits the same method name with
-     * limit:1 and no to_lt, so only to_lt-carrying calls count as pagination. */
-    walkPages: 0,
-    /** `to_lt` params seen on v2 getTransactions calls (the walk's wire cursor). */
-    walkToLts: [] as string[],
-    /** v2 getTransactions with limit:1 and no `to_lt` — the hydration of event txs
-     * by (lt, hash) on the fast path (and of walked txs on the v2 path). */
+    /** v2 getTransactions with a `to_lt` floor and NO (lt, hash) anchor: the first
+     * page of a plain tx-chain walk from the account's tip. */
+    walkStarts: 0,
+    /** v2 getTransactions with a `to_lt` floor AND an (lt, hash) anchor: a bounded
+     * page of consecutive txs — the fast path's batched hydration, the index-driven
+     * walk's pages, and the plain walk's continuation pages. */
+    anchoredPages: 0,
+    /** `to_lt` values seen on v2 getTransactions calls (the walk's wire cursor). */
+    toLts: [] as string[],
+    /** v2 getTransactions with limit:1 and no `to_lt`: one event tx hydrated by
+     * (lt, hash). */
     v2Hydrate: 0,
-    /** v2 lookupBlock/getBlockHeader calls — the per-tx seqno-resolution cost that the
-     * v3 meta oracle replaces on deep walks (a few per scan are unrelated: floor
-     * resolution, the endBlock cap). */
+    /** v2 lookupBlock/getBlockHeader: block-number resolution over v2. The fast path
+     * makes none (the index stamps block numbers); a walk makes a few for its floor
+     * and cap, and one or more per tx when the index's tx list does not drive it. */
     v2SeqnoLookups: 0,
-    /** HTTP 429 responses observed on any fetch: the public index's shared-egress
-     * storm signature; retries after a 429 wait longer. */
+    /** HTTP 429 answers (each retried by the SDK's fetch). */
     rateLimited: 0,
   }
   const orig = globalThis.fetch
@@ -112,9 +130,10 @@ function spyFetch() {
     init?: Parameters<typeof fetch>[1],
   ) => {
     const url = String(input instanceof Request ? input.url : input)
-    if (url.includes('/api/v3/messages')) calls.v3messages++
-    else if (url.includes('/api/v3/transactions')) calls.v3transactions++
-    else if (url.includes('/api/v3/masterchainInfo')) calls.v3tip++
+    let count: (() => void) | undefined
+    if (url.includes('/api/v3/messages')) count = () => calls.v3messages++
+    else if (url.includes('/api/v3/transactions')) count = () => calls.v3transactions++
+    else if (url.includes('/api/v3/masterchainInfo')) count = () => calls.v3tip++
     else {
       // Bodies arrive in several shapes (string / bytes / Request payload — the
       // axios fetch adapter differs); normalize before sniffing the JSON-RPC method.
@@ -130,15 +149,20 @@ function spyFetch() {
         try {
           const m = JSON.parse(bodyText) as {
             method?: string
-            params?: { to_lt?: string; limit?: number }
+            params?: { to_lt?: string; lt?: string; limit?: number }
           }
-          if (m.method === 'getTransactions' && m.params?.to_lt != null) {
-            calls.walkPages++
-            calls.walkToLts.push(String(m.params.to_lt))
-          } else if (m.method === 'getTransactions' && m.params?.limit === 1) {
-            calls.v2Hydrate++
+          const params = m.params
+          if (m.method === 'getTransactions' && params?.to_lt != null) {
+            const toLt = String(params.to_lt)
+            count = () => {
+              calls.toLts.push(toLt)
+              if (params.lt != null) calls.anchoredPages++
+              else calls.walkStarts++
+            }
+          } else if (m.method === 'getTransactions' && params?.limit === 1) {
+            count = () => calls.v2Hydrate++
           } else if (m.method === 'lookupBlock' || m.method === 'getBlockHeader') {
-            calls.v2SeqnoLookups++
+            count = () => calls.v2SeqnoLookups++
           }
         } catch {
           // not a JSON-RPC body — ignore
@@ -147,462 +171,289 @@ function spyFetch() {
     }
     const res = await orig(input, init)
     if (res.status === 429) calls.rateLimited++
+    else count?.()
     return res
   }
   return { calls, restore: () => (globalThis.fetch = orig) }
 }
 type Calls = ReturnType<typeof spyFetch>['calls']
 
-/** One-line counter snapshot of an attempt, for failure diagnostics. */
-const callsDiag = ({ walkToLts: _, ...counts }: Calls) =>
-  `calls: ${Object.entries(counts)
+/** One-line counter snapshot, for assertion messages. */
+const diag = ({ toLts: _, ...counts }: Calls) =>
+  Object.entries(counts)
     .map(([key, value]) => `${key}=${value}`)
-    .join(' ')}`
+    .join(' ')
 
-/** Live scans retry until an attempt's shapes hold (each test's clean condition):
- * the shared public index 429-storms shared-egress networks in minute-scale
- * bursts, and the index can lag the v2 tip in the same window — both transient.
- * Spacing grows so a storm is ridden out without hammering the index further. A
- * 429'd attempt waits longer: the SDK already paces this endpoint, so a 429 means
- * something ELSE on the same egress spends the keyless per-IP budget, and only
- * waiting out the window clears it. */
-const RETRY_SPACING_MS = [10_000, 20_000, 40_000]
-const THROTTLED_SPACING_MS = [20_000, 45_000, 90_000]
-/** Wall-clock a single test spends retrying before it fails. */
-const RETRY_BUDGET_MS = 240_000
-const MAX_SCAN_ATTEMPTS = RETRY_SPACING_MS.length + 1
+/** Runs one scan to its end under a fresh wire spy. */
+async function spied(scan: AsyncIterable<ChainLog>): Promise<{ logs: ChainLog[]; calls: Calls }> {
+  const spy = spyFetch()
+  try {
+    const logs: ChainLog[] = []
+    for await (const log of scan) logs.push(log)
+    LOGGER.debug(`scan: ${logs.length} logs; ${diag(spy.calls)}`)
+    return { logs, calls: spy.calls }
+  } finally {
+    spy.restore()
+  }
+}
 
-/** Transport degradation (throttling, 5xx, network blips, a mid-stream index
- * self-contradiction) — retried. Anything else is a bug and fails at once. */
-function isTransient(err: unknown): boolean {
-  if (err instanceof CCIPError) return err.isTransient
-  // AxiosError from @ton/ton's HttpApi: the response status is the verdict.
-  const status = Number((err as { response?: { status?: unknown } } | null)?.response?.status)
-  if (status > 0) return isTransientHttpStatus(status)
-  return /\b(429|rate.?limit|timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|fetch failed|socket)/i.test(
-    String((err as Error | null)?.message),
+/** Identity of a log across scan paths. */
+const ids = (logs: ChainLog[]) => logs.map((l) => `${l.transactionHash}#${l.index}`)
+
+/** The index answered the scan: no tx-chain walk, no block-number resolution over v2. */
+function assertServedByIndex(calls: Calls) {
+  assert.ok(calls.v3messages >= 1, `the index's /messages served the scan (${diag(calls)})`)
+  assert.equal(calls.walkStarts, 0, `no tx-chain walk (${diag(calls)})`)
+  assert.equal(
+    calls.v2SeqnoLookups,
+    0,
+    `block numbers come from the index, not from v2 lookups (${diag(calls)})`,
   )
-}
-
-/** Collects up to `max` logs. The SDK ends a stream on an index self-contradiction
- * after a valid prefix: the prefix is returned with `truncated` set. */
-async function collect(logs: AsyncIterable<ChainLog>, max = Infinity) {
-  const t0 = Date.now()
-  const out = {
-    logs: [] as ChainLog[],
-    truncated: false,
-    firstYieldMs: undefined as number | undefined,
-  }
-  try {
-    for await (const log of logs) {
-      out.firstYieldMs ??= Date.now() - t0
-      out.logs.push(log)
-      if (out.logs.length >= max) break
-    }
-  } catch (err) {
-    if (!(err instanceof CCIPLogsStreamInconsistentError) || !out.logs.length) throw err
-    out.truncated = true
-  }
-  return out
-}
-
-/**
- * Unix time of the newest external-out event the TonCenter v3 index has for
- * `address` — the anchor the scan window is widened to. One /messages page, no v2
- * hydration. Returns undefined when the index is unavailable (a v2-only endpoint):
- * the window then keeps the pollers' plain 24h lookback.
- */
-async function fetchNewestV3EventTime(address: string): Promise<number | undefined> {
-  try {
-    const base = new URL(V3_BASE)
-    const url = new URL(`${base.pathname.replace(/\/+$/, '')}/messages`, base)
-    for (const [key, value] of base.searchParams) url.searchParams.append(key, value)
-    url.searchParams.set('source', Address.parse(address).toRawString())
-    url.searchParams.set('destination', 'null') // external-out ("log") messages only
-    url.searchParams.set('direction', 'out')
-    url.searchParams.set('sort', 'desc')
-    url.searchParams.set('limit', '1')
-    const fetchV3 = createRateLimitedFetch(tonRateLimitProfile(V3_BASE, { maxRetries: 3 }), {
-      logger: LOGGER,
-    })
-    const res = await fetchV3(url, { headers: { Accept: 'application/json' } })
-    if (!res.ok) return undefined
-    const { messages } = (await res.json()) as { messages?: { created_at?: unknown }[] }
-    const created = Number(messages?.[0]?.created_at)
-    return Number.isFinite(created) && created > 0 ? created : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Runs `scan` (under a fresh spyFetch) until `problem` returns undefined for an
- * attempt, retrying transient errors and unclean shapes with growing spacing.
- * Fails with the last error or problem and the wire counters when the attempts or
- * the retry budget run out.
- */
-async function runAttempts<T>(
-  scan: () => Promise<T>,
-  problem: (result: T, calls: Calls) => string | undefined,
-): Promise<{ result: T; calls: Calls; elapsedMs: number; attempts: Calls[] }> {
-  const startedAt = Date.now()
-  const attempts: Calls[] = []
-  for (let attempt = 0; ; attempt++) {
-    const spy = spyFetch()
-    const t0 = Date.now()
-    let why: string | undefined
-    try {
-      const result = await scan()
-      why = problem(result, spy.calls)
-      if (why === undefined)
-        return {
-          result,
-          calls: spy.calls,
-          elapsedMs: Date.now() - t0,
-          attempts: [...attempts, spy.calls],
-        }
-    } catch (err) {
-      if (!isTransient(err)) throw err
-      why = `transient error: ${err instanceof Error ? err.message : JSON.stringify(err)}`
-    } finally {
-      spy.restore()
-    }
-    attempts.push(spy.calls)
-    const ladder = spy.calls.rateLimited ? THROTTLED_SPACING_MS : RETRY_SPACING_MS
-    const wait = ladder[Math.min(attempt, ladder.length - 1)]!
-    if (attempt + 1 >= MAX_SCAN_ATTEMPTS || Date.now() - startedAt + wait > RETRY_BUDGET_MS)
-      assert.fail(
-        `no clean scan in ${attempt + 1} attempts; last: ${why} (${callsDiag(spy.calls)})`,
-      )
-    await sleep(wait)
-  }
 }
 
 describe('TON getLogs real-workload scans (live testnet)', { skip }, () => {
   let chain: TONChain
   let address: string
-  /** Indexed-tip snapshot taken once at suite start: the pinned scan window END for
-   * every scan and retry attempt below, so every attempt scans the SAME fixed
-   * window (a deterministic shape for the wire assertions) instead of one that grows
-   * with each backoff. The fast path never declines on the pin (the index tip only
-   * moves forward), and the walk fallback is bounded by the same snapshot. */
-  let endBlockPin: number
-  /** Floor of the deep walk: the pollers' 24h lookback, or the widened window
-   * computed in `before` (never deeper than {@link MAX_LOOKBACK_S}). */
-  let windowStart: number
-  let eventAnchor: number
-  let recentStart: number
-  let cursor: Promise<ChainLog> | undefined
+  /** The pinned window every OffRamp scan below runs over. */
+  let window: { startTime: number; endBlock: number }
+  /** Whether the window sits in the deep, still-served age band (see WINDOW above). */
+  let deep: boolean
+  let windowScan$: ReturnType<typeof spied> | undefined
 
   before(async () => {
-    chain = await TONChain.fromUrl(TON_TESTNET_RPC, { logger: LOGGER })
-    const sourceSelector = 16015286601757825753n
-    const router = await chain.getRouterForOnRamp(ONRAMP, sourceSelector)
-    const offRamps = await chain.getOffRampsForRouter(router, sourceSelector)
+    const index: TonIndex = { fetch: patientIndexFetch(V3_BASE, LOGGER), v3Base: V3_BASE }
+    chain = await TONChain.fromUrl(TON_TESTNET_RPC, { logger: LOGGER, v3Fetch: index.fetch })
+    const router = await chain.getRouterForOnRamp(ONRAMP, SEPOLIA_SELECTOR)
+    const offRamps = await chain.getOffRampsForRouter(router, SEPOLIA_SELECTOR)
     assert.ok(offRamps[0], 'an active Sepolia OffRamp must exist')
     address = offRamps[0]
 
-    // The pollers' steady state is a 24h lookback, but organic testnet activity
-    // pauses for days: widen the window (bounded) to end shortly after the newest
-    // event the index has, so every scan below still sees real logs. With a busy
-    // lane the anchor is inside the last day and the window stays exactly 24h.
+    // The account's newest log transactions at or before `notAfter`, newest first.
+    const logTxs = async (notAfter?: number) => {
+      const rows = await newestLogRows(index, address, {
+        limit: 4 * WINDOW_TXS,
+        ...(notAfter != null && { notAfter }),
+      })
+      return rows.filter((row, i) => rows.findIndex((r) => r.txHash === row.txHash) === i)
+    }
     const nowS = Math.floor(Date.now() / 1e3)
-    const anchor = (await fetchNewestV3EventTime(address)) ?? nowS
-    // Pin after selecting the event, so a newly indexed event is not beyond our cutoff.
-    endBlockPin = await fetchV3IndexedTip({
-      rateLimitedFetch: createRateLimitedFetch(tonRateLimitProfile(V3_BASE, { maxRetries: 3 }), {
-        logger: LOGGER,
-      }),
-      v3BaseUrl: V3_BASE,
-    })
-    eventAnchor = anchor
-    // Fast-path shape tests need only a few events, not the entire historical burst.
-    recentStart = anchor - HOUR_S
-    windowStart = Math.max(
-      nowS - MAX_LOOKBACK_S,
-      Math.min(nowS - DAY_S, anchor - ACTIVITY_MARGIN_S),
+    const served = (tx?: { createdAt: number }) =>
+      tx != null && tx.createdAt >= nowS - V2_RETENTION_S
+    let txs = (await logTxs(nowS - DEEP_AGE_S)).slice(0, WINDOW_TXS)
+    deep = txs.length >= 2 && served(txs[txs.length - 1])
+    if (!deep) txs = (await logTxs()).slice(0, WINDOW_TXS)
+    const newest = txs[0]
+    const oldest = txs[txs.length - 1]
+    assert.ok(
+      newest && oldest && txs.length >= 2,
+      `the index knows fewer than two log transactions on OffRamp ${address}`,
     )
+    assert.ok(
+      served(oldest),
+      `the newest logs of OffRamp ${address} are ${Math.round((nowS - oldest.createdAt) / HOUR_S)}h old: ` +
+        'the public TON v2 endpoint no longer serves their transactions, so no scan can read them',
+    )
+    window = {
+      startTime: oldest.createdAt,
+      endBlock: await txBlock(index, address, newest.txHash),
+    }
+    LOGGER.debug('window', window, 'deep', deep)
   })
   after(() => chain.destroy())
 
-  const recentWindow = () => ({ startTime: recentStart, endBlock: endBlockPin })
-
-  /** The `since` cursor for tests C/D: the first execution log of the window. */
-  const getCursor = () =>
-    (cursor ??= runAttempts(
-      () =>
-        collect(
-          chain.getLogs({
-            address: address,
-            topics: [EVENT_TOPIC],
-            startTime: recentStart - HOUR_S,
-            endBlock: endBlockPin,
-          }),
-          1,
-        ),
-      (r) => (r.logs.length ? undefined : 'no execution log of the OffRamp in the window'),
-    ).then(({ result }) => result.logs[0]!))
+  /**
+   * The window's logs through the startTime-only scan (test A2), shared as
+   * the reference for B, C and C2. They need a cursor log and a later log in another
+   * transaction, so fewer than two transactions is a fixture problem, reported here.
+   */
+  const scanWindow = async () => {
+    const scan = await (windowScan$ ??= spied(
+      chain.getLogs({ address, topics: EVENT_TOPICS, ...window }),
+    ))
+    assert.ok(
+      new Set(scan.logs.map((l) => l.transactionHash)).size >= 2,
+      `the window ${JSON.stringify(window)} holds logs of at least two transactions ` +
+        `(got ${scan.logs.length} logs; ${diag(scan.calls)})`,
+    )
+    return scan
+  }
 
   it(
-    'startTime-only cold backfill: v3 index fast path, no v2 tx-chain pagination',
+    'startTime-only scan, topics that match nothing: served by the index, no walk',
     { timeout: 600_000 },
     async () => {
-      const { result, calls, elapsedMs, attempts } = await runAttempts(
-        () =>
-          collect(
-            chain.getLogs({
-              address: address,
-              topics: CONFIG_TOPICS,
-              startTime: eventAnchor,
-              endBlock: endBlockPin,
-            }),
-          ),
-        (r, c) =>
-          r.truncated
-            ? 'the index self-contradicted mid-stream'
-            : c.walkPages
-              ? 'fell back to the v2 walk'
-              : undefined,
+      const { logs, calls } = await spied(
+        chain.getLogs({ address, topics: CONFIG_TOPICS, ...window }),
       )
-      // Whatever the (usually zero) config events, every emitted log must match the
-      // filter and carry an authoritative masterchain block number.
-      for (const l of result.logs) {
+      // Whatever the (usually zero) config events of the window, every emitted log
+      // matches the filter and carries a block number.
+      for (const l of logs) {
         assert.ok(
           CONFIG_TOPICS.some((t) => crc32(t) === l.topics[0]),
           `log topic ${l.topics[0]} matches the config filter`,
         )
-        assert.ok(Number(l.blockNumber) > 0)
+        assert.ok(l.blockNumber > 0 && l.blockNumber <= window.endBlock)
       }
-      assert.ok(calls.v3messages >= 1, 'v3 messages index queried')
-      // The tip is chain-cached ~30s: a retry attempt reuses it, so count across attempts.
-      assert.ok(
-        attempts.some((c) => c.v3tip >= 1),
-        'v3 index tip consulted (lag guard)',
-      )
-      // Pathology guard: this scan took ~80s of 429-retry hell before the fast-path
-      // transport fixes (paced, fail-fast, tip-cached).
-      assert.ok(elapsedMs < 240_000, `scan completes in a bounded time (${elapsedMs}ms)`)
+      assertServedByIndex(calls)
     },
   )
 
   it(
-    'startTime-only cold backfill with a matching topic: v3 seed + v2 hydration yields real logs',
+    'startTime-only scan with a matching topic: the index finds the logs, v2 hydrates them',
     { timeout: 600_000 },
     async () => {
-      // A truncated prefix is valid (the block in progress is dropped — the same
-      // contract as a chain gap on the v2 walk).
-      const { result, calls } = await runAttempts(
-        () =>
-          collect(chain.getLogs({ address: address, topics: [EVENT_TOPIC], ...recentWindow() }), 3),
-        (r, c) =>
-          !r.logs.length ? 'no log yielded' : c.walkPages ? 'fell back to the v2 walk' : undefined,
-      )
-      for (const l of result.logs) {
-        assert.equal(l.topics[0], EVENT_TOPIC_HASH)
-        assert.ok(Number(l.blockNumber) > 0, 'stamped with the index-authoritative mc seqno')
-      }
-      assert.ok(
-        result.logs.every(
-          (l, i, arr) => i === 0 || Number(arr[i - 1]!.blockNumber) <= Number(l.blockNumber),
-        ),
-        'blocks non-decreasing',
-      )
-      assert.ok(calls.v3messages >= 1, 'v3 messages index seeded the scan')
-      // The sparse index finds the events; only the raw event txs are hydrated over v2.
-      // First yield is seconds even on the paced public index (repro: ~5s direct RPC).
-      assert.ok(
-        result.firstYieldMs != null && result.firstYieldMs < 120_000,
-        `first yield timely (${result.firstYieldMs}ms)`,
-      )
-    },
-  )
-
-  it(
-    'startBlock at the window floor: bounded index-driven walk streams matches progressively',
-    { timeout: 600_000 },
-    async () => {
-      const startBlock = await chain.getMCSeqNoByUnixtime(windowStart)
-      // A floor older than four hours engages the index-driven walk before its first yield.
-      // Three logs prove the path without hydrating the entire burst over the public RPC.
-      const { result, calls } = await runAttempts(
-        () =>
-          collect(
-            chain.getLogs({
-              address: address,
-              topics: [EVENT_TOPIC],
-              startBlock,
-              endBlock: endBlockPin,
-            }),
-            3,
-          ),
-        (r, c) =>
-          r.truncated
-            ? 'the index self-contradicted mid-stream'
-            : c.v3transactions === 0
-              ? 'the v3 seqno oracle never engaged'
-              : undefined,
-      )
-      const { logs } = result
-      assert.ok(logs.length >= 3, 'streams matching logs')
+      const { logs, calls } = await scanWindow()
       for (const l of logs) {
-        assert.equal(l.topics[0], EVENT_TOPIC_HASH)
-        assert.ok(Number(l.blockNumber) >= startBlock, 'log at/above the requested floor')
+        assert.ok(EVENT_TOPIC_HASHES.includes(l.topics[0]!), `topic ${l.topics[0]} matches`)
+        assert.ok(l.blockNumber > 0, 'stamped with the index-authoritative block number')
+        assert.ok(l.blockNumber <= window.endBlock, 'at or below the pinned endBlock')
+        assert.ok(l.blockTimestamp >= window.startTime, 'at or after startTime')
       }
       assert.ok(
-        logs.every(
-          (l, i, arr) => i === 0 || Number(arr[i - 1]!.blockNumber) <= Number(l.blockNumber),
-        ),
+        logs.every((l, i, arr) => i === 0 || arr[i - 1]!.blockNumber <= l.blockNumber),
         'blocks non-decreasing',
       )
-      assert.equal(calls.v3messages, 0, 'a startBlock floor never opens the event index')
-      assert.ok(calls.walkPages >= 1, 'v2 tx-chain pagination used')
-      // Bounded by PAGES, not by walked txs: the walked count drifts with organic
-      // traffic, but a per-tx seqno fallback over a deep window would mean ~100+ index
-      // calls — a few pages is the oracle's signature either way.
-      assert.ok(
-        calls.v3transactions <= 12,
-        `seqno meta came in index pages, not per-tx lookups (saw ${calls.v3transactions})`,
-      )
-      // Bounds the DESIGNED degradation: txs newer than the index's tip (tail lag) fall
-      // back to per-tx seqno resolution. CI's healthy observed run on the public index
-      // did 97; the pre-oracle walk pays ~2-3 RPCs per walked tx (444+ for 24h).
-      assert.ok(
-        calls.v2SeqnoLookups <= 320,
-        `per-tx seqno RPCs bounded by the oracle (saw ${calls.v2SeqnoLookups}; ~2-3 per walked tx without it)`,
-      )
-      assert.ok(
-        result.firstYieldMs != null && result.firstYieldMs < 120_000,
-        `first yield timely (${result.firstYieldMs}ms; ~7s on a direct RPC)`,
-      )
+      assert.equal(new Set(ids(logs)).size, logs.length, 'no log emitted twice')
+      assertServedByIndex(calls)
+      // The index drops the topic, so every log-carrying tx of the window is read
+      // from v2 — in pages of consecutive txs where they sit close, one by one where
+      // they do not — and never more calls than transactions.
+      const hydrations = calls.anchoredPages + calls.v2Hydrate
+      assert.ok(hydrations >= 1, `raw transactions hydrated over v2 (${diag(calls)})`)
     },
   )
 
   it(
-    'since cursor in the window, composite-only hint: resumes on the v2 walk, tx-exclusive',
-    { timeout: 900_000 },
+    'startBlock floor: the v2 walk returns the same logs, block-granular',
+    { timeout: 600_000 },
     async () => {
-      const oldLog = await getCursor()
+      const { logs: expected } = await scanWindow()
+      const startBlock = expected[0]!.blockNumber
+      const { logs, calls } = await spied(
+        chain.getLogs({
+          address,
+          topics: EVENT_TOPICS,
+          startBlock,
+          endBlock: window.endBlock,
+        }),
+      )
+      for (const l of logs) {
+        assert.ok(EVENT_TOPIC_HASHES.includes(l.topics[0]!), `topic ${l.topics[0]} matches`)
+        assert.ok(
+          l.blockNumber >= startBlock && l.blockNumber <= window.endBlock,
+          `log block ${l.blockNumber} within [${startBlock}, ${window.endBlock}]`,
+        )
+      }
+      // A block floor is coarser than the window's time floor: the walk may add logs
+      // of the first block that precede startTime, but it must not miss any.
+      const got = new Set(ids(logs))
+      assert.deepEqual(
+        ids(expected).filter((id) => !got.has(id)),
+        [],
+        'every log of the index scan is in the walk',
+      )
+      assert.deepEqual(
+        ids(logs.filter((l) => l.blockTimestamp >= window.startTime)),
+        ids(expected),
+        'same logs, same order, from the time floor on',
+      )
+      assert.equal(calls.v3messages, 0, `a startBlock floor never opens /messages (${diag(calls)})`)
+      assert.ok(
+        calls.walkStarts + calls.anchoredPages >= 1,
+        `v2 tx-chain pages read (${diag(calls)})`,
+      )
+      if (deep) {
+        // Deep window: the index's ordered tx list drives bounded v2 pages and stamps
+        // the block numbers, so v2 block lookups stay at the walk's own floor and cap
+        // — without it the walk pays 2-3 lookups per walked tx.
+        assert.equal(calls.walkStarts, 0, `no unbounded walk from the tip (${diag(calls)})`)
+        assert.ok(calls.v3transactions >= 1, `the index's tx list engaged (${diag(calls)})`)
+        assert.ok(
+          calls.v2SeqnoLookups <= 16,
+          `no per-tx block lookups on the index-driven walk (${diag(calls)})`,
+        )
+      }
+    },
+  )
+
+  it(
+    'since hint without its index: resumes on the v2 walk, excluding the hinted tx',
+    { timeout: 600_000 },
+    async () => {
+      const { logs: expected } = await scanWindow()
+      const cursor = expected[0]!
       // A hint WITHOUT its per-log index has no message-granular cursor: it stays
       // on the v2 walk (composite lt, tx-exclusive `to_lt`).
-      const hint = { ...oldLog, index: undefined }
-      // Clean attempt: the meta seed either never engaged (legacy v2-only walk, per-tx
-      // lookups bounded) or fully covered the window (no per-tx seqno resolution, and
-      // seed pages proportionate to the walk's own depth — each ≤100 txs). A
-      // 429'd/truncated seed walks the rest on per-tx seqno resolution (correct, just
-      // slower) — transient, retried.
-      const { result, calls } = await runAttempts(
-        () =>
-          collect(
-            chain.getLogs({
-              address: address,
-              topics: [EVENT_TOPIC],
-              since: hint,
-              endBlock: endBlockPin,
-            }),
-            3,
-          ),
-        (r, c) =>
-          r.truncated
-            ? 'the index self-contradicted mid-stream'
-            : !r.logs.length
-              ? 'no log after the cursor'
-              : c.v3transactions === 0
-                ? c.v2SeqnoLookups < 200
-                  ? undefined
-                  : 'legacy per-tx seqno resolution exceeded its bound'
-                : c.v2SeqnoLookups <= 8 && c.v3transactions <= Math.max(3, c.walkPages + 1)
-                  ? undefined
-                  : 'the lt-list seed did not cover the walk',
+      const { logs, calls } = await spied(
+        chain.getLogs({
+          address,
+          topics: EVENT_TOPICS,
+          since: { ...cursor, index: undefined },
+          endBlock: window.endBlock,
+        }),
       )
-      const first = result.logs[0]!
-      assert.notEqual(
-        first.transactionHash,
-        hint.transactionHash,
-        'the hinted tx is not re-streamed (tx-exclusive floor)',
-      )
-      assert.ok(
-        Number(first.blockNumber) > hint.blockNumber ||
-          (Number(first.blockNumber) === hint.blockNumber && first.index > oldLog.index),
-        'resumes strictly past the cursor',
-      )
-      assert.equal(calls.v3messages, 0, 'a hint without an index keeps the scan on the v2 walk')
-      assert.ok(
-        calls.walkToLts.includes(oldLog.transactionHash.split(':')[2]!),
-        `walk paged with to_lt at the hinted tx lt (exclusive); saw: ${calls.walkToLts.slice(0, 3).join(',')}`,
-      )
-    },
-  )
-
-  it(
-    'since cursor in the window, with per-log index: hint scan on the v3 /messages fast path',
-    { timeout: 900_000 },
-    async () => {
-      // The hint's `index` IS its log's created_lt: the message-granular index floors
-      // at index + 1 (`start_lt` is inclusive), so same-tx/same-block logs still flow
-      // and the hinted log is never re-fetched — no v2 walk at all.
-      const oldLog = await getCursor()
-      const { result, calls } = await runAttempts(
-        () =>
-          collect(
-            chain.getLogs({
-              address: address,
-              topics: [EVENT_TOPIC],
-              since: oldLog,
-              endBlock: endBlockPin,
-            }),
-            3,
-          ),
-        (r, c) =>
-          !r.logs.length
-            ? 'no log after the cursor'
-            : c.walkPages
-              ? 'fell back to the v2 walk'
-              : undefined,
-      )
-      const first = result.logs[0]!
-      assert.ok(
-        Number(first.blockNumber) > oldLog.blockNumber ||
-          (Number(first.blockNumber) === oldLog.blockNumber && first.index > oldLog.index),
-        'resumes strictly past the cursor',
-      )
-      assert.ok(calls.v3messages >= 1, 'the /messages fast path served the hint scan')
-      assert.equal(calls.v2SeqnoLookups, 0, 'no per-tx seqno resolution (index stamps them)')
-      assert.ok(calls.v2Hydrate > 0, 'event txs hydrated from v2 by (lt, hash)')
-    },
-  )
-
-  it(
-    'quiet address: the v3 seed answers "no events in 24h" in one index call',
-    { timeout: 600_000 },
-    async () => {
-      const { result, calls, elapsedMs } = await runAttempts(
-        () =>
-          collect(
-            chain.getLogs({
-              address: QUIET_ADDR,
-              topics: CONFIG_TOPICS,
-              startTime: Math.floor(Date.now() / 1e3) - DAY_S,
-            }),
-          ),
-        (r, c) =>
-          r.truncated
-            ? 'the index self-contradicted mid-stream'
-            : c.walkPages
-              ? 'fell back to the v2 walk'
-              : undefined,
+      assert.deepEqual(
+        ids(logs),
+        ids(expected.filter((l) => l.transactionHash !== cursor.transactionHash)),
+        'exactly the logs of the transactions after the hinted one',
       )
       assert.equal(
-        result.logs.length,
+        calls.v3messages,
         0,
-        `QUIET_ADDR is no longer dormant (${result.logs.length} config logs in 24h): pick another dormant address`,
+        `a hint without an index keeps the scan on the v2 walk (${diag(calls)})`,
       )
       assert.ok(
-        calls.v3messages <= 3,
-        `one strictly-filtered /messages query, plus at most paced 429 retries on the public index (saw ${calls.v3messages})`,
+        calls.toLts.includes(cursor.transactionHash.split(':')[2]!),
+        `the walk's wire floor is the hinted tx lt (exclusive); saw to_lt: ${calls.toLts.slice(0, 3).join(',')}`,
       )
-      // The pre-fast-path behavior here was a full tx-history walk per poll; now it's
-      // one index call and done (~2s on a direct RPC, paced on the public one).
-      assert.ok(elapsedMs < 60_000, 'quiet scans are cheap')
+    },
+  )
+
+  it(
+    'since hint with its index: resumes on the index, right after the hinted log',
+    { timeout: 600_000 },
+    async () => {
+      // The hint's `index` IS its log's created_lt: the index floors at index + 1, so
+      // later logs of the same tx and block still flow and the hinted log is never
+      // read again — no v2 walk at all.
+      const { logs: expected } = await scanWindow()
+      const { logs, calls } = await spied(
+        chain.getLogs({
+          address,
+          topics: EVENT_TOPICS,
+          since: expected[0]!,
+          endBlock: window.endBlock,
+        }),
+      )
+      assert.deepEqual(ids(logs), ids(expected.slice(1)), 'exactly the logs after the hinted one')
+      assertServedByIndex(calls)
+    },
+  )
+
+  it(
+    'quiet address: the index answers "no events in 24h" in one call',
+    { timeout: 600_000 },
+    async () => {
+      const { logs, calls } = await spied(
+        chain.getLogs({
+          address: QUIET_ADDR,
+          topics: CONFIG_TOPICS,
+          startTime: Math.floor(Date.now() / 1e3) - DAY_S,
+        }),
+      )
+      assert.equal(
+        logs.length,
+        0,
+        `QUIET_ADDR is no longer dormant (${logs.length} config logs in 24h): pick another dormant address`,
+      )
+      assertServedByIndex(calls)
+      // The pre-fast-path behavior here was a full tx-history walk per poll.
+      assert.equal(calls.v3messages, 1, `one /messages query (${diag(calls)})`)
+      assert.equal(
+        calls.v3transactions + calls.anchoredPages + calls.v2Hydrate,
+        0,
+        `nothing to place or hydrate (${diag(calls)})`,
+      )
     },
   )
 })

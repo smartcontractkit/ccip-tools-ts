@@ -1193,6 +1193,8 @@ describe('TON index unit tests', () => {
            * created_at order) — lets tests inject created_lt disorder. Each row's tx
            * must be one of `all`; `out_msg_tx_hash` is derived from `txLt`. */
           rows?: { txLt: number; createdLt: string; createdAt: string; noHash?: boolean }[]
+          /** Anchored (batched hydration) v2 pages throw: the per-tx fetch must take over. */
+          failChunk?: boolean
         }
       } = {},
     ) {
@@ -1241,12 +1243,25 @@ describe('TON index unit tests', () => {
           }))
         })
 
-      const calls = { v3Messages: 0, v3Reqs: [] as Record<string, string>[], v2Walk: 0 }
+      const calls = {
+        v3Messages: 0,
+        v3Reqs: [] as Record<string, string>[],
+        /** Every v3 index URL requested. */
+        v3Urls: [] as string[],
+        /** v2 getTransactions pages that WALK the account's tx chain (no inclusive anchor). */
+        v2Walk: 0,
+        /** `limit` of each anchored inclusive v2 page: the fast path's batched hydration
+         * (and the index-driven deep walk, which pages the same way). */
+        v2Chunks: [] as number[],
+        /** lts hydrated one by one through getTransaction(lt, hash). */
+        v2Single: [] as number[],
+      }
       const fetchImpl = (async (input: unknown, opts?: { body?: string }) => {
         const url = String(input instanceof Request ? input.url : input)
         if (url.includes('/api/v3/')) {
           if (!v3) throw new Error(`unexpected v3 url (harness has no v3): ${url}`)
           calls.v3Messages++
+          calls.v3Urls.push(url)
           const req = Object.fromEntries(new URL(url).searchParams.entries())
           if (url.includes('/messages')) {
             if (v3.fail) return new Response('v3 down', { status: 500 })
@@ -1307,7 +1322,10 @@ describe('TON index unit tests', () => {
           _a: Address,
           o: { limit: number; lt?: string; hash?: string; to_lt?: string; inclusive?: boolean },
         ) => {
-          calls.v2Walk++
+          if (o.lt != null && o.hash != null && o.inclusive) {
+            if (v3?.failChunk) throw new Error('chunk page failed')
+            calls.v2Chunks.push(o.limit)
+          } else calls.v2Walk++
           let start = 0
           if (o.lt != null) {
             const at = linked.findIndex((t) => t.lt === BigInt(o.lt!))
@@ -1319,8 +1337,10 @@ describe('TON index unit tests', () => {
         },
         // Fast-path hydration fetches raw txs by (lt, hash) straight from the client;
         // the LINKED copy carries prevTransactionLt, which buildChainTransaction reads.
-        getTransaction: async (_a: Address, lt: string, _hash: string) =>
-          linked.find((t) => t.lt === BigInt(lt)) ?? null,
+        getTransaction: async (_a: Address, lt: string, _hash: string) => {
+          calls.v2Single.push(Number(lt))
+          return linked.find((t) => t.lt === BigInt(lt)) ?? null
+        },
       } as unknown as TonClient
 
       const chain = new TONChain(client, mockNetworkInfo, { fetch: fetchImpl })
@@ -1934,6 +1954,310 @@ describe('TON index unit tests', () => {
           '10105',
           "the turn cursor is the page's max created_at, not its lt-max row's",
         )
+      })
+
+      describe('batched hydration', () => {
+        // A tx without ext-out messages: part of the account's chain (and of the
+        // index's tx list), absent from /messages.
+        const silent = (lt: number) => ({ ...tx(lt), outMessages: new Map() })
+
+        it('hydrates the event txs of a page with one anchored v2 page', async () => {
+          // Three event txs with event-less txs between them sit at positions 0, 2, 4
+          // of the account's chain: one page of 5 anchored at the newest covers them.
+          const chain = makeChain(13, [10_001, 10_002, 11_001, 11_002, 12_001], [], {
+            v3: {},
+            txOf: (lt) => (lt === 10_002 || lt === 11_002 ? silent(lt) : tx(lt)),
+          })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            ['10001', '11001', '12001'],
+          )
+          assert.deepEqual(chain.calls.v2Chunks, [5], 'one page spans the three event txs')
+          assert.deepEqual(chain.calls.v2Single, [], 'no per-tx hydration')
+          assert.equal(chain.calls.v2Walk, 0, 'no tx-chain walk')
+        })
+
+        it('keeps the single (lt, hash) fetch for a lone event tx', async () => {
+          const chain = makeChain(13, [11_001], [], { v3: {} })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            ['11001'],
+          )
+          assert.deepEqual(chain.calls.v2Chunks, [], 'a page would cost the same call')
+          assert.deepEqual(chain.calls.v2Single, [11_001])
+        })
+
+        it('never spans more than one page between event txs', async () => {
+          // 120 consecutive account txs; only the first and the last carry an event.
+          // They are 119 positions apart: no single page covers both.
+          const lts = [
+            ...Array.from({ length: 60 }, (_, i) => 10_001 + i),
+            ...Array.from({ length: 60 }, (_, i) => 11_001 + i),
+          ]
+          const first = lts[0]!
+          const last = lts[lts.length - 1]!
+          const chain = makeChain(13, lts, [], {
+            v3: {},
+            txOf: (lt) => (lt === first || lt === last ? tx(lt) : silent(lt)),
+          })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            [String(first), String(last)],
+          )
+          assert.deepEqual(chain.calls.v2Chunks, [])
+          assert.deepEqual(chain.calls.v2Single, [first, last])
+        })
+
+        it('falls back to per-tx hydration when the page fails', async () => {
+          const chain = makeChain(13, [10_001, 11_001, 12_001], [], { v3: { failChunk: true } })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            ['10001', '11001', '12001'],
+            'the scan is complete without the batch',
+          )
+          assert.deepEqual(chain.calls.v2Single, [10_001, 11_001, 12_001])
+        })
+
+        it('does not read ahead past the seal boundary', async () => {
+          // Tip 13 ⇒ cutoff 12. The index stamps tx 13_001 with block 13: the page
+          // stops at 12_001, and only the row loop reads the first unsealed tx (the
+          // consumer stops at it), as it did before.
+          const chain = makeChain(13, [11_001, 12_001, 13_001], [], { v3: {} })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            ['11001', '12001'],
+            'the sealed blocks are complete',
+          )
+          assert.deepEqual(chain.calls.v2Chunks, [2], 'the page stops at the cutoff')
+          assert.deepEqual(chain.calls.v2Single, [13_001])
+        })
+
+        it('reads at most one index page ahead of the tx it hydrates', async () => {
+          // 300 consecutive account txs (three index pages of 100); only the tx at
+          // position 50 carries an event. Its own meta is on page 1; looking for
+          // followers within 100 positions needs page 2, and never page 3.
+          const lts = Array.from(
+            { length: 300 },
+            (_, i) => 10_001 + Math.floor(i / 90) * 1000 + (i % 90),
+          )
+          const event = lts[50]!
+          const chain = makeChain(20, lts, [], {
+            v3: {},
+            txOf: (lt) => (lt === event ? tx(lt) : silent(lt)),
+          })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            [String(event)],
+          )
+          assert.equal(
+            chain.calls.v3Urls.filter((url) => url.includes('/transactions')).length,
+            2,
+            'index tx pages read',
+          )
+          assert.deepEqual(chain.calls.v2Single, [event], 'no follower: the single fetch')
+          assert.deepEqual(chain.calls.v2Chunks, [])
+        })
+      })
+
+      describe('execution scan shortcuts (getExecutionReceipts)', () => {
+        const SEPOLIA = 16015286601757825753n
+        const ROOT = `0x${'5'.repeat(64)}`
+        type Harness = ReturnType<typeof makeChain>
+
+        const withVersion = (chain: Harness, version: string) => {
+          chain.typeAndVersion = async () => ['OffRamp', '1.6.0', `OffRamp ${version}`]
+          return chain
+        }
+        /** Replaces the MerkleRoot lookup; records the roots it was asked for. */
+        const withRootRoute = (chain: Harness, answer: number[] | undefined) => {
+          const asked: string[] = []
+          ;(
+            chain as unknown as {
+              executionTxsViaMerkleRoot: (a: string, root: string) => Promise<unknown>
+            }
+          ).executionTxsViaMerkleRoot = async (_a, root) => {
+            asked.push(root)
+            return (
+              answer &&
+              Promise.all(
+                answer.map((lt) =>
+                  chain.buildChainTransaction(
+                    { ...tx(lt), prevTransactionLt: 0n } as never,
+                    Address.parse(OFFRAMP),
+                  ),
+                ),
+              )
+            )
+          }
+          return asked
+        }
+        const receipts = async (chain: Harness, opts: Record<string, unknown>) => {
+          const out = []
+          for await (const exec of chain.getExecutionReceipts({
+            offRamp: OFFRAMP,
+            startTime: 1,
+            ...opts,
+          } as never))
+            out.push(exec)
+          return out
+        }
+        const commit = (blockNumber: number) => ({
+          report: { merkleRoot: ROOT },
+          log: { blockNumber },
+        })
+        // No receipt matches this id, so a scan reads every page instead of stopping
+        // at the first Success.
+        const NO_SUCH_MESSAGE = `0x${'2'.repeat(64)}`
+
+        it('asks the index for the source chain rows only, on every page', async () => {
+          const chain = withVersion(
+            makeChain(13, [10_001, 11_001, 12_001], [], { v3: {} }),
+            '1.6.2',
+          )
+          await receipts(chain, {
+            sourceChainSelector: SEPOLIA,
+            messageId: NO_SUCH_MESSAGE,
+            page: 1,
+          })
+          assert.ok(chain.calls.v3Reqs.length > 1, 'the scan turned pages')
+          assert.deepEqual(
+            [...new Set(chain.calls.v3Reqs.map((r) => r.opcode))],
+            ['0xde41ba4f'],
+            'the high 32 bits of the selector filter the seed and every turn',
+          )
+        })
+
+        it('scans unfiltered on an OffRamp version that was not verified', async () => {
+          const chain = withVersion(makeChain(13, [11_001], [], { v3: {} }), '1.8.0')
+          const out = await receipts(chain, { sourceChainSelector: SEPOLIA })
+          assert.equal(out.length, 1)
+          assert.equal(chain.calls.v3Reqs[0]?.opcode, undefined)
+        })
+
+        it('scans unfiltered when the OffRamp version cannot be read', async () => {
+          const chain = makeChain(13, [11_001], [], { v3: {} })
+          chain.typeAndVersion = async () => {
+            throw new Error('getter failed')
+          }
+          const out = await receipts(chain, { sourceChainSelector: SEPOLIA })
+          assert.equal(out.length, 1, 'the plain scan still answers')
+          assert.equal(chain.calls.v3Reqs[0]?.opcode, undefined)
+        })
+
+        it('getLogs itself never narrows', async () => {
+          const chain = withVersion(makeChain(13, [11_001], [], { v3: {} }), '1.6.2')
+          await collect(chain, { startTime: 1 })
+          assert.equal(chain.calls.v3Reqs[0]?.opcode, undefined)
+        })
+
+        it('reads executions through the MerkleRoot contract when the commit is known', async () => {
+          const chain = withVersion(
+            makeChain(20, [10_001, 11_001, 12_001], [], { v3: {} }),
+            '1.6.2',
+          )
+          const asked = withRootRoute(chain, [11_001])
+          const out = await receipts(chain, { verifications: commit(10) })
+          assert.deepEqual(asked, [ROOT])
+          assert.deepEqual(
+            out.map((e) => [e.log.blockNumber, e.log.index]),
+            [[11, 11_001]],
+            'only the tx the MerkleRoot contract leads to, stamped with its block',
+          )
+          assert.equal(chain.calls.v3Messages, 0, 'no index scan')
+          assert.equal(chain.calls.v2Walk, 0, 'no walk of the OffRamp history')
+        })
+
+        it('answers "not executed yet" without a scan', async () => {
+          const chain = withVersion(makeChain(20, [10_001, 11_001], [], { v3: {} }), '1.6.2')
+          withRootRoute(chain, [])
+          assert.deepEqual(await receipts(chain, { verifications: commit(10) }), [])
+          assert.equal(chain.calls.v3Messages + chain.calls.v2Walk, 0)
+        })
+
+        it('scans when the MerkleRoot route cannot answer', async () => {
+          const chain = withVersion(makeChain(20, [10_001, 11_001], [], { v3: {} }), '1.6.2')
+          withRootRoute(chain, undefined)
+          const out = await receipts(chain, { verifications: commit(10) })
+          assert.equal(out.length, 1, 'the scan found the execution')
+          assert.ok(chain.calls.v2Walk >= 1, 'the OffRamp history was walked')
+        })
+
+        it('keeps explicit start floors on the MerkleRoot route', async () => {
+          const chain = withVersion(makeChain(20, [], [], { v3: {} }), '1.6.2')
+          withRootRoute(chain, [10_001, 12_001])
+          const byBlock = await receipts(chain, { verifications: commit(10), startBlock: 11 })
+          assert.deepEqual(
+            byBlock.map((e) => e.log.blockNumber),
+            [12],
+            'the block-10 tx is below startBlock',
+          )
+          // The harness stamps a tx with timestamp 100 + lt.
+          const byTime = await receipts(chain, {
+            verifications: commit(10),
+            startTime: 100 + 12_001,
+          })
+          assert.deepEqual(
+            byTime.map((e) => e.log.blockNumber),
+            [12],
+            'the block-10 tx is before startTime',
+          )
+        })
+
+        it('applies the message filters and stops at the first Success', async () => {
+          // Every harness tx carries a Success receipt of the same message.
+          const chain = withVersion(makeChain(20, [], [], { v3: {} }), '1.6.2')
+          withRootRoute(chain, [11_001, 12_001])
+          const first = await receipts(chain, { verifications: commit(10) })
+          assert.deepEqual(
+            first.map((e) => e.log.index),
+            [11_001],
+            'nothing after the first Success',
+          )
+          assert.deepEqual(
+            await receipts(chain, { verifications: commit(10), messageId: NO_SUCH_MESSAGE }),
+            [],
+          )
+          assert.deepEqual(
+            await receipts(chain, { verifications: commit(10), sequenceNumber: 2n }),
+            [],
+          )
+          assert.deepEqual(
+            await receipts(chain, { verifications: commit(10), sourceChainSelector: 1n }),
+            [],
+          )
+        })
+
+        it('scans, without the MerkleRoot route, when resuming from a since hint', async () => {
+          const chain = withVersion(
+            makeChain(20, [10_001, 11_001, 12_001], [], { v3: {} }),
+            '1.6.2',
+          )
+          const asked = withRootRoute(chain, [])
+          const out = await receipts(chain, {
+            verifications: commit(10),
+            since: hintFor(11_001),
+          })
+          assert.deepEqual(asked, [])
+          assert.deepEqual(
+            out.map((e) => e.log.index),
+            [12_001],
+            'the scan resumed after the hinted log',
+          )
+        })
+
+        it('does not use the MerkleRoot route on an unverified OffRamp version', async () => {
+          const chain = withVersion(makeChain(20, [10_001, 11_001], [], { v3: {} }), '1.8.0')
+          const asked = withRootRoute(chain, [])
+          const out = await receipts(chain, { verifications: commit(10) })
+          assert.deepEqual(asked, [])
+          assert.equal(out.length, 1, 'the plain scan answered')
+        })
       })
     })
   })
