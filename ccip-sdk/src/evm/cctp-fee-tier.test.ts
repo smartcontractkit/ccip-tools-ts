@@ -23,7 +23,19 @@ const TWO_TIER_BURN_FEES = [
   { finalityThreshold: 2000, minimumFee: 0 },
 ]
 
-function makeChain(poolAddress: string) {
+/** A v2.0 pool's token transfer fee config: 5 bps finalized, 10 bps fast. */
+const POOL_FEE_CONFIG = {
+  destGasOverhead: 90_000,
+  destBytesOverhead: 32,
+  finalityFeeUSDCents: 0,
+  fastFinalityFeeUSDCents: 0,
+  finalityTransferFeeBps: 5,
+  fastFinalityTransferFeeBps: 10,
+  isEnabled: true,
+}
+
+/** An EVMChain on a v2.0 lane, whose pool is a CCTP pool unless given a `tokenTransferFeeConfig`. */
+function makeChain(poolAddress: string, tokenTransferFeeConfig?: typeof POOL_FEE_CONFIG) {
   const provider = {
     call: mock.fn(async (tx: { data?: string }) => {
       const data = tx.data ?? '0x'
@@ -52,8 +64,12 @@ function makeChain(poolAddress: string) {
       'OnRamp 2.0.0',
     ]) as unknown as EVMChain['typeAndVersion'],
     getFee: mock.fn(async () => 1_000_000_000_000n),
-    getTokenPoolConfig: mock.fn(async () => ({ tokenTransferFeeConfig: {} })),
-    detectUsdcDomains: mock.fn(async () => ({ sourceDomain: 0, destDomain: 1 })),
+    getTokenPoolConfig: mock.fn(async () => ({
+      tokenTransferFeeConfig: tokenTransferFeeConfig ?? {},
+    })),
+    detectUsdcDomains: mock.fn(async () =>
+      tokenTransferFeeConfig ? undefined : { sourceDomain: 0, destDomain: 1 },
+    ),
   })
   return chain
 }
@@ -112,4 +128,30 @@ describe('getTotalFeesEstimate CCTP fast/standard tier selection', () => {
     })
     assert.equal(estimate.tokenTransferFee?.bps, 1)
   })
+})
+
+describe('getTotalFeesEstimate pool bps fee selection', () => {
+  const estimate = (finality: 'finalized' | 'safe' | number) =>
+    makeChain(getAddress(hexlify(randomBytes(20))), POOL_FEE_CONFIG).getTotalFeesEstimate({
+      router: getAddress(hexlify(randomBytes(20))),
+      destChainSelector: DEST_SELECTOR,
+      message: {
+        receiver: getAddress(hexlify(randomBytes(20))),
+        tokenAmounts: [{ token: getAddress(hexlify(randomBytes(20))), amount: 1_000_000n }],
+        extraArgs: { finality },
+      },
+    })
+
+  for (const finality of ['finalized', 0] as const)
+    it(`finality: ${JSON.stringify(finality)} takes the finality bps`, async () => {
+      assert.deepEqual((await estimate(finality)).tokenTransferFee, { bps: 5, feeDeducted: 500n })
+    })
+
+  for (const finality of ['safe', 5] as const)
+    it(`finality: ${JSON.stringify(finality)} takes the fast-finality bps`, async () => {
+      assert.deepEqual((await estimate(finality)).tokenTransferFee, {
+        bps: 10,
+        feeDeducted: 1_000n,
+      })
+    })
 })
