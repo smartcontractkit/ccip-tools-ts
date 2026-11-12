@@ -126,6 +126,7 @@ export {
   fromUIAmount,
   getDataBytes,
   getSourceTokenFromExtraData,
+  isCantonPartyId,
   isSupportedTxHash,
   jsonParse,
   jsonStringify,

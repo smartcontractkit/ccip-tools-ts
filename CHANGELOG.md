@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- SDK: export `encodeAddressToAny` from the package root, next to `decodeAddress`. It encodes an address of any chain family the way CCIP messages carry it, e.g. a Canton party as `keccak256(partyId)`
+- SDK: export `encodeAddressToAny` and `isCantonPartyId` from the package root. `encodeAddressToAny` encodes an address of any chain family the way CCIP messages carry it, e.g. a Canton party as `keccak256(partyId)`; `isCantonPartyId` checks the `hint::1220<64 hex>` party form it hashes
 
 ## [1.17.0] - 2026-11-10
 
