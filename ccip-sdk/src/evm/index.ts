@@ -234,12 +234,22 @@ function nonZeroBytes<T extends string>(value: T | undefined): T | undefined {
   return value && !hexlify(getDataBytes(value)).match(/^0x0*$/) ? value : undefined
 }
 
-function isBalanceOverrideArtifact(data: BytesLike): boolean {
+function isLockOrBurnSimulationArtifact(data: BytesLike, onRamp: string): boolean {
   const hex = hexlify(getDataBytes(data))
   const selector = hex.slice(0, 10)
   // Error(string) and Panic(uint256) — ERC20 implementations, not pool gates
   if (selector === '0x08c379a0' || selector === '0x4e487b71') return true
-  const parsed = parseWithFragment(selector)
+  const parsed = parseWithFragment(hex)
+  // Hedera RPCs can replace a contract `from` with a default account. A different caller
+  // cannot establish that the real OnRamp would fail the pool's caller check.
+  if (parsed?.[0].name === 'CallerIsNotARampOnRouter') {
+    try {
+      const caller = parsed[2]?.[0] as string | undefined
+      return caller != null && getAddress(caller) !== getAddress(onRamp)
+    } catch {
+      return false // malformed caller data does not prove a simulation artifact
+    }
+  }
   return (
     parsed != null &&
     ['ERC20InsufficientBalance', 'ERC20InsufficientAllowance'].includes(parsed[0].name)
@@ -3675,11 +3685,11 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       // finality gate, chain not allowed). Surface it typed so callers block the send. EXCEPT
       // balance/allowance reverts: the pool's token balance is only best-effort state-overridden
       // (`findBalancesSlot` can miss exotic layouts), so those prove nothing about the real send
-      // — rethrow raw for the caller's best-effort fallback. Same for transport errors (no revert
-      // data) and typed SDK errors (already verdicts of their own).
+      // — rethrow raw for the caller's best-effort fallback, as for an RPC-rewritten caller.
+      // Same for transport errors (no revert data) and typed SDK errors (already verdicts).
       if (err instanceof CCIPError) throw err
       const revertData = getErrorData(err)
-      if (revertData && !isBalanceOverrideArtifact(revertData)) {
+      if (revertData && !isLockOrBurnSimulationArtifact(revertData, opts.onRamp)) {
         throw new CCIPSourcePoolRevertError(describeRevert(revertData), {
           cause: err instanceof Error ? err : undefined,
           isTransient: isTransientReleaseOrMintRevert(revertData),
