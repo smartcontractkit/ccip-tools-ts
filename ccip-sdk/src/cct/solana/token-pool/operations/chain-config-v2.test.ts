@@ -8,11 +8,17 @@ import {
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
+import BN from 'bn.js'
 
+import { CCIPTokenPoolChainConfigNotFoundError } from '../../../../errors/index.ts'
 import { tokenPoolV2Coder } from '../../../../solana/idl/token-pool-coder.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import { deriveTokenPoolChainConfigV2Pda } from '../../../../solana/token-pool.ts'
-import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
+import {
+  CCTDataDecodeError,
+  CCTOperationUnsupportedError,
+  CCTParamsInvalidError,
+} from '../../../errors.ts'
 import {
   deriveEventAuthorityPda,
   deriveTokenPoolConfigPda,
@@ -37,14 +43,87 @@ const WALLET = {
 const INIT_DISCRIMINATOR = [31, 189, 231, 179, 25, 226, 94, 90]
 const EDIT_DISCRIMINATOR = [118, 24, 17, 167, 67, 206, 107, 213]
 
-/** A chain whose canonical burn-mint pool runs `version`, for a Token-2022 mint. */
-function chain(version: string | null = '2.0.0'): SolanaChain {
+const CHAIN_CONFIG_V2 = deriveTokenPoolChainConfigV2Pda(POOL_PROGRAM, SELECTOR, MINT)
+
+type CCVLists = {
+  thresholdAmount?: bigint
+  outboundCcvs?: string[]
+  thresholdOutboundCcvs?: string[]
+  inboundCcvs?: string[]
+  thresholdInboundCcvs?: string[]
+}
+
+/** The fees of the lane's `ChainConfigV2` fixture, in the program's field names. */
+const LANE_FEES = {
+  destGasOverhead: 90_000,
+  destBytesOverhead: 32,
+  finalityFee: 25,
+  fastFinalityFee: 50,
+  finalityBpsFee: 10,
+  fastFinalityBpsFee: 20,
+  isEnabled: true,
+}
+
+/** A full edit config, which needs no read of the lane. */
+const FULL_CONFIG = {
+  allowedFinality: { finalityDepth: 0 },
+  tokenTransferFeeConfig: {
+    destGasOverhead: 0,
+    destBytesOverhead: 0,
+    finalityFeeUSDCents: 0,
+    fastFinalityFeeUSDCents: 0,
+    finalityTransferFeeBps: 0,
+    fastFinalityTransferFeeBps: 0,
+    isEnabled: false,
+  },
+  ccvConfig: {},
+}
+
+/**
+ * A `ChainConfigV2` account owned by the canonical pool, encoded with the program's full IDL: it
+ * allows finality depth 10 and the safe head, charges {@link LANE_FEES}, and requires `ccvs`.
+ */
+async function chainConfigV2Account(ccvs: CCVLists = {}, owner = POOL_PROGRAM) {
+  const keys = (list: string[] = []) => list.map((ccv) => new PublicKey(ccv))
+  const data = await tokenPoolV2Coder.accounts.encode('chainConfigV2', {
+    bump: 255,
+    version: 1,
+    remoteChainSelector: new BN(SELECTOR.toString()),
+    mint: MINT,
+    allowedFinalityConfig: { flags: 1, blockDepth: 10 },
+    tokenTransferFeeConfig: LANE_FEES,
+    ccvConfig: {
+      thresholdAmount: new BN((ccvs.thresholdAmount ?? 0n).toString()),
+      outboundCcvs: keys(ccvs.outboundCcvs),
+      thresholdOutboundCcvs: keys(ccvs.thresholdOutboundCcvs),
+      inboundCcvs: keys(ccvs.inboundCcvs),
+      thresholdInboundCcvs: keys(ccvs.thresholdInboundCcvs),
+    },
+  })
+  return { owner, data }
+}
+
+/**
+ * A chain whose canonical burn-mint pool runs `version`, for a Token-2022 mint. `chainConfigV2` is
+ * the lane's `ChainConfigV2` account (`null` when it does not exist); it defaults to one without
+ * CCVs.
+ */
+function chain(
+  version: string | null = '2.0.0',
+  chainConfigV2?: { owner: PublicKey; data: Buffer } | null,
+): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
       getMultipleAccountsInfo: async () => [{}],
       getAccountInfo: async (key: PublicKey) =>
-        key.equals(MINT) ? { owner: TOKEN_2022_PROGRAM_ID, data: Buffer.alloc(82) } : {},
+        key.equals(MINT)
+          ? { owner: TOKEN_2022_PROGRAM_ID, data: Buffer.alloc(82) }
+          : key.equals(CHAIN_CONFIG_V2)
+            ? chainConfigV2 === undefined
+              ? chainConfigV2Account()
+              : chainConfigV2
+            : {},
     },
     typeAndVersion: async () =>
       version ? ['burnmintTokenPool', version] : Promise.reject(new Error('typeVersion')),
@@ -247,9 +326,109 @@ describe('InitChainConfigV2 / EditChainConfigV2 (cct/solana)', () => {
           err instanceof CCTOperationUnsupportedError && err.context.version === '1.6.2',
       )
       const poolProgramAddress = Keypair.generate().publicKey.toBase58()
-      const { instructions } = await new Op().generate(chain(null), { ...base, poolProgramAddress })
+      const { instructions } = await new Op().generate(chain(null), {
+        ...base,
+        ...FULL_CONFIG,
+        poolProgramAddress,
+      })
       assert.equal(instructions[0]!.programId.toBase58(), poolProgramAddress)
     }
+  })
+
+  const current = {
+    thresholdAmount: 5_000n,
+    outboundCcvs: [CCV_A],
+    thresholdOutboundCcvs: [CCV_B],
+    inboundCcvs: [CCV_B],
+  }
+  const ccvsOf = (ccv: Record<string, PublicKey[]>) =>
+    [ccv.outboundCcvs, ccv.thresholdOutboundCcvs, ccv.inboundCcvs, ccv.thresholdInboundCcvs].map(
+      (ccvs) => ccvs!.map((key) => key.toBase58()),
+    )
+
+  it('keeps the finality, fees and CCVs edit omits', async () => {
+    const { instructions } = await new EditChainConfigV2().generate(
+      chain('2.0.0', await chainConfigV2Account(current)),
+      base,
+    )
+    const { params } = decodeParams(instructions[0]!.data)
+
+    assert.deepEqual(params.allowedFinalityConfig, { flags: 1, blockDepth: 10 })
+    assert.deepEqual(params.tokenTransferFeeConfig, LANE_FEES)
+    assert.equal(params.ccvConfig.thresholdAmount.toString(), '5000')
+    assert.deepEqual(ccvsOf(params.ccvConfig), [[CCV_A], [CCV_B], [CCV_B], []])
+  })
+
+  it('replaces only the config fields edit passes', async () => {
+    const lane = chain('2.0.0', await chainConfigV2Account(current))
+    const finality = await new EditChainConfigV2().generate(lane, {
+      ...base,
+      allowedFinality: { finalityDepth: 3 },
+    })
+    let { params } = decodeParams(finality.instructions[0]!.data)
+    assert.deepEqual(params.allowedFinalityConfig, { flags: 0, blockDepth: 3 })
+    assert.deepEqual(params.tokenTransferFeeConfig, LANE_FEES)
+    assert.deepEqual(ccvsOf(params.ccvConfig), [[CCV_A], [CCV_B], [CCV_B], []])
+
+    const fees = await new EditChainConfigV2().generate(lane, {
+      ...base,
+      tokenTransferFeeConfig: FULL_CONFIG.tokenTransferFeeConfig,
+    })
+    ;({ params } = decodeParams(fees.instructions[0]!.data))
+    assert.deepEqual(params.allowedFinalityConfig, { flags: 1, blockDepth: 10 })
+    assert.equal(params.tokenTransferFeeConfig.isEnabled, false)
+    assert.equal(params.tokenTransferFeeConfig.destGasOverhead, 0)
+    assert.equal(params.ccvConfig.thresholdAmount.toString(), '5000')
+
+    // `{}` clears the CCVs, and keeps the rest
+    const cleared = await new EditChainConfigV2().generate(lane, { ...base, ccvConfig: {} })
+    ;({ params } = decodeParams(cleared.instructions[0]!.data))
+    assert.deepEqual(params.tokenTransferFeeConfig, LANE_FEES)
+    assert.equal(params.ccvConfig.thresholdAmount.toString(), '0')
+    assert.deepEqual(ccvsOf(params.ccvConfig), [[], [], [], []])
+  })
+
+  it('reads nothing from the lane when edit passes the full config', async () => {
+    let reads = 0
+    const lane = chain('2.0.0', null)
+    const getAccountInfo = lane.connection.getAccountInfo.bind(lane.connection)
+    lane.connection.getAccountInfo = (async (key: PublicKey) => {
+      if (key.equals(CHAIN_CONFIG_V2)) reads++
+      return getAccountInfo(key)
+    }) as typeof getAccountInfo
+    // the missing config is left to the program
+    const { instructions } = await new EditChainConfigV2().generate(lane, {
+      ...base,
+      ...FULL_CONFIG,
+    })
+    assert.equal(instructions.length, 1)
+    assert.equal(reads, 0)
+  })
+
+  it('rejects an edit that omits a field, of a lane without ChainConfigV2', async () => {
+    const { ccvConfig: _, ...withoutCCVs } = FULL_CONFIG
+    for (const account of [null, { owner: SystemProgram.programId, data: Buffer.alloc(0) }]) {
+      for (const params of [base, { ...base, ...withoutCCVs }]) {
+        await assert.rejects(
+          () => new EditChainConfigV2().generate(chain('2.0.0', account), params),
+          (err: unknown) =>
+            err instanceof CCIPTokenPoolChainConfigNotFoundError &&
+            err.context.address === CHAIN_CONFIG_V2.toBase58(),
+        )
+      }
+    }
+  })
+
+  it('rejects an edit that omits a field, when the ChainConfigV2 cannot be decoded', async () => {
+    await assert.rejects(
+      () =>
+        new EditChainConfigV2().generate(
+          chain('2.0.0', { owner: POOL_PROGRAM, data: Buffer.alloc(16) }),
+          base,
+        ),
+      (err: unknown) =>
+        err instanceof CCTDataDecodeError && err.context.account === CHAIN_CONFIG_V2.toBase58(),
+    )
   })
 
   it('rejects a non-wallet authority for signed execution', async () => {

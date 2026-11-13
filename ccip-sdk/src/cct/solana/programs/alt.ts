@@ -50,12 +50,6 @@ const SLOT_HASH_ENTRY_SIZE = 40
  * Picks the recent slot to create a lookup table from: the {@link LOOKUP_TABLE_SLOT_MARGIN}th
  * newest entry of the node's `SlotHashes` (its oldest, if it has fewer), or the finalized slot if
  * the sysvar cannot be read.
- *
- * @remarks The ALT program only accepts a slot in the `SlotHashes` of the node that runs the
- * transaction, so the slot comes from that list, which also holds on a fresh fork or local
- * validator with a short history. Going back {@link LOOKUP_TABLE_SLOT_MARGIN} entries covers a
- * load-balanced RPC that simulates or lands the transaction on a node behind the one that answered.
- * It shortens the 512-slot window to land the creation by that margin.
  */
 export async function recentLookupTableSlot(connection: {
   getAccountInfo: (

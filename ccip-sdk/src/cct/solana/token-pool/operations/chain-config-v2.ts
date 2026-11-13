@@ -11,7 +11,12 @@ import BN from 'bn.js'
 
 import type { TokenTransferFeeConfig } from '../../../../chain.ts'
 import type { FinalityAllowed } from '../../../../extra-args.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import type { SolanaChain } from '../../../../solana/index.ts'
+import {
+  decodeTokenPoolChainConfigV2,
+  deriveTokenPoolChainConfigV2Pda,
+} from '../../../../solana/token-pool.ts'
+import { CCTDataDecodeError, CCTParamsInvalidError } from '../../../errors.ts'
 import type { SolanaGenerateParams } from '../../operation.ts'
 import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import {
@@ -33,9 +38,10 @@ const U32_MAX = 0xffff_ffff
 /**
  * CCVs a CCIP 2.0 token pool requires on a lane, on top of those the lane itself requires.
  *
- * @remarks Each list is a complete replacement, and defaults to empty: the pool requires no CCVs
- * of its own in that direction. CCV addresses must be non-default and unique across a direction's
- * base and threshold lists.
+ * @remarks A `ccvConfig` object is a complete replacement: each list defaults to empty (the pool
+ * requires no CCVs of its own in that direction) and `thresholdAmount` to `0n`. CCV addresses must
+ * be non-default and unique across a direction's base and threshold lists. Read a lane's current
+ * CCVs with `getCCVConfig`, whose result can be passed back as is.
  */
 export type TokenPoolCCVConfig = {
   /** CCVs required on every transfer to the remote chain. */
@@ -69,15 +75,21 @@ export type ChainConfigV2Params = PoolProgramRef & {
   /**
    * Finality that transfers to the remote chain may request below full finality: `finalityDepth`
    * is the lowest block depth allowed (`0` allows none) and `finalitySafe` allows the `safe` head.
-   * Defaults to `{ finalityDepth: 0 }`, full finality only.
+   * `initChainConfigV2` defaults to `{ finalityDepth: 0 }`, full finality only;
+   * `editChainConfigV2` keeps the lane's current finality when omitted.
    */
   allowedFinality?: FinalityAllowed
   /**
-   * Fees the pool charges on transfers to the remote chain. Defaults to disabled (all zero). An
+   * Fees the pool charges on transfers to the remote chain, replaced in full when passed. An
    * enabled config takes BPS fees up to `10000` (100%) and a `destBytesOverhead` of at least 32.
+   * `initChainConfigV2` defaults to disabled (all zero); `editChainConfigV2` keeps the lane's
+   * current fees when omitted.
    */
   tokenTransferFeeConfig?: TokenTransferFeeConfig
-  /** CCVs the pool requires on the lane. Defaults to none. */
+  /**
+   * CCVs the pool requires on the lane. `initChainConfigV2` defaults to none;
+   * `editChainConfigV2` keeps the lane's current CCVs when omitted, and `{}` clears them.
+   */
   ccvConfig?: TokenPoolCCVConfig
   /**
    * Pool owner, who also pays the config account's rent. Defaults to `payer` for single-signer
@@ -254,6 +266,63 @@ export function parseChainConfigV2Params(
     allowedFinalityConfig: parseAllowedFinality(operation, params.allowedFinality),
     tokenTransferFeeConfig: parseTokenTransferFeeConfig(operation, params.tokenTransferFeeConfig),
     ccvConfig: parseCCVConfig(operation, params.ccvConfig),
+  }
+}
+
+/** The fields of a lane's `ChainConfigV2` that `init`/`edit_chain_config_v2` write. */
+export type TokenPoolChainConfigV2Fields = Pick<
+  ParsedChainConfigV2Params,
+  'allowedFinalityConfig' | 'tokenTransferFeeConfig' | 'ccvConfig'
+>
+
+/**
+ * Reads a 2.0 pool's `ChainConfigV2` for a lane: its allowed finality, fees and CCVs.
+ * @returns The lane's config, or `undefined` if the lane has no `ChainConfigV2`: the pool then
+ *   allows full finality only, charges no pool fees and requires no CCVs of its own on it.
+ * @throws {@link CCTDataDecodeError} if the account exists but is not a `ChainConfigV2`.
+ */
+export async function readTokenPoolChainConfigV2(
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  mint: PublicKey,
+  remoteChainSelector: bigint,
+): Promise<TokenPoolChainConfigV2Fields | undefined> {
+  const address = deriveTokenPoolChainConfigV2Pda(poolProgram, remoteChainSelector, mint)
+  const account = await chain.connection.getAccountInfo(address)
+  // only the pool program can create its PDA; any other owner (e.g. lamports sent to the
+  // address) is an uninitialized config, as the program's own `try_load` treats it
+  if (!account || !account.owner.equals(poolProgram)) return undefined
+  let config
+  try {
+    config = decodeTokenPoolChainConfigV2(account.data)
+  } catch (err) {
+    throw new CCTDataDecodeError(address.toBase58(), {
+      cause: err instanceof Error ? err : undefined,
+      context: { poolProgram: poolProgram.toBase58(), remoteChainSelector },
+    })
+  }
+  const { allowedFinalityConfig, tokenTransferFeeConfig, ccvConfig } = config
+  return {
+    allowedFinalityConfig: {
+      flags: allowedFinalityConfig.flags,
+      blockDepth: allowedFinalityConfig.blockDepth,
+    },
+    tokenTransferFeeConfig: {
+      destGasOverhead: tokenTransferFeeConfig.destGasOverhead,
+      destBytesOverhead: tokenTransferFeeConfig.destBytesOverhead,
+      finalityFee: tokenTransferFeeConfig.finalityFee,
+      fastFinalityFee: tokenTransferFeeConfig.fastFinalityFee,
+      finalityBpsFee: tokenTransferFeeConfig.finalityBpsFee,
+      fastFinalityBpsFee: tokenTransferFeeConfig.fastFinalityBpsFee,
+      isEnabled: tokenTransferFeeConfig.isEnabled,
+    },
+    ccvConfig: {
+      thresholdAmount: BigInt(ccvConfig.thresholdAmount.toString()),
+      outboundCCVs: ccvConfig.outboundCcvs,
+      thresholdOutboundCCVs: ccvConfig.thresholdOutboundCcvs,
+      inboundCCVs: ccvConfig.inboundCcvs,
+      thresholdInboundCCVs: ccvConfig.thresholdInboundCcvs,
+    },
   }
 }
 
