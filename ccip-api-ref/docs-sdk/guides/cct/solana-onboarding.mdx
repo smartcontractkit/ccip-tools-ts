@@ -101,10 +101,6 @@ for (const { name, hashes } of steps) console.log(name, hashes)
 
 `steps` lists the steps this call ran, with their transaction signatures. It is empty if the token was already onboarded.
 
-:::note
-The SDK's waits do not keep Node.js running. In a standalone script with nothing else pending, such as one using top-level `await`, keep the process alive until onboarding returns, for example with `const keepAlive = setInterval(() => {}, 60_000)` and `clearInterval(keepAlive)` afterwards.
-:::
-
 ## Onboard with a Squads vault
 
 With an external signer, `generateUnsignedOnboardToken` returns one step at a time. Each step's operations check the state that the previous step leaves, so a step can only be built after the previous one lands.
@@ -211,13 +207,6 @@ Onboarding validates every parameter, including each remote chain's, before it r
 | `CCTParamsInvalidError`        | A parameter is invalid, or a precondition fails: the authority is not the mint authority, the pool owner, the token administrator, or the pool program's upgrade authority where the program does not allow self-served pools.                                                                        |
 | `CCTOperationUnsupportedError` | The pool program predates CCIP 2.0.                                                                                                                                                                                                                                                                   |
 | `CCTTxFailedError`             | A step fails. With `onboardToken`, every error once the steps start carries the steps that landed before it in `error.context.executedSteps`. If `setPool` fails after creating the lookup table, `error.context.lookupTableAddress` holds it: pass it as `poolLookupTableAddress` to resume with it. |
-
-## What onboarding does not do
-
-- **It does not update existing remote chains.** It checks only whether a lane config exists, not its values. Change them with `editChainRemoteConfig`, `setChainRateLimit`, `editChainConfigV2` and `setFastFinalityRateLimit`. `editChainConfigV2` keeps each of the lane's finality, fees and CCVs that you omit; read the CCVs with `getCCVConfig`.
-- **It does not hand over ownership.** The authority stays the pool owner and the token administrator. Move them with `transferPoolOwnership` and `transferAdmin`.
-- **It does not deploy or register from a multisig mint authority.** Onboarding deploys the pool and registers the token with the mint authority itself as the signer, so set up your own multisig after onboarding, or let onboarding create one. To deploy a pool and register the token as a 1-of-N signer of a multisig mint authority instead, call `deployTokenPool` with `mintAuthorityMultisig`, then `registerAdmin` with that signer as `authority`.
-- **It does not deploy the remote side.** Deploy and configure the remote token and pool on their own chain.
 
 ## Related
 
