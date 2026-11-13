@@ -1,7 +1,7 @@
 /**
- * Anchor 0.29 IDL of `ccip_router 2.0.1`, limited to set_pool_interface_implementation, upgrade_token_admin_registry.
+ * Anchor 0.29 IDL of `ccip_router 2.0.1`, limited to set_pool_interface_implementation, upgrade_token_admin_registry, multisig_owner_propose_administrator, multisig_owner_override_pending_administrator.
  *
- * From smartcontractkit/chainlink-ccip-solana@ee67ce0d, contracts/target/idl/ccip_router.json.
+ * From smartcontractkit/chainlink-ccip-solana@903f3bf, contracts/target/idl/ccip_router.json.
  *
  * Converted from the `anchor build` IDL (Anchor spec 0.1.0) to the Anchor 0.29 format, with every
  * instruction and account discriminator checked against the IDL's; regenerate rather than edit.
@@ -57,6 +57,56 @@ export type CcipRouterTokenAdminRegistryV2 = {
         { name: 'systemProgram'; isMut: false; isSigner: false },
       ]
       args: []
+    },
+    {
+      name: 'multisigOwnerProposeAdministrator'
+      docs: [
+        'Registers the Token Admin Registry by a signer of the mint authority multisig.',
+        '',
+        '# Arguments',
+        '',
+        '* `ctx` - The context containing the accounts required for registration.',
+        '* `token_admin_registry_admin` - The public key of the token admin registry admin to propose.',
+      ]
+      accounts: [
+        { name: 'config'; isMut: false; isSigner: false },
+        { name: 'tokenAdminRegistry'; isMut: true; isSigner: false },
+        { name: 'mint'; isMut: false; isSigner: false },
+        { name: 'authority'; isMut: true; isSigner: true },
+        {
+          name: 'mintAuthorityMultisig'
+          isMut: false
+          isSigner: false
+          docs: ['Only 1-of-N multisigs (threshold `m == 1`) are supported in this flow.']
+        },
+        { name: 'systemProgram'; isMut: false; isSigner: false },
+      ]
+      args: [{ name: 'tokenAdminRegistryAdmin'; type: 'publicKey' }]
+    },
+    {
+      name: 'multisigOwnerOverridePendingAdministrator'
+      docs: [
+        'Overrides the pending admin of the Token Admin Registry by a signer of the mint authority multisig',
+        '',
+        '# Arguments',
+        '',
+        '* `ctx` - The context containing the accounts required for registration.',
+        '* `token_admin_registry_admin` - The public key of the token admin registry admin to propose.',
+      ]
+      accounts: [
+        { name: 'config'; isMut: false; isSigner: false },
+        { name: 'tokenAdminRegistry'; isMut: true; isSigner: false },
+        { name: 'mint'; isMut: false; isSigner: false },
+        { name: 'authority'; isMut: true; isSigner: true },
+        {
+          name: 'mintAuthorityMultisig'
+          isMut: false
+          isSigner: false
+          docs: ['Only 1-of-N multisig mint authorities are supported in this flow.']
+        },
+        { name: 'systemProgram'; isMut: false; isSigner: false },
+      ]
+      args: [{ name: 'tokenAdminRegistryAdmin'; type: 'publicKey' }]
     },
   ]
   accounts: []
@@ -261,6 +311,11 @@ export type CcipRouterTokenAdminRegistryV2 = {
       name: 'TokenOwnedByMultisig'
       msg: 'Token uses a multisig as mint authority - use the multisig-specific method instead'
     },
+    {
+      code: 7068
+      name: 'PoolV2RequiresWithoutExtendedLookupTable'
+      msg: 'Pool interface version 2 requires the WithoutExtendedLookupTable account resolution'
+    },
   ]
   types: [
     {
@@ -380,6 +435,106 @@ export const IDL: CcipRouterTokenAdminRegistryV2 = {
         },
       ],
       args: [],
+    },
+    {
+      name: 'multisigOwnerProposeAdministrator',
+      docs: [
+        'Registers the Token Admin Registry by a signer of the mint authority multisig.',
+        '',
+        '# Arguments',
+        '',
+        '* `ctx` - The context containing the accounts required for registration.',
+        '* `token_admin_registry_admin` - The public key of the token admin registry admin to propose.',
+      ],
+      accounts: [
+        {
+          name: 'config',
+          isMut: false,
+          isSigner: false,
+        },
+        {
+          name: 'tokenAdminRegistry',
+          isMut: true,
+          isSigner: false,
+        },
+        {
+          name: 'mint',
+          isMut: false,
+          isSigner: false,
+        },
+        {
+          name: 'authority',
+          isMut: true,
+          isSigner: true,
+        },
+        {
+          name: 'mintAuthorityMultisig',
+          isMut: false,
+          isSigner: false,
+          docs: ['Only 1-of-N multisigs (threshold `m == 1`) are supported in this flow.'],
+        },
+        {
+          name: 'systemProgram',
+          isMut: false,
+          isSigner: false,
+        },
+      ],
+      args: [
+        {
+          name: 'tokenAdminRegistryAdmin',
+          type: 'publicKey',
+        },
+      ],
+    },
+    {
+      name: 'multisigOwnerOverridePendingAdministrator',
+      docs: [
+        'Overrides the pending admin of the Token Admin Registry by a signer of the mint authority multisig',
+        '',
+        '# Arguments',
+        '',
+        '* `ctx` - The context containing the accounts required for registration.',
+        '* `token_admin_registry_admin` - The public key of the token admin registry admin to propose.',
+      ],
+      accounts: [
+        {
+          name: 'config',
+          isMut: false,
+          isSigner: false,
+        },
+        {
+          name: 'tokenAdminRegistry',
+          isMut: true,
+          isSigner: false,
+        },
+        {
+          name: 'mint',
+          isMut: false,
+          isSigner: false,
+        },
+        {
+          name: 'authority',
+          isMut: true,
+          isSigner: true,
+        },
+        {
+          name: 'mintAuthorityMultisig',
+          isMut: false,
+          isSigner: false,
+          docs: ['Only 1-of-N multisig mint authorities are supported in this flow.'],
+        },
+        {
+          name: 'systemProgram',
+          isMut: false,
+          isSigner: false,
+        },
+      ],
+      args: [
+        {
+          name: 'tokenAdminRegistryAdmin',
+          type: 'publicKey',
+        },
+      ],
     },
   ],
   accounts: [],
@@ -723,6 +878,11 @@ export const IDL: CcipRouterTokenAdminRegistryV2 = {
       code: 7067,
       name: 'TokenOwnedByMultisig',
       msg: 'Token uses a multisig as mint authority - use the multisig-specific method instead',
+    },
+    {
+      code: 7068,
+      name: 'PoolV2RequiresWithoutExtendedLookupTable',
+      msg: 'Pool interface version 2 requires the WithoutExtendedLookupTable account resolution',
     },
   ],
   types: [

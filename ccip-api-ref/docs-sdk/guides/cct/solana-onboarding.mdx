@@ -214,9 +214,9 @@ Onboarding validates every parameter, including each remote chain's, before it r
 
 ## What onboarding does not do
 
-- **It does not update existing remote chains.** It checks only whether a lane config exists, not its values. Change them with `editChainRemoteConfig`, `setChainRateLimit`, `editChainConfigV2` and `setFastFinalityRateLimit`.
+- **It does not update existing remote chains.** It checks only whether a lane config exists, not its values. Change them with `editChainRemoteConfig`, `setChainRateLimit`, `editChainConfigV2` and `setFastFinalityRateLimit`. `editChainConfigV2` keeps each of the lane's finality, fees and CCVs that you omit; read the CCVs with `getCCVConfig`.
 - **It does not hand over ownership.** The authority stays the pool owner and the token administrator. Move them with `transferPoolOwnership` and `transferAdmin`.
-- **It does not deploy or register from a multisig mint authority.** Onboarding deploys the pool and registers the token with the mint authority itself as the signer, so set up your own multisig after onboarding, or let onboarding create one. To deploy a pool as a 1-of-N signer of a multisig mint authority instead, call `deployTokenPool` with `mintAuthorityMultisig`.
+- **It does not deploy or register from a multisig mint authority.** Onboarding deploys the pool and registers the token with the mint authority itself as the signer, so set up your own multisig after onboarding, or let onboarding create one. To deploy a pool and register the token as a 1-of-N signer of a multisig mint authority instead, call `deployTokenPool` with `mintAuthorityMultisig`, then `registerAdmin` with that signer as `authority`.
 - **It does not deploy the remote side.** Deploy and configure the remote token and pool on their own chain.
 
 ## Related

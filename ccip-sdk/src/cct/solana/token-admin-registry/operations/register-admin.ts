@@ -1,10 +1,8 @@
-import { unpackMint } from '@solana/spl-token'
 import { type TransactionInstruction, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../../../solana/types.ts'
-import { resolveTokenMint } from '../../../../solana/utils.ts'
 import { CCTParamsInvalidError } from '../../../errors.ts'
 import type { TransactionResult } from '../../../operation.ts'
 import {
@@ -14,12 +12,18 @@ import {
 } from '../../operation.ts'
 import {
   createRouterProgram,
+  createRouterTokenAdminRegistryV2Program,
   deriveRouterConfigPda,
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { submit } from '../../submit.ts'
 import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
 import { REGISTRATION_METHODS } from '../constants.ts'
+import {
+  type TokenMintAuthority,
+  readTokenMintAuthority,
+  validateMultisigOwnerSigner,
+} from '../mint-authority.ts'
 
 /** Authorization path used to register a token in the TokenAdminRegistry. */
 export type RegisterAdminMethod = (typeof REGISTRATION_METHODS)[keyof typeof REGISTRATION_METHODS]
@@ -34,10 +38,14 @@ type RegisterAdminParams = {
   address: string
   /** Selects registration authority; defaults to `owner`. */
   registrationMethod?: RegisterAdminMethod
-  /** Registry administrator to propose. Defaults to the mint authority when present. */
+  /**
+   * Registry administrator to propose. Defaults to the mint authority when present, or to
+   * `authority` when the mint authority is a multisig, which cannot accept the role.
+   */
   administrator?: string
   /**
-   * Registration authority. Defaults to `payer` for single-signer transactions.
+   * Registration authority. Defaults to `payer` for single-signer transactions. With the `owner`
+   * method it is the mint authority, or a signer of a 1-of-N SPL multisig mint authority.
    * Multisig/Squads flows should pass the mint or CCIP admin/vault authority explicitly.
    */
   authority?: string
@@ -74,11 +82,24 @@ type RegisterAdminAccounts = {
 type RouterProgram = ReturnType<typeof createRouterProgram>
 
 async function buildOwnerInstruction(
+  chain: SolanaChain,
   program: RouterProgram,
+  payer: PublicKey,
   accounts: RegisterAdminAccounts,
-  mintAuthority: PublicKey | null,
+  { mintAuthority, multisig }: TokenMintAuthority,
   administrator: PublicKey,
 ): Promise<TransactionInstruction> {
+  if (mintAuthority && multisig) {
+    validateMultisigOwnerSigner('registerAdmin', mintAuthority, multisig, accounts.authority)
+    return createRouterTokenAdminRegistryV2Program(chain, program.programId, payer)
+      .methods.multisigOwnerProposeAdministrator(administrator)
+      .accountsStrict({
+        ...accounts,
+        mintAuthorityMultisig: mintAuthority,
+        systemProgram: SystemProgram.programId,
+      })
+      .instruction()
+  }
   if (!mintAuthority) {
     throw new CCTParamsInvalidError(
       'registerAdmin',
@@ -172,9 +193,12 @@ export class RegisterAdmin extends SolanaOperation<
     const router = new PublicKey(await chain.getTokenAdminRegistryFor(opts.address.toBase58()))
     const { tokenMint, payer, authority, method } = opts
 
-    const mintAccount = await resolveTokenMint(chain.connection, tokenMint)
-    const { mintAuthority } = unpackMint(tokenMint, mintAccount, mintAccount.owner)
-    const administrator = opts.administrator ?? mintAuthority
+    const tokenMintAuthority = await readTokenMintAuthority(chain, tokenMint)
+    const { mintAuthority, multisig } = tokenMintAuthority
+    // a multisig cannot sign acceptAdmin: its signer registering is the owner's default admin
+    const administrator =
+      opts.administrator ??
+      (!multisig ? mintAuthority : method === REGISTRATION_METHODS.OWNER ? authority : null)
     const config = deriveRouterConfigPda(router)
     const tokenAdminRegistry = deriveTokenAdminRegistryPda(router, tokenMint)
     const registryAccount = await chain.connection.getAccountInfo(tokenAdminRegistry)
@@ -199,14 +223,23 @@ export class RegisterAdmin extends SolanaOperation<
       throw new CCTParamsInvalidError(
         this.name,
         'administrator',
-        'is required when the mint has no mint authority',
+        multisig
+          ? 'is required with ccip-admin when the mint authority is a multisig, which cannot accept the role'
+          : 'is required when the mint has no mint authority',
       )
     }
 
     const instructions: TransactionInstruction[] = []
     switch (method) {
       case REGISTRATION_METHODS.OWNER: {
-        const ownerIx = await buildOwnerInstruction(program, accounts, mintAuthority, administrator)
+        const ownerIx = await buildOwnerInstruction(
+          chain,
+          program,
+          payer,
+          accounts,
+          tokenMintAuthority,
+          administrator,
+        )
         instructions.push(ownerIx)
         break
       }

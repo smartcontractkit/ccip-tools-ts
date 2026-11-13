@@ -165,6 +165,8 @@ import {
   type GenerateWithdrawFeeTokensResult,
   type GenerateWithdrawLiquidityParams,
   type GenerateWithdrawLiquidityResult,
+  type GetCCVConfigParams,
+  type GetCCVConfigResult,
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
@@ -179,6 +181,7 @@ import {
   DeployTokenPool,
   EditChainConfigV2,
   EditChainRemoteConfig,
+  GetCCVConfig,
   GetTokenPoolRemotes,
   GetTokenPoolState,
   InitChainConfigV2,
@@ -278,6 +281,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   // CCIP 2.0 token pool operations
   readonly #deleteFastFinalityRateLimit = new DeleteFastFinalityRateLimit()
   readonly #editChainConfigV2 = new EditChainConfigV2()
+  readonly #getCCVConfig = new GetCCVConfig()
   readonly #initChainConfigV2 = new InitChainConfigV2()
   readonly #initFastFinalityRateLimit = new InitFastFinalityRateLimit()
   readonly #setFastFinalityRateLimit = new SetFastFinalityRateLimit()
@@ -1868,21 +1872,28 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction that replaces a CCIP 2.0 token pool's `ChainConfigV2` for a
-   * remote chain. Pass `poolProgramAddress` for a non-canonical pool program; `authority`
-   * defaults to `payer`.
+   * Builds an unsigned instruction that edits a CCIP 2.0 token pool's `ChainConfigV2` for a remote
+   * chain. Pass `poolProgramAddress` for a non-canonical pool program; `authority` defaults to
+   * `payer`.
    *
-   * @remarks On-chain execution requires `authority` to be the pool owner. Every field is
-   * replaced and omitted ones reset to their defaults, so pass `ccvConfig` again in full, or the
-   * pool's CCVs on the lane are cleared: `chain.getTokenPoolConfig` returns the lane's allowed
-   * finality and fees, but not its CCVs. The config must exist.
+   * @remarks On-chain execution requires `authority` to be the pool owner. Each of
+   * `allowedFinality`, `tokenTransferFeeConfig` and `ccvConfig` replaces that part of the config in
+   * full when passed, and keeps its current value when omitted (`ccvConfig: {}` clears the CCVs).
+   * Kept values are read when the instruction is built, so build it close to execution if the
+   * config may change meanwhile. Read them with `chain.getTokenPoolConfig` (finality and fees) and
+   * {@link getCCVConfig}. The config must exist.
    *
    * @see {@link editChainConfigV2}
+   * @see {@link getCCVConfig}
    * @see {@link generateUnsignedInitChainConfigV2}
    *
    * @throws {@link CCTParamsInvalidError} If a parameter is malformed or the pool program would
    * reject the config.
    * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If a config field is omitted and the lane
+   * has no `ChainConfigV2`.
+   * @throws {@link CCTDataDecodeError} If a config field is omitted and the lane's `ChainConfigV2`
+   * cannot be decoded.
    *
    * @example
    * ```ts
@@ -1903,19 +1914,24 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Replaces a CCIP 2.0 token pool's `ChainConfigV2` for a remote chain with the pool owner
-   * wallet.
+   * Edits a CCIP 2.0 token pool's `ChainConfigV2` for a remote chain with the pool owner wallet.
    *
-   * @remarks Every field is replaced and omitted ones reset to their defaults, so pass
-   * `ccvConfig` again in full, or the pool's CCVs on the lane are cleared. The config must exist.
+   * @remarks Each of `allowedFinality`, `tokenTransferFeeConfig` and `ccvConfig` replaces that part
+   * of the config in full when passed, and keeps its current value when omitted (`ccvConfig: {}`
+   * clears the CCVs). The config must exist.
    *
    * @see {@link generateUnsignedEditChainConfigV2}
+   * @see {@link getCCVConfig}
    * @see {@link initChainConfigV2}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a parameter is invalid or the authority differs from
    * the executing wallet.
    * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If a config field is omitted and the lane
+   * has no `ChainConfigV2`.
+   * @throws {@link CCTDataDecodeError} If a config field is omitted and the lane's `ChainConfigV2`
+   * cannot be decoded.
    * @throws {@link CCTTxFailedError} If the config does not exist, the wallet is not the pool
    * owner, or simulation/submission fails.
    *
@@ -1932,6 +1948,40 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   editChainConfigV2(opts: ExecuteEditChainConfigV2Params): Promise<ExecuteEditChainConfigV2Result> {
     return this.#editChainConfigV2.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads the CCVs a CCIP 2.0 token pool requires on a remote chain's lane, from its
+   * `ChainConfigV2`. Pass `poolProgramAddress` for a non-canonical pool program.
+   *
+   * @remarks The result has the shape of the `ccvConfig` param of {@link editChainConfigV2} and
+   * {@link initChainConfigV2}, so it can be modified and passed back; edit keeps the lane's
+   * finality and fees when they are omitted. A lane without a
+   * `ChainConfigV2` returns empty lists and a `0n` `thresholdAmount`: the pool requires no CCVs of
+   * its own on it. Base lists apply to every transfer; threshold lists add CCVs from
+   * `thresholdAmount` (local mint base units) when it is positive. These are the pool's own CCVs,
+   * required on top of the lane's.
+   *
+   * @see {@link generateUnsignedEditChainConfigV2}
+   *
+   * @throws {@link CCTParamsInvalidError} If the token or pool program address or remote selector is
+   * invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTDataDecodeError} If the lane's `ChainConfigV2` cannot be decoded.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const { inboundCCVs, outboundCCVs, thresholdAmount } = await cct.getCCVConfig({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * console.log({ inboundCCVs, outboundCCVs, thresholdAmount })
+   * ```
+   */
+  getCCVConfig(opts: GetCCVConfigParams): Promise<GetCCVConfigResult> {
+    return this.#getCCVConfig.query(this.chain, opts)
   }
 
   /**
@@ -2383,17 +2433,20 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks
    * Only the mint authority may authorize this recovery path, and only while the registry has no
-   * accepted administrator. It replaces the initial pending administrator; the replacement must
-   * still call {@link generateUnsignedAcceptAdmin}. `authority` defaults to `payer`; use this
-   * unsigned method for Squads/vault signatures.
+   * accepted administrator. When the mint authority is a 1-of-N SPL multisig, `authority` is one of
+   * its signers, and the Router's multisig instruction is used. It replaces the initial pending
+   * administrator; the replacement must still call {@link generateUnsignedAcceptAdmin}.
+   * `authority` defaults to `payer`; use this unsigned method for Squads/vault signatures.
    *
    * @see {@link ownerOverridePendingAdministrator} For wallet-based execution.
    * @see {@link generateUnsignedAcceptAdmin} The replacement administrator must accept separately.
    *
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or the registry already has an
-   * accepted administrator.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an
+   * accepted administrator, or the mint authority is a multisig whose threshold is not 1 or that
+   * `authority` does not sign for.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
    * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
    *
    * @example
    * ```ts
@@ -2418,7 +2471,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @remarks
    * This recovery path only works while the registry has no accepted administrator. It replaces the
    * initial pending administrator; it does not make the replacement an administrator. The replacement
-   * must call {@link acceptAdmin} separately. `authority` defaults to `wallet`; use
+   * must call {@link acceptAdmin} separately. `authority` defaults to `wallet`, which may also be
+   * a signer of a 1-of-N SPL multisig mint authority; use
    * {@link generateUnsignedOwnerOverridePendingAdministrator} for Squads/vault flows.
    *
    * @see {@link generateUnsignedOwnerOverridePendingAdministrator} For externally signed transactions.
@@ -2426,7 +2480,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an accepted
-   * administrator, or `authority` differs from the wallet.
+   * administrator, `authority` differs from the wallet, or the mint authority is a multisig whose
+   * threshold is not 1 or that `authority` does not sign for.
    * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
    * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
    * @throws {@link CCTTxFailedError} If the Router rejects a non-mint authority or the registry changes.
@@ -2457,6 +2512,11 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * choose `ccip-admin` when the Router CCIP admin signs. Provide `administrator`
    * to nominate a different admin or register a mint with no mint authority.
    *
+   * @remarks When the mint authority is a 1-of-N SPL multisig, the `owner` method takes one of its
+   * signers as `authority` and uses the Router's multisig instruction. The administrator then
+   * defaults to `authority`, as the multisig cannot accept the role; `ccip-admin` requires an
+   * explicit `administrator`.
+   *
    * @see {@link generateUnsignedAcceptAdmin}
    * @see {@link generateUnsignedSetPool}
    *
@@ -2486,6 +2546,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   /**
    * Proposes a token registry administrator using the executing wallet as registration authority
    * and fee payer. The proposed admin must {@link acceptAdmin} before calling {@link setPool}.
+   *
+   * @remarks With a 1-of-N SPL multisig mint authority, the wallet registers as one of its signers
+   * and is the default administrator; see {@link generateUnsignedRegisterAdmin}.
    *
    * @see {@link acceptAdmin}
    * @see {@link setPool}
