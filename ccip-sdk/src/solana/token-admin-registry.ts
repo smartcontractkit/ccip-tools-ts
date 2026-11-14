@@ -14,7 +14,8 @@ import { CCIPDataFormatUnsupportedError, CCIPTokenNotConfiguredError } from '../
  */
 export type TokenAccountResolution = 'NoResolution' | 'Standard' | 'WithoutExtendedLookupTable'
 
-const ACCOUNT_RESOLUTIONS: readonly TokenAccountResolution[] = [
+/** Every {@link TokenAccountResolution}, in `ResolutionType` variant order. */
+export const TOKEN_ACCOUNT_RESOLUTIONS: readonly TokenAccountResolution[] = [
   'NoResolution',
   'Standard',
   'WithoutExtendedLookupTable',
@@ -51,11 +52,23 @@ const TOKEN_ADMIN_REGISTRY_DISCRIMINATOR =
 const TOKEN_ADMIN_REGISTRY_V1_SIZE = 169
 const TOKEN_ADMIN_REGISTRY_V2_SIZE = 170
 const TOKEN_ADMIN_REGISTRY_V3_SIZE = 172
+const TOKEN_ADMIN_REGISTRY_V4_SIZE = 173
 const ACCOUNT_RESOLUTION_OFFSET = 169
 const INTERFACE_VERSION_OFFSET = 171
 const SKIP_LOOKUP_TABLE_ADDITIONAL_ENTRIES_OFFSET = 172
 // Accounts predating the field implement the 1.6-compatible pool interface.
 const DEFAULT_INTERFACE_VERSION = 1
+
+/**
+ * Whether raw TokenAdminRegistry account data has the CCIP 2.0 Router's latest (v4) layout. The
+ * Router's registry instructions, other than `upgrade_token_admin_registry`, reject older ones.
+ */
+export function isLatestTokenAdminRegistryLayout(data: Buffer): boolean {
+  return data.length >= TOKEN_ADMIN_REGISTRY_V4_SIZE
+}
+
+/** Index of the token pool's state account in the pool lookup table a registry names. */
+const LOOKUP_TABLE_TOKEN_POOL_INDEX = 3
 
 /** Decodes the Router's 32-byte MSB-first writable-index bitmap. */
 function decodeWritableIndexes(buf: Buffer): number[] {
@@ -97,14 +110,14 @@ export function decodeTokenAdminRegistryConfig(
 
   let accountResolution: TokenAccountResolution = 'NoResolution'
   let interfaceVersion = DEFAULT_INTERFACE_VERSION
-  if (data.length > TOKEN_ADMIN_REGISTRY_V3_SIZE) {
+  if (isLatestTokenAdminRegistryLayout(data)) {
     if (data[ACCOUNT_RESOLUTION_OFFSET])
       accountResolution = data[SKIP_LOOKUP_TABLE_ADDITIONAL_ENTRIES_OFFSET]
         ? 'WithoutExtendedLookupTable'
         : 'Standard'
     interfaceVersion = data[INTERFACE_VERSION_OFFSET]!
   } else if (data.length === TOKEN_ADMIN_REGISTRY_V3_SIZE) {
-    const resolution = ACCOUNT_RESOLUTIONS[data[ACCOUNT_RESOLUTION_OFFSET]!]
+    const resolution = TOKEN_ACCOUNT_RESOLUTIONS[data[ACCOUNT_RESOLUTION_OFFSET]!]
     if (!resolution) {
       throw new CCIPDataFormatUnsupportedError(
         `unknown TokenAdminRegistry account resolution ${data[ACCOUNT_RESOLUTION_OFFSET]}`,
@@ -150,14 +163,25 @@ export async function getTokenAdminRegistryConfig(
   if (!account) throw new CCIPTokenNotConfiguredError(mint.toBase58(), router.toBase58())
 
   const config = decodeTokenAdminRegistryConfig(account.data)
-  if (!config.lookupTable) return config
+  const tokenPool =
+    config.lookupTable && (await getLookupTableTokenPool(connection, config.lookupTable))
+  return tokenPool ? { ...config, tokenPool } : config
+}
 
+/**
+ * Reads the token pool state account that a registry's pool lookup table names.
+ *
+ * @returns The token pool, or `undefined` if the table is missing, unreadable, or names none.
+ */
+export async function getLookupTableTokenPool(
+  connection: Connection,
+  lookupTable: PublicKey,
+): Promise<PublicKey | undefined> {
   try {
-    const lookupTable = await connection.getAddressLookupTable(config.lookupTable)
-    const tokenPool = lookupTable.value?.state.addresses[3]
-    if (tokenPool && !tokenPool.equals(PublicKey.default)) return { ...config, tokenPool }
+    const table = await connection.getAddressLookupTable(lookupTable)
+    const tokenPool = table.value?.state.addresses[LOOKUP_TABLE_TOKEN_POOL_INDEX]
+    if (tokenPool && !tokenPool.equals(PublicKey.default)) return tokenPool
   } catch {
     // Token pool may not be configured yet.
   }
-  return config
 }

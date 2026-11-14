@@ -1,0 +1,215 @@
+---
+id: solana-onboarding
+title: 'Onboard a Token on Solana'
+description: 'Onboard an SPL token to CCIP 2.0 in one call with SolanaTokenManager, with a wallet or a Squads vault.'
+sidebar_label: Solana Onboarding
+---
+
+# Onboard a Token on Solana
+
+`SolanaTokenManager` onboards an SPL token to CCIP 2.0 with one API. It chains the operations that [CCT on Solana](./solana) walks through one by one. Onboarding takes a mint from no pool to a pool that:
+
+- is registered with the Router, with you as the token administrator;
+- is connected to its remote chains, on both the 1.6 and the 2.0 lane configs;
+- runs on the 2.0 pool interface.
+
+The API works with a wallet that signs every step, or with an external signer such as a Squads vault.
+
+## Before you start
+
+You need:
+
+- **The token mint.** Its mint authority must be the account that onboards it: the wallet, or the vault. If the mint authority is another key, move it first with `setTokenAuthority`.
+- **A pool program that lets you deploy the pool.** The canonical programs let a mint authority deploy its own token's pool. A program that does not allow self-served pools takes its upgrade authority instead.
+- **The token administrator role, if the token is registered.** A token that is already registered with the Router must have the onboarding account as its administrator, or pending administrator.
+- **A pool type.** `burn-mint` pools burn and mint the token; onboarding gives them a share of its mint authority. `lock-release` pools lock and release it, and leave the mint authority where it is.
+- **The remote side of each lane:** the remote token address, its pool addresses and its decimals.
+- **SOL for rent and fees.** Onboarding creates the pool, the registry entry, a lookup table and the per-lane config accounts.
+
+The account that onboards the token becomes the pool owner and the token administrator. Onboarding validates every parameter, and checks these preconditions against the on-chain state, before it sends the first transaction. It checks them again before each later step, in case the state changed in between.
+
+## What onboarding runs
+
+Onboarding runs these steps in order. Before each step, it reads the on-chain state, and skips the steps that are already done.
+
+| Step                             | What it does                                                     | Skipped when                                                           |
+| -------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `deployTokenPool`                | Deploys the pool and the pool signer's token account             | The pool exists                                                        |
+| `registerAdmin`                  | Proposes the authority as token administrator                    | The token is registered                                                |
+| `upgradeTokenAdminRegistry`      | Migrates a registry an older Router created to the latest layout | The registry has the latest layout                                     |
+| `acceptAdmin`                    | Accepts the administrator role                                   | The authority is the administrator                                     |
+| `createLookupTable`              | Creates an empty pool lookup table, paid by `lookupTablePayer`   | Without `lookupTablePayer`, or with `poolLookupTableAddress`           |
+| `setPool`                        | Creates or fills the pool's lookup table, then sets the pool     | The registry's lookup table names this pool                            |
+| `applyChainUpdates`              | Connects remote chains: remote token, pools and rate limits      | Per remote chain, when it is connected                                 |
+| `initChainConfigV2`              | Sets each lane's 2.0 config: allowed finality, fees and CCVs     | Per remote chain, when it has a 2.0 config                             |
+| `initFastFinalityRateLimit`      | Sets each lane's faster-than-finality (FTF) rate limits          | Per remote chain without `fastFinalityRateLimits`, or when it has them |
+| `setPoolInterfaceImplementation` | Moves the pool to the 2.0 interface, with the account resolution | The registry is on v2, with `accountResolution` if given               |
+| `createTokenMultisig`            | Creates the mint authority multisig (burn-mint only)             | The multisig exists, or the handover is done                           |
+| `setTokenAuthority`              | Makes the multisig the mint authority (burn-mint only)           | The pool can mint through the mint authority                           |
+
+A token that is already registered keeps its registry entry. If the entry was created by an older Router, `upgradeTokenAdminRegistry` migrates it first, since the Router's other registry instructions reject the older layout. If the entry points at another pool, such as a 1.6 pool or a pool of the other type, `setPool` points it at the onboarded pool and logs a warning. Check `getTokenOnboardingPlan` first on a token that is already live.
+
+### The mint authority of a burn-mint token
+
+A burn-mint pool mints through its pool signer PDA. On Solana, a mint has a single mint authority, so onboarding does not hand it to the pool signer alone: then nobody else could ever mint, or move the authority. See [the multisig handoff](./solana#hand-the-mint-authority-to-a-multisig) for why.
+
+Instead, the last two steps make the mint authority a 1-of-2 SPL multisig:
+
+- the pool signer, which mints through it alone, so CCIP transfers never wait on a person;
+- the authority, which keeps its own path to mint, or to move the mint authority later.
+
+Its address is fixed by the authority and the mint, so a resumed onboarding finds it. The plan and results return it as `mintMultisigAddress`.
+
+These steps run last, because the earlier steps need the authority to be the mint authority itself. Once the pool is deployed and registered, a mint authority that the pool can already mint through alone, such as a multisig you set up with the pool signer, counts as done.
+
+## Onboard with a wallet
+
+`onboardToken` runs every remaining step, with the wallet as the payer and the authority:
+
+```typescript
+import { SolanaChain } from '@chainlink/ccip-sdk'
+import { SolanaTokenManager } from '@chainlink/ccip-sdk/cct/solana'
+import { Wallet } from '@coral-xyz/anchor'
+
+const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
+const cct = SolanaTokenManager.fromChain(chain)
+
+const { steps, poolAddress, poolSignerAddress } = await cct.onboardToken({
+  tokenAddress: mint,
+  poolType: 'burn-mint',
+  remoteChains: [
+    {
+      remoteChainSelector: 16015286601757825753n, // Ethereum Sepolia
+      remoteTokenAddress: '0x…',
+      remotePoolAddresses: ['0x…'],
+      remoteTokenDecimals: 18,
+      inboundRateLimiterConfig: { enabled: true, capacity: 100_000n * 10n ** 9n, rate: 10n ** 9n },
+      outboundRateLimiterConfig: { enabled: true, capacity: 100_000n * 10n ** 9n, rate: 10n ** 9n },
+      // 2.0 lane config
+      allowedFinality: { finalityDepth: 5 },
+      fastFinalityRateLimits: {
+        inbound: { enabled: true, capacity: 10_000n * 10n ** 9n, rate: 10n ** 8n },
+        outbound: { enabled: true, capacity: 10_000n * 10n ** 9n, rate: 10n ** 8n },
+      },
+    },
+  ],
+  wallet: new Wallet(keypair),
+})
+
+for (const { name, hashes } of steps) console.log(name, hashes)
+```
+
+`steps` lists the steps this call ran, with their transaction signatures. It is empty if the token was already onboarded.
+
+## Onboard with a Squads vault
+
+With an external signer, `generateUnsignedOnboardToken` returns one step at a time. Each step's operations check the state that the previous step leaves, so a step can only be built after the previous one lands.
+
+### The lookup table needs a hot wallet
+
+Solana creates a lookup table from a recent slot, and only accepts slots from the last 512 (about 3 minutes). A vault transaction that waits longer for approvals cannot create one.
+
+So pass a hot wallet as `lookupTablePayer`. Onboarding then creates the pool's lookup table in a `createLookupTable` step of its own. The hot wallet pays for it and signs it alone; the vault stays the table's authority. The vault fills the table in the `setPool` step, which has no time limit.
+
+### The loop
+
+1. Call `generateUnsignedOnboardToken` with the vault as `payer` and the hot wallet as `lookupTablePayer`.
+2. Sign and land each returned transaction, in order, with the result's `payer`:
+   - for `createLookupTable`, the hot wallet signs right away;
+   - for every other step, propose the transactions to the vault, and wait until they execute.
+3. If the result has a `lookupTableAddress`, pass it as `poolLookupTableAddress` from now on.
+4. Call again. Stop when `step` is `undefined`.
+
+```typescript
+import type { GenerateOnboardTokenParams } from '@chainlink/ccip-sdk/cct/solana'
+
+const onboarding: GenerateOnboardTokenParams = {
+  tokenAddress: mint,
+  poolType: 'lock-release',
+  remoteChains: [/* as above */],
+  payer: vault, // the vault is the mint authority, the payer and the future pool owner
+  lookupTablePayer: hotWallet.publicKey.toBase58(),
+}
+
+for (;;) {
+  const { step, transactions, payer, lookupTableAddress } =
+    await cct.generateUnsignedOnboardToken(onboarding)
+  if (!step) break
+  console.log('next step:', step.name, step.remoteChainSelectors ?? '')
+  for (const tx of transactions) {
+    // tx.instructions can go straight into a Squads vault transaction;
+    // serializeUnsignedTx gives a legacy message for tools that import one
+    const message = await cct.serializeUnsignedTx(tx, payer)
+    if (step.name === 'createLookupTable') await signWithHotWalletAndSend(message)
+    else await proposeAndWaitForExecution(message) // your Squads integration
+  }
+  if (lookupTableAddress) onboarding.poolLookupTableAddress = lookupTableAddress
+}
+```
+
+Keep `poolLookupTableAddress` with your onboarding state. Without it, a later call cannot find the table, and creates another.
+
+Without `lookupTablePayer`, the `setPool` step creates the table itself, in a vault transaction. That works only if the vault executes it within about 3 minutes.
+
+The fee payer and the authority can differ. Pass the vault as `authority` and another account as `payer`; then both sign every vault step.
+
+## Check progress and resume
+
+`getTokenOnboardingPlan` lists the remaining steps without building anything:
+
+```typescript
+const { steps } = await cct.getTokenOnboardingPlan({ ...onboarding, payer: vault })
+console.log(steps.map(({ name }) => name)) // e.g. ['setPoolInterfaceImplementation', 'setTokenAuthority']
+```
+
+Every call plans from the on-chain state. To resume an interrupted onboarding, call `onboardToken` or `generateUnsignedOnboardToken` again with the same parameters.
+
+To add a remote chain to an onboarded token, call onboarding again with the new chain in `remoteChains`. Onboarding configures only the chains and lane configs that the pool does not have yet, and keeps the registry's account resolution unless you pass `accountResolution`.
+
+## Parameters
+
+| Parameter                | Description                                                                                                                                                                                                           |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tokenAddress`           | The token mint.                                                                                                                                                                                                       |
+| `poolType`               | `burn-mint` or `lock-release`.                                                                                                                                                                                        |
+| `poolProgramAddress`     | The pool program. Defaults to the canonical program for `poolType`. It must be a CCIP 2.0 program.                                                                                                                    |
+| `remoteChains`           | The remote chains to connect. See below.                                                                                                                                                                              |
+| `allowlist`              | Senders to allowlist when the pool is deployed. Setting it enables the allowlist.                                                                                                                                     |
+| `accountResolution`      | How the Router resolves the pool's accounts on 2.0 lanes. Defaults to `Standard`; omitted, a registry already on the 2.0 interface keeps its own.                                                                     |
+| `poolLookupTableAddress` | A lookup table to set instead of creating one: one that onboarding created, or your own. It must be empty, with the authority as its authority, or start with the pool's CCIP addresses.                              |
+| `payer`                  | `generateUnsignedOnboardToken` and `getTokenOnboardingPlan` only. Pays every transaction, except `createLookupTable`'s.                                                                                               |
+| `authority`              | `generateUnsignedOnboardToken` and `getTokenOnboardingPlan` only. The mint authority, future pool owner and token administrator. Defaults to `payer`.                                                                 |
+| `lookupTablePayer`       | `generateUnsignedOnboardToken` and `getTokenOnboardingPlan` only. A hot wallet that creates the pool's lookup table in its own step. See [the lookup table needs a hot wallet](#the-lookup-table-needs-a-hot-wallet). |
+| `wallet`                 | `onboardToken` only. Signs and pays every step. It must be the mint authority.                                                                                                                                        |
+| `computeUnits`           | `onboardToken` only. The compute unit limit of each transaction. Simulated by default.                                                                                                                                |
+
+Each entry of `remoteChains` takes:
+
+| Field                       | Description                                                                                                                            |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `remoteChainSelector`       | The remote chain's CCIP selector.                                                                                                      |
+| `remoteTokenAddress`        | The remote token, in the remote chain's format (`0x…` for EVM).                                                                        |
+| `remotePoolAddresses`       | The remote pools, in the remote chain's format. At least one.                                                                          |
+| `remoteTokenDecimals`       | The remote token's decimals.                                                                                                           |
+| `inboundRateLimiterConfig`  | The rate limit on tokens received from the remote chain.                                                                               |
+| `outboundRateLimiterConfig` | The rate limit on tokens sent to the remote chain.                                                                                     |
+| `allowedFinality`           | The finality that transfers may request below full finality. Defaults to `{ finalityDepth: 0 }`: full finality only.                   |
+| `tokenTransferFeeConfig`    | The fees the pool charges on transfers to the remote chain. Defaults to disabled.                                                      |
+| `ccvConfig`                 | The CCVs the pool requires on the lane. Defaults to none.                                                                              |
+| `fastFinalityRateLimits`    | `{ inbound, outbound }` rate limits for FTF transfers. Omit it to create none; the lane's rate limits then apply to FTF transfers too. |
+
+Onboarding validates every parameter, including each remote chain's, before it reads the chain. An invalid remote chain field fails with its path, such as `remoteChains[1].outboundRateLimiterConfig.rate`.
+
+## Errors
+
+| Error                          | When                                                                                                                                                                                                                                                                                                  |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CCTParamsInvalidError`        | A parameter is invalid, or a precondition fails: the authority is not the mint authority, the pool owner, the token administrator, or the pool program's upgrade authority where the program does not allow self-served pools.                                                                        |
+| `CCTOperationUnsupportedError` | The pool program predates CCIP 2.0.                                                                                                                                                                                                                                                                   |
+| `CCTTxFailedError`             | A step fails. With `onboardToken`, every error once the steps start carries the steps that landed before it in `error.context.executedSteps`. If `setPool` fails after creating the lookup table, `error.context.lookupTableAddress` holds it: pass it as `poolLookupTableAddress` to resume with it. |
+
+## Related
+
+- [CCT on Solana](./solana): each onboarding operation, one at a time
+- [SolanaTokenManager API reference](/sdk/classes/SolanaTokenManager)
+- [Token Pools](./reference/inspecting-pools): inspect deployed pool configuration

@@ -1,4 +1,4 @@
-import { PublicKey } from '@solana/web3.js'
+import { PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -12,11 +12,13 @@ import {
 } from '../../operation.ts'
 import {
   createRouterProgram,
+  createRouterTokenAdminRegistryV2Program,
   deriveRouterConfigPda,
   deriveTokenAdminRegistryPda,
 } from '../../programs/router.ts'
 import { submit } from '../../submit.ts'
 import { parsePublicKey, validateAuthorityMatchesWallet } from '../../validate.ts'
+import { readTokenMintAuthority, validateMultisigOwnerSigner } from '../mint-authority.ts'
 
 /** Parameters shared by owner override pending administrator generation and execution. */
 type OwnerOverridePendingAdministratorParams = {
@@ -26,7 +28,10 @@ type OwnerOverridePendingAdministratorParams = {
   address: string
   /** Administrator to propose as the replacement pending administrator. */
   newAdmin: string
-  /** Mint authority. Defaults to `payer` for single-signer transactions. */
+  /**
+   * Mint authority, or a signer of a 1-of-N SPL multisig mint authority. Defaults to `payer` for
+   * single-signer transactions.
+   */
   authority?: string
 }
 
@@ -52,7 +57,10 @@ type ParsedOwnerOverridePendingAdministratorParams = {
   authority: PublicKey
 }
 
-/** Replaces an initial pending TokenAdminRegistry administrator using the mint authority. */
+/**
+ * Replaces an initial pending TokenAdminRegistry administrator using the mint authority, or a
+ * signer of a 1-of-N SPL multisig mint authority.
+ */
 export class OwnerOverridePendingAdministrator extends SolanaOperation<
   OwnerOverridePendingAdministratorParams,
   UnsignedSolanaTx,
@@ -77,7 +85,11 @@ export class OwnerOverridePendingAdministrator extends SolanaOperation<
     }
   }
 
-  /** Builds the override instruction. The Router verifies the mint authority and initial state on-chain. */
+  /**
+   * Builds the override instruction: the Router's multisig variant when the mint authority is an
+   * SPL multisig, whose threshold and signers are checked first. The Router verifies the mint
+   * authority and initial state on-chain.
+   */
   protected async buildUnsigned(
     chain: SolanaChain,
     opts: ParsedOwnerOverridePendingAdministratorParams,
@@ -93,15 +105,30 @@ export class OwnerOverridePendingAdministrator extends SolanaOperation<
       )
     }
 
-    const instruction = await createRouterProgram(chain, router, payer)
-      .methods.ownerOverridePendingAdministrator(newAdmin)
-      .accounts({
-        config: deriveRouterConfigPda(router),
-        tokenAdminRegistry: deriveTokenAdminRegistryPda(router, tokenMint),
-        mint: tokenMint,
-        authority,
-      })
-      .instruction()
+    const accounts = {
+      config: deriveRouterConfigPda(router),
+      tokenAdminRegistry: deriveTokenAdminRegistryPda(router, tokenMint),
+      mint: tokenMint,
+      authority,
+    }
+    const { mintAuthority, multisig } = await readTokenMintAuthority(chain, tokenMint)
+    let instruction
+    if (mintAuthority && multisig) {
+      validateMultisigOwnerSigner(this.name, mintAuthority, multisig, authority)
+      instruction = await createRouterTokenAdminRegistryV2Program(chain, router, payer)
+        .methods.multisigOwnerOverridePendingAdministrator(newAdmin)
+        .accountsStrict({
+          ...accounts,
+          mintAuthorityMultisig: mintAuthority,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction()
+    } else {
+      instruction = await createRouterProgram(chain, router, payer)
+        .methods.ownerOverridePendingAdministrator(newAdmin)
+        .accounts(accounts)
+        .instruction()
+    }
 
     chain.logger.debug(
       `${

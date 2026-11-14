@@ -17,6 +17,7 @@ import {
 import {
   buildCreateLookupTableInstruction,
   deriveCcipLookupTableAddresses,
+  recentLookupTableSlot,
 } from '../../programs/alt.ts'
 import type { PoolProgramRef } from '../../programs/token-pool.ts'
 import { submit } from '../../submit.ts'
@@ -125,7 +126,7 @@ export class CreateLookupTable extends SolanaOperation<
       const { instruction: createIx, lookupTableAddress } = buildCreateLookupTableInstruction({
         authority,
         payer,
-        recentSlot: await chain.connection.getSlot('finalized'),
+        recentSlot: await recentLookupTableSlot(chain.connection),
       })
       chain.logger.debug(
         `${this.name}: mode = createEmpty, lookupTable = ${lookupTableAddress.toBase58()}`,
@@ -150,7 +151,7 @@ export class CreateLookupTable extends SolanaOperation<
     const { instruction: createIx, lookupTableAddress } = buildCreateLookupTableInstruction({
       authority,
       payer,
-      recentSlot: await chain.connection.getSlot('finalized'),
+      recentSlot: await recentLookupTableSlot(chain.connection),
     })
 
     const ccipAddresses = await deriveCcipLookupTableAddresses(chain, {

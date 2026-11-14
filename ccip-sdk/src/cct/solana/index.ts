@@ -11,6 +11,14 @@ import type { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import type { UnsignedSolanaTx } from '../../solana/types.ts'
 import { TokenManager } from '../token-manager.ts'
+import {
+  type ExecuteOnboardTokenParams,
+  type ExecuteOnboardTokenResult,
+  type GenerateOnboardTokenParams,
+  type GenerateOnboardTokenResult,
+  type TokenOnboardingPlan,
+  OnboardToken,
+} from './onboarding/onboard-token.ts'
 import { type SerializedSolanaTxEncoding, serializeUnsignedSolanaTx } from './serialize.ts'
 import {
   type ExecuteAcceptAdminParams,
@@ -157,6 +165,8 @@ import {
   type GenerateWithdrawFeeTokensResult,
   type GenerateWithdrawLiquidityParams,
   type GenerateWithdrawLiquidityResult,
+  type GetCCVConfigParams,
+  type GetCCVConfigResult,
   type GetTokenPoolRemotesParams,
   type GetTokenPoolRemotesResult,
   type GetTokenPoolStateParams,
@@ -171,6 +181,7 @@ import {
   DeployTokenPool,
   EditChainConfigV2,
   EditChainRemoteConfig,
+  GetCCVConfig,
   GetTokenPoolRemotes,
   GetTokenPoolState,
   InitChainConfigV2,
@@ -270,10 +281,13 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   // CCIP 2.0 token pool operations
   readonly #deleteFastFinalityRateLimit = new DeleteFastFinalityRateLimit()
   readonly #editChainConfigV2 = new EditChainConfigV2()
+  readonly #getCCVConfig = new GetCCVConfig()
   readonly #initChainConfigV2 = new InitChainConfigV2()
   readonly #initFastFinalityRateLimit = new InitFastFinalityRateLimit()
   readonly #setFastFinalityRateLimit = new SetFastFinalityRateLimit()
   readonly #withdrawFeeTokens = new WithdrawFeeTokens()
+  // Onboarding
+  readonly #onboardToken = new OnboardToken()
 
   /** Creates a Solana CCT manager for an existing chain. */
   constructor(chain: SolanaChain) {
@@ -1791,639 +1805,6 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction that replaces an initialized Solana token pool remote-chain
-   * config. Initialize the config first with `generateUnsignedInitChainRemoteConfig`. Each call
-   * replaces the remote token address, pool addresses, and decimals. Pass `poolProgramAddress`
-   * for a non-canonical pool program; `authority` defaults to `payer`.
-   *
-   * @see {@link editChainRemoteConfig}
-   * @see {@link generateUnsignedInitChainRemoteConfig}
-   * @see {@link generateUnsignedDeleteChainRemoteConfig}
-   *
-   * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedEditChainRemoteConfig({
-   *   tokenAddress: mint,
-   *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
-   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
-   *   remoteTokenDecimals: 18,
-   *   payer,
-   *   authority,
-   * })
-   * ```
-   */
-  generateUnsignedEditChainRemoteConfig(
-    opts: GenerateEditChainRemoteConfigParams,
-  ): Promise<GenerateEditChainRemoteConfigResult> {
-    return this.#editChainRemoteConfig.generate(this.chain, opts)
-  }
-
-  /**
-   * Replaces an initialized Solana token pool remote-chain config with the pool owner wallet.
-   * Initialize the config first with `initChainRemoteConfig`. Each call replaces the remote token
-   * address, pool addresses, and decimals.
-   *
-   * @see {@link generateUnsignedEditChainRemoteConfig}
-   * @see {@link initChainRemoteConfig}
-   * @see {@link deleteChainRemoteConfig}
-   *
-   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
-   * from the executing wallet.
-   * @throws {@link CCTTxFailedError} If simulation or the pool rejects the transaction.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.editChainRemoteConfig({
-   *   tokenAddress: mint,
-   *   remoteChainSelector: 5009297550715157269n,
-   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
-   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
-   *   remoteTokenDecimals: 18,
-   *   wallet,
-   * })
-   * ```
-   */
-  editChainRemoteConfig(
-    opts: ExecuteEditChainRemoteConfigParams,
-  ): Promise<ExecuteEditChainRemoteConfigResult> {
-    return this.#editChainRemoteConfig.execute(this.chain, opts)
-  }
-
-  /**
-   * Builds unsigned Solana lookup table extend instructions.
-   *
-   * Pass `tokenAddress` (plus `poolProgramAddress` for a non-canonical pool program) to append the
-   * standard CCIP pool addresses; pass `additionalAddresses` to append manual addresses. `authority`
-   * defaults to `payer`.
-   *
-   * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
-   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
-   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedAppendToLookupTable({
-   *   lookupTableAddress,
-   *   payer: squadsVault,
-   *   authority: squadsVault,
-   *   tokenAddress: mint,
-   *   poolProgramAddress: poolProgram,
-   *   additionalAddresses: [extraAccount],
-   * })
-   * ```
-   */
-  generateUnsignedAppendToLookupTable(
-    opts: GenerateAppendToLookupTableParams,
-  ): Promise<GenerateAppendToLookupTableResult> {
-    return this.#appendToLookupTable.generate(this.chain, opts)
-  }
-
-  /**
-   * Extends a Solana lookup table.
-   *
-   * Pass `tokenAddress` (plus `poolProgramAddress` for a non-canonical pool program) to append the
-   * standard CCIP pool addresses.
-   *
-   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
-   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
-   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.appendToLookupTable({
-   *   lookupTableAddress,
-   *   wallet,
-   *   tokenAddress: mint,
-   *   poolProgramAddress: poolProgram,
-   *   additionalAddresses: [extraAccount],
-   * })
-   * ```
-   */
-  appendToLookupTable(
-    opts: ExecuteAppendToLookupTableParams,
-  ): Promise<ExecuteAppendToLookupTableResult> {
-    return this.#appendToLookupTable.execute(this.chain, opts)
-  }
-
-  /**
-   * Builds an unsigned Solana instruction that accepts a pending token administrator role.
-   *
-   * The supplied authority must be the pending token administrator.
-   *
-   * @remarks
-   * Call this after {@link generateUnsignedRegisterAdmin} or {@link generateUnsignedTransferAdmin}
-   * and before {@link generateUnsignedSetPool}. `authority` defaults to `payer`; Squads/vault
-   * flows should use this method with their fee payer and signing authority explicitly.
-   *
-   * @see {@link generateUnsignedRegisterAdmin}
-   * @see {@link generateUnsignedTransferAdmin}
-   * @see {@link generateUnsignedSetPool}
-   *
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
-   * pending token administrator.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedAcceptAdmin({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   payer: pendingAdmin,
-   * })
-   * ```
-   */
-  generateUnsignedAcceptAdmin(opts: GenerateAcceptAdminParams): Promise<GenerateAcceptAdminResult> {
-    return this.#acceptAdmin.generate(this.chain, opts)
-  }
-
-  /**
-   * Accepts a pending token administrator role using the pending administrator wallet.
-   *
-   * @remarks
-   * Call this after {@link registerAdmin} or {@link transferAdmin} and before {@link setPool}.
-   * `authority` defaults to `wallet`; Squads/vault flows should use
-   * {@link generateUnsignedAcceptAdmin} instead.
-   *
-   * @see {@link registerAdmin}
-   * @see {@link transferAdmin}
-   * @see {@link setPool}
-   *
-   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
-   * the executing wallet/pending token administrator.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
-   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.acceptAdmin({ tokenAddress: mint, address: router, wallet: pendingAdminWallet })
-   * ```
-   */
-  acceptAdmin(opts: ExecuteAcceptAdminParams): Promise<ExecuteAcceptAdminResult> {
-    return this.#acceptAdmin.execute(this.chain, opts)
-  }
-
-  /**
-   * Builds an unsigned instruction that replaces an initial pending registry administrator.
-   *
-   * @remarks
-   * Only the mint authority may authorize this recovery path, and only while the registry has no
-   * accepted administrator. It replaces the initial pending administrator; the replacement must
-   * still call {@link generateUnsignedAcceptAdmin}. `authority` defaults to `payer`; use this
-   * unsigned method for Squads/vault signatures.
-   *
-   * @see {@link ownerOverridePendingAdministrator} For wallet-based execution.
-   * @see {@link generateUnsignedAcceptAdmin} The replacement administrator must accept separately.
-   *
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or the registry already has an
-   * accepted administrator.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedOwnerOverridePendingAdministrator({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   newAdmin: replacementAdmin,
-   *   payer: mintAuthority,
-   * })
-   * ```
-   */
-  generateUnsignedOwnerOverridePendingAdministrator(
-    opts: GenerateOwnerOverridePendingAdministratorParams,
-  ): Promise<GenerateOwnerOverridePendingAdministratorResult> {
-    return this.#ownerOverridePendingAdministrator.generate(this.chain, opts)
-  }
-
-  /**
-   * Replaces an initial pending registry administrator using the mint authority wallet.
-   *
-   * @remarks
-   * This recovery path only works while the registry has no accepted administrator. It replaces the
-   * initial pending administrator; it does not make the replacement an administrator. The replacement
-   * must call {@link acceptAdmin} separately. `authority` defaults to `wallet`; use
-   * {@link generateUnsignedOwnerOverridePendingAdministrator} for Squads/vault flows.
-   *
-   * @see {@link generateUnsignedOwnerOverridePendingAdministrator} For externally signed transactions.
-   * @see {@link acceptAdmin} The replacement administrator must accept the role separately.
-   *
-   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an accepted
-   * administrator, or `authority` differs from the wallet.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
-   * @throws {@link CCTTxFailedError} If the Router rejects a non-mint authority or the registry changes.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.ownerOverridePendingAdministrator({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   newAdmin: replacementAdmin,
-   *   wallet: mintAuthorityWallet,
-   * })
-   * ```
-   */
-  ownerOverridePendingAdministrator(
-    opts: ExecuteOwnerOverridePendingAdministratorParams,
-  ): Promise<ExecuteOwnerOverridePendingAdministratorResult> {
-    return this.#ownerOverridePendingAdministrator.execute(this.chain, opts)
-  }
-
-  /**
-   * Builds an unsigned Solana token registration instruction.
-   *
-   * This proposes the registry administrator. The proposed admin must accept the role using
-   * {@link generateUnsignedAcceptAdmin} before calling {@link generateUnsignedSetPool}. The
-   * administrator defaults to the mint authority and the method to `owner`;
-   * choose `ccip-admin` when the Router CCIP admin signs. Provide `administrator`
-   * to nominate a different admin or register a mint with no mint authority.
-   *
-   * @see {@link generateUnsignedAcceptAdmin}
-   * @see {@link generateUnsignedSetPool}
-   *
-   * @throws {@link CCTParamsInvalidError} If an address or `registrationMethod` is invalid, the
-   * authority does not match the selected registration method, `administrator` is required, or a
-   * registry entry already exists for the token.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
-   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedRegisterAdmin({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   payer: mintAuthority,
-   * })
-   * ```
-   */
-  generateUnsignedRegisterAdmin(
-    opts: GenerateRegisterAdminParams,
-  ): Promise<GenerateRegisterAdminResult> {
-    return this.#registerAdmin.generate(this.chain, opts)
-  }
-
-  /**
-   * Proposes a token registry administrator using the executing wallet as registration authority
-   * and fee payer. The proposed admin must {@link acceptAdmin} before calling {@link setPool}.
-   *
-   * @see {@link acceptAdmin}
-   * @see {@link setPool}
-   *
-   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If an address or `registrationMethod` is invalid, the
-   * authority does not match the selected registration method or executing wallet,
-   * `administrator` is required, or a registry entry already exists for the token.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
-   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.registerAdmin({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   wallet,
-   * })
-   * ```
-   */
-  registerAdmin(opts: ExecuteRegisterAdminParams): Promise<ExecuteRegisterAdminResult> {
-    return this.#registerAdmin.execute(this.chain, opts)
-  }
-
-  /**
-   * Builds an unsigned instruction to remove addresses from a token pool allowlist. The pool must
-   * be initialized first. Pass `poolProgramAddress` for a non-canonical pool program;
-   * `authority` defaults to `payer`. Every removed address must already be allowlisted or the
-   * transaction reverts.
-   *
-   * @remarks Removal does not change enforcement; removing the last allowed sender while the
-   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
-   *
-   * @see {@link generateUnsignedConfigureAllowlist}
-   * @see {@link removeFromAllowlist}
-   *
-   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedRemoveFromAllowlist({
-   *   tokenAddress: mint,
-   *   remove: [sender],
-   *   payer,
-   *   authority,
-   * })
-   * ```
-   */
-  generateUnsignedRemoveFromAllowlist(
-    opts: GenerateRemoveFromAllowlistParams,
-  ): Promise<GenerateRemoveFromAllowlistResult> {
-    return this.#removeFromAllowlist.generate(this.chain, opts)
-  }
-
-  /**
-   * Removes addresses from an initialized Solana token pool allowlist using the pool owner wallet.
-   * Every removed address must already be allowlisted or the transaction reverts.
-   *
-   * @remarks Removal does not change enforcement; removing the last allowed sender while the
-   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
-   *
-   * @see {@link configureAllowlist}
-   * @see {@link generateUnsignedRemoveFromAllowlist}
-   *
-   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
-   * from the executing wallet.
-   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.removeFromAllowlist({
-   *   tokenAddress: mint,
-   *   remove: [sender],
-   *   wallet,
-   * })
-   * ```
-   */
-  removeFromAllowlist(
-    opts: ExecuteRemoveFromAllowlistParams,
-  ): Promise<ExecuteRemoveFromAllowlistResult> {
-    return this.#removeFromAllowlist.execute(this.chain, opts)
-  }
-
-  /**
-   * Builds unsigned Solana `setPool` instructions.
-   *
-   * The token must first be registered and its proposed administrator accepted. The `payer` pays
-   * transaction fees; `authority` defaults to `payer`, while Squads/multisig flows should pass
-   * the token admin/vault authority explicitly. For a newly deployed canonical pool, create the
-   * pool signer's ATA before calling this operation.
-   *
-   * @see {@link generateUnsignedRegisterAdmin}
-   * @see {@link generateUnsignedAcceptAdmin}
-   * @see {@link generateUnsignedDeployTokenPool}
-   * @see {@link generateUnsignedCreateTokenAccount}
-   *
-   * @throws {@link CCTParamsInvalidError} If an address or `writableIndexes` is invalid.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedSetPool({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   poolLookupTableAddress: lookupTable,
-   *   payer: squadsVault,
-   *   authority: tokenAdmin,
-   * })
-   * ```
-   */
-  generateUnsignedSetPool(opts: GenerateSetPoolParams): Promise<GenerateSetPoolResult> {
-    return this.#setPool.generate(this.chain, opts)
-  }
-
-  /**
-   * Registers a token pool. The token must first be registered and its proposed administrator
-   * accepted; the wallet must be the token admin authority. For a newly deployed canonical pool,
-   * create the pool signer's ATA before calling this operation.
-   *
-   * @see {@link registerAdmin}
-   * @see {@link acceptAdmin}
-   * @see {@link deployTokenPool}
-   * @see {@link createTokenAccount}
-   *
-   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If an address or `writableIndexes` is invalid.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.setPool({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   poolLookupTableAddress: lookupTable,
-   *   wallet,
-   * })
-   * ```
-   */
-  setPool(opts: ExecuteSetPoolParams): Promise<ExecuteSetPoolResult> {
-    return this.#setPool.execute(this.chain, opts)
-  }
-
-  /**
-   * Builds an unsigned Solana instruction that transfers a token administrator role.
-   *
-   * @remarks
-   * This transfers an already accepted administrator role; it does not register a token. The
-   * proposed administrator must call {@link generateUnsignedAcceptAdmin} before becoming the
-   * current administrator.
-   *
-   * @see {@link generateUnsignedAcceptAdmin}
-   *
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
-   * current token administrator.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const unsigned = await cct.generateUnsignedTransferAdmin({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   newAdmin,
-   *   payer: currentAdmin,
-   * })
-   * ```
-   */
-  generateUnsignedTransferAdmin(
-    opts: GenerateTransferAdminParams,
-  ): Promise<GenerateTransferAdminResult> {
-    return this.#transferAdmin.generate(this.chain, opts)
-  }
-
-  /**
-   * Transfers a token administrator role using the executing wallet as the current administrator.
-   *
-   * @remarks
-   * This transfers an already accepted administrator role; it does not register a token. The
-   * proposed administrator must call {@link acceptAdmin} before becoming the current administrator.
-   *
-   * @see {@link acceptAdmin}
-   *
-   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
-   * the executing wallet/current token administrator.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
-   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * await cct.transferAdmin({
-   *   tokenAddress: mint,
-   *   address: router,
-   *   newAdmin,
-   *   wallet: currentAdminWallet,
-   * })
-   * ```
-   */
-  transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
-    return this.#transferAdmin.execute(this.chain, opts)
-  }
-
-  /**
-   * Reads an SPL token mint's metadata, program, supply, initialization state, and mint/freeze
-   * authorities.
-   *
-   * @remarks Metadata comes from {@link SolanaChain.getTokenInfo}; mint state comes directly from
-   * the SPL Token or Token-2022 mint account. Supply is in base units. Solana-only; no EVM CCT
-   * equivalent exists.
-   *
-   * @see {@link setTokenAuthority} Sets the mint or freeze authorities returned here.
-   * @see {@link updateMetadataAuthority} Updates the Metaplex metadata associated with this mint.
-   * @see {@link getTokenPoolState} Reads pool configuration rather than mint state.
-   * @see {@link SolanaChain.getTokenInfo} Reads the underlying token metadata.
-   *
-   * @throws {@link CCTParamsInvalidError} If `tokenAddress` is not a valid Solana public key.
-   * @throws {@link CCIPSplTokenInvalidError} If the token metadata is not a valid SPL token.
-   * @throws {@link CCIPTokenMintNotFoundError} If the mint account does not exist.
-   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
-   * @throws {@link CCIPTokenDataParseError} If the mint data cannot be parsed.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const info = await cct.getTokenInfo({ tokenAddress: mint })
-   * console.log(`${info.symbol}: ${info.decimals} decimals`)
-   * ```
-   */
-  getTokenInfo(opts: GetTokenInfoParams): Promise<GetTokenInfoResult> {
-    return this.#getTokenInfo.query(this.chain, opts)
-  }
-
-  /**
-   * Reads all, or one selected, Solana token pool remote-chain configurations.
-   *
-   * @remarks Results are keyed by remote network name. Omit `remoteChainSelector` to scan all
-   * configured remotes; provide it to query one. Rate-limit amounts use the local mint's smallest
-   * unit.
-   *
-   * @throws {@link CCTParamsInvalidError} If the token or pool program address or remote selector is invalid.
-   * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
-   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If the selected remote-chain config does not exist.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const remotes = await cct.getTokenPoolRemotes({
-   *   tokenAddress: mint,
-   *   remoteChainSelector: 5009297550715157269n,
-   * })
-   * console.log(remotes)
-   * ```
-   */
-  getTokenPoolRemotes(opts: GetTokenPoolRemotesParams): Promise<GetTokenPoolRemotesResult> {
-    return this.#getTokenPoolRemotes.query(this.chain, opts)
-  }
-
-  /**
-   * Reads a token pool's state account. A lock-release pool's config also reports its liquidity
-   * fields (`rebalancer`, `canAcceptLiquidity`); narrow on their presence.
-   *
-   * @remarks The EVM counterpart, `EVMTokenManager.getTokenPoolState`, returns a different shape:
-   * its fields are flat where these nest under `state.config`, it spells `config.mint` /
-   * `config.decimals` / `config.rmnRemote` as `token` / `tokenDecimals` / `rmnProxy`, and its
-   * `version` is the pool's protocol semver (`'2.0.0'`), not the account-layout number returned
-   * here. `owner`, `rateLimitAdmin` and `router` are named alike on both.
-   *
-   * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
-   * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
-   * @throws {@link CCTDataDecodeError} If the pool state account cannot be decoded.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const state = await cct.getTokenPoolState({
-   *   tokenAddress: mint,
-   * })
-   * // config.owner must sign pool writes; config.rateLimitAdmin may set rate limits
-   * console.log(state.config.owner, state.config.mint, state.config.decimals)
-   * // lock-release only: who rebalances the pool, and whether it accepts liquidity
-   * if ('rebalancer' in state.config) {
-   *   console.log(state.config.rebalancer, state.config.canAcceptLiquidity)
-   * }
-   * ```
-   */
-  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
-    return this.#getTokenPoolState.query(this.chain, opts)
-  }
-
-  /**
-   * Reads a token's TokenAdminRegistry administrator, pending administrator, and pool lookup table.
-   *
-   * @throws {@link CCTParamsInvalidError} If `address` or `tokenAddress` is not a valid Solana public key.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const config = await cct.getTokenAdminRegistry({
-   *   address: router,
-   *   tokenAddress: mint,
-   * })
-   * ```
-   */
-  getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
-    return this.#getTokenAdminRegistry.query(this.chain, opts)
-  }
-
-  /**
-   * Lists all SPL token mints configured in a Router's TokenAdminRegistry in a single scan;
-   * pagination is not supported.
-   *
-   * @throws {@link CCTParamsInvalidError} If `address` is not a valid Solana public key.
-   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
-   *
-   * @example
-   * ```ts
-   * const cct = SolanaTokenManager.fromChain(chain)
-   * const tokens = await cct.getSupportedTokens({ address: router })
-   * ```
-   */
-  getSupportedTokens(opts: GetSupportedTokensParams): Promise<string[]> {
-    return this.#getSupportedTokens.query(this.chain, opts)
-  }
-
-  /**
    * Builds an unsigned instruction that creates a CCIP 2.0 token pool's `ChainConfigV2` for a
    * remote chain: the lane's allowed finality, token transfer fees, and CCVs. It also creates, if
    * missing, the fee vault token account where the lane's in-token BPS fee accrues. Pass
@@ -2491,20 +1872,28 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Builds an unsigned instruction that replaces a CCIP 2.0 token pool's `ChainConfigV2` for a
-   * remote chain. Pass `poolProgramAddress` for a non-canonical pool program; `authority`
-   * defaults to `payer`.
+   * Builds an unsigned instruction that edits a CCIP 2.0 token pool's `ChainConfigV2` for a remote
+   * chain. Pass `poolProgramAddress` for a non-canonical pool program; `authority` defaults to
+   * `payer`.
    *
-   * @remarks On-chain execution requires `authority` to be the pool owner. Every field is
-   * replaced and omitted ones reset to their defaults; read the current config with
-   * `chain.getTokenPoolConfig` to change only some. The config must exist.
+   * @remarks On-chain execution requires `authority` to be the pool owner. Each of
+   * `allowedFinality`, `tokenTransferFeeConfig` and `ccvConfig` replaces that part of the config in
+   * full when passed, and keeps its current value when omitted (`ccvConfig: {}` clears the CCVs).
+   * Kept values are read when the instruction is built, so build it close to execution if the
+   * config may change meanwhile. Read them with `chain.getTokenPoolConfig` (finality and fees) and
+   * {@link getCCVConfig}. The config must exist.
    *
    * @see {@link editChainConfigV2}
+   * @see {@link getCCVConfig}
    * @see {@link generateUnsignedInitChainConfigV2}
    *
    * @throws {@link CCTParamsInvalidError} If a parameter is malformed or the pool program would
    * reject the config.
    * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If a config field is omitted and the lane
+   * has no `ChainConfigV2`.
+   * @throws {@link CCTDataDecodeError} If a config field is omitted and the lane's `ChainConfigV2`
+   * cannot be decoded.
    *
    * @example
    * ```ts
@@ -2525,19 +1914,24 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
-   * Replaces a CCIP 2.0 token pool's `ChainConfigV2` for a remote chain with the pool owner
-   * wallet.
+   * Edits a CCIP 2.0 token pool's `ChainConfigV2` for a remote chain with the pool owner wallet.
    *
-   * @remarks Every field is replaced and omitted ones reset to their defaults. The config must
-   * exist.
+   * @remarks Each of `allowedFinality`, `tokenTransferFeeConfig` and `ccvConfig` replaces that part
+   * of the config in full when passed, and keeps its current value when omitted (`ccvConfig: {}`
+   * clears the CCVs). The config must exist.
    *
    * @see {@link generateUnsignedEditChainConfigV2}
+   * @see {@link getCCVConfig}
    * @see {@link initChainConfigV2}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
    * @throws {@link CCTParamsInvalidError} If a parameter is invalid or the authority differs from
    * the executing wallet.
    * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If a config field is omitted and the lane
+   * has no `ChainConfigV2`.
+   * @throws {@link CCTDataDecodeError} If a config field is omitted and the lane's `ChainConfigV2`
+   * cannot be decoded.
    * @throws {@link CCTTxFailedError} If the config does not exist, the wallet is not the pool
    * owner, or simulation/submission fails.
    *
@@ -2554,6 +1948,40 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    */
   editChainConfigV2(opts: ExecuteEditChainConfigV2Params): Promise<ExecuteEditChainConfigV2Result> {
     return this.#editChainConfigV2.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads the CCVs a CCIP 2.0 token pool requires on a remote chain's lane, from its
+   * `ChainConfigV2`. Pass `poolProgramAddress` for a non-canonical pool program.
+   *
+   * @remarks The result has the shape of the `ccvConfig` param of {@link editChainConfigV2} and
+   * {@link initChainConfigV2}, so it can be modified and passed back; edit keeps the lane's
+   * finality and fees when they are omitted. A lane without a
+   * `ChainConfigV2` returns empty lists and a `0n` `thresholdAmount`: the pool requires no CCVs of
+   * its own on it. Base lists apply to every transfer; threshold lists add CCVs from
+   * `thresholdAmount` (local mint base units) when it is positive. These are the pool's own CCVs,
+   * required on top of the lane's.
+   *
+   * @see {@link generateUnsignedEditChainConfigV2}
+   *
+   * @throws {@link CCTParamsInvalidError} If the token or pool program address or remote selector is
+   * invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTDataDecodeError} If the lane's `ChainConfigV2` cannot be decoded.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const { inboundCCVs, outboundCCVs, thresholdAmount } = await cct.getCCVConfig({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 16015286601757825753n,
+   * })
+   * console.log({ inboundCCVs, outboundCCVs, thresholdAmount })
+   * ```
+   */
+  getCCVConfig(opts: GetCCVConfigParams): Promise<GetCCVConfigResult> {
+    return this.#getCCVConfig.query(this.chain, opts)
   }
 
   /**
@@ -2814,6 +2242,528 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Builds an unsigned instruction that replaces an initialized Solana token pool remote-chain
+   * config. Initialize the config first with `generateUnsignedInitChainRemoteConfig`. Each call
+   * replaces the remote token address, pool addresses, and decimals. Pass `poolProgramAddress`
+   * for a non-canonical pool program; `authority` defaults to `payer`.
+   *
+   * @see {@link editChainRemoteConfig}
+   * @see {@link generateUnsignedInitChainRemoteConfig}
+   * @see {@link generateUnsignedDeleteChainRemoteConfig}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter or remote config value is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedEditChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *   remoteTokenDecimals: 18,
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedEditChainRemoteConfig(
+    opts: GenerateEditChainRemoteConfigParams,
+  ): Promise<GenerateEditChainRemoteConfigResult> {
+    return this.#editChainRemoteConfig.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces an initialized Solana token pool remote-chain config with the pool owner wallet.
+   * Initialize the config first with `initChainRemoteConfig`. Each call replaces the remote token
+   * address, pool addresses, and decimals.
+   *
+   * @see {@link generateUnsignedEditChainRemoteConfig}
+   * @see {@link initChainRemoteConfig}
+   * @see {@link deleteChainRemoteConfig}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If simulation or the pool rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.editChainRemoteConfig({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 5009297550715157269n,
+   *   remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *   remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *   remoteTokenDecimals: 18,
+   *   wallet,
+   * })
+   * ```
+   */
+  editChainRemoteConfig(
+    opts: ExecuteEditChainRemoteConfigParams,
+  ): Promise<ExecuteEditChainRemoteConfigResult> {
+    return this.#editChainRemoteConfig.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned Solana lookup table extend instructions.
+   *
+   * Pass `tokenAddress` (plus `poolProgramAddress` for a non-canonical pool program) to append the
+   * standard CCIP pool addresses; pass `additionalAddresses` to append manual addresses. `authority`
+   * defaults to `payer`.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedAppendToLookupTable({
+   *   lookupTableAddress,
+   *   payer: squadsVault,
+   *   authority: squadsVault,
+   *   tokenAddress: mint,
+   *   poolProgramAddress: poolProgram,
+   *   additionalAddresses: [extraAccount],
+   * })
+   * ```
+   */
+  generateUnsignedAppendToLookupTable(
+    opts: GenerateAppendToLookupTableParams,
+  ): Promise<GenerateAppendToLookupTableResult> {
+    return this.#appendToLookupTable.generate(this.chain, opts)
+  }
+
+  /**
+   * Extends a Solana lookup table.
+   *
+   * Pass `tokenAddress` (plus `poolProgramAddress` for a non-canonical pool program) to append the
+   * standard CCIP pool addresses.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or lookup table parameter is invalid.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.appendToLookupTable({
+   *   lookupTableAddress,
+   *   wallet,
+   *   tokenAddress: mint,
+   *   poolProgramAddress: poolProgram,
+   *   additionalAddresses: [extraAccount],
+   * })
+   * ```
+   */
+  appendToLookupTable(
+    opts: ExecuteAppendToLookupTableParams,
+  ): Promise<ExecuteAppendToLookupTableResult> {
+    return this.#appendToLookupTable.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned Solana instruction that accepts a pending token administrator role.
+   *
+   * The supplied authority must be the pending token administrator.
+   *
+   * @remarks
+   * Call this after {@link generateUnsignedRegisterAdmin} or {@link generateUnsignedTransferAdmin}
+   * and before {@link generateUnsignedSetPool}. `authority` defaults to `payer`; Squads/vault
+   * flows should use this method with their fee payer and signing authority explicitly.
+   *
+   * @see {@link generateUnsignedRegisterAdmin}
+   * @see {@link generateUnsignedTransferAdmin}
+   * @see {@link generateUnsignedSetPool}
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
+   * pending token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedAcceptAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   payer: pendingAdmin,
+   * })
+   * ```
+   */
+  generateUnsignedAcceptAdmin(opts: GenerateAcceptAdminParams): Promise<GenerateAcceptAdminResult> {
+    return this.#acceptAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Accepts a pending token administrator role using the pending administrator wallet.
+   *
+   * @remarks
+   * Call this after {@link registerAdmin} or {@link transferAdmin} and before {@link setPool}.
+   * `authority` defaults to `wallet`; Squads/vault flows should use
+   * {@link generateUnsignedAcceptAdmin} instead.
+   *
+   * @see {@link registerAdmin}
+   * @see {@link transferAdmin}
+   * @see {@link setPool}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
+   * the executing wallet/pending token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.acceptAdmin({ tokenAddress: mint, address: router, wallet: pendingAdminWallet })
+   * ```
+   */
+  acceptAdmin(opts: ExecuteAcceptAdminParams): Promise<ExecuteAcceptAdminResult> {
+    return this.#acceptAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction that replaces an initial pending registry administrator.
+   *
+   * @remarks
+   * Only the mint authority may authorize this recovery path, and only while the registry has no
+   * accepted administrator. When the mint authority is a 1-of-N SPL multisig, `authority` is one of
+   * its signers, and the Router's multisig instruction is used. It replaces the initial pending
+   * administrator; the replacement must still call {@link generateUnsignedAcceptAdmin}.
+   * `authority` defaults to `payer`; use this unsigned method for Squads/vault signatures.
+   *
+   * @see {@link ownerOverridePendingAdministrator} For wallet-based execution.
+   * @see {@link generateUnsignedAcceptAdmin} The replacement administrator must accept separately.
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an
+   * accepted administrator, or the mint authority is a multisig whose threshold is not 1 or that
+   * `authority` does not sign for.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedOwnerOverridePendingAdministrator({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin: replacementAdmin,
+   *   payer: mintAuthority,
+   * })
+   * ```
+   */
+  generateUnsignedOwnerOverridePendingAdministrator(
+    opts: GenerateOwnerOverridePendingAdministratorParams,
+  ): Promise<GenerateOwnerOverridePendingAdministratorResult> {
+    return this.#ownerOverridePendingAdministrator.generate(this.chain, opts)
+  }
+
+  /**
+   * Replaces an initial pending registry administrator using the mint authority wallet.
+   *
+   * @remarks
+   * This recovery path only works while the registry has no accepted administrator. It replaces the
+   * initial pending administrator; it does not make the replacement an administrator. The replacement
+   * must call {@link acceptAdmin} separately. `authority` defaults to `wallet`, which may also be
+   * a signer of a 1-of-N SPL multisig mint authority; use
+   * {@link generateUnsignedOwnerOverridePendingAdministrator} for Squads/vault flows.
+   *
+   * @see {@link generateUnsignedOwnerOverridePendingAdministrator} For externally signed transactions.
+   * @see {@link acceptAdmin} The replacement administrator must accept the role separately.
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid, the registry already has an accepted
+   * administrator, `authority` differs from the wallet, or the mint authority is a multisig whose
+   * threshold is not 1 or that `authority` does not sign for.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCTTxFailedError} If the Router rejects a non-mint authority or the registry changes.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.ownerOverridePendingAdministrator({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin: replacementAdmin,
+   *   wallet: mintAuthorityWallet,
+   * })
+   * ```
+   */
+  ownerOverridePendingAdministrator(
+    opts: ExecuteOwnerOverridePendingAdministratorParams,
+  ): Promise<ExecuteOwnerOverridePendingAdministratorResult> {
+    return this.#ownerOverridePendingAdministrator.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned Solana token registration instruction.
+   *
+   * This proposes the registry administrator. The proposed admin must accept the role using
+   * {@link generateUnsignedAcceptAdmin} before calling {@link generateUnsignedSetPool}. The
+   * administrator defaults to the mint authority and the method to `owner`;
+   * choose `ccip-admin` when the Router CCIP admin signs. Provide `administrator`
+   * to nominate a different admin or register a mint with no mint authority.
+   *
+   * @remarks When the mint authority is a 1-of-N SPL multisig, the `owner` method takes one of its
+   * signers as `authority` and uses the Router's multisig instruction. The administrator then
+   * defaults to `authority`, as the multisig cannot accept the role; `ccip-admin` requires an
+   * explicit `administrator`.
+   *
+   * @see {@link generateUnsignedAcceptAdmin}
+   * @see {@link generateUnsignedSetPool}
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or `registrationMethod` is invalid, the
+   * authority does not match the selected registration method, `administrator` is required, or a
+   * registry entry already exists for the token.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedRegisterAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   payer: mintAuthority,
+   * })
+   * ```
+   */
+  generateUnsignedRegisterAdmin(
+    opts: GenerateRegisterAdminParams,
+  ): Promise<GenerateRegisterAdminResult> {
+    return this.#registerAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Proposes a token registry administrator using the executing wallet as registration authority
+   * and fee payer. The proposed admin must {@link acceptAdmin} before calling {@link setPool}.
+   *
+   * @remarks With a 1-of-N SPL multisig mint authority, the wallet registers as one of its signers
+   * and is the default administrator; see {@link generateUnsignedRegisterAdmin}.
+   *
+   * @see {@link acceptAdmin}
+   * @see {@link setPool}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or `registrationMethod` is invalid, the
+   * authority does not match the selected registration method or executing wallet,
+   * `administrator` is required, or a registry entry already exists for the token.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.registerAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   wallet,
+   * })
+   * ```
+   */
+  registerAdmin(opts: ExecuteRegisterAdminParams): Promise<ExecuteRegisterAdminResult> {
+    return this.#registerAdmin.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned instruction to remove addresses from a token pool allowlist. The pool must
+   * be initialized first. Pass `poolProgramAddress` for a non-canonical pool program;
+   * `authority` defaults to `payer`. Every removed address must already be allowlisted or the
+   * transaction reverts.
+   *
+   * @remarks Removal does not change enforcement; removing the last allowed sender while the
+   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
+   *
+   * @see {@link generateUnsignedConfigureAllowlist}
+   * @see {@link removeFromAllowlist}
+   *
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedRemoveFromAllowlist({
+   *   tokenAddress: mint,
+   *   remove: [sender],
+   *   payer,
+   *   authority,
+   * })
+   * ```
+   */
+  generateUnsignedRemoveFromAllowlist(
+    opts: GenerateRemoveFromAllowlistParams,
+  ): Promise<GenerateRemoveFromAllowlistResult> {
+    return this.#removeFromAllowlist.generate(this.chain, opts)
+  }
+
+  /**
+   * Removes addresses from an initialized Solana token pool allowlist using the pool owner wallet.
+   * Every removed address must already be allowlisted or the transaction reverts.
+   *
+   * @remarks Removal does not change enforcement; removing the last allowed sender while the
+   * allowlist is enabled blocks all senders — use `configureAllowlist` to toggle.
+   *
+   * @see {@link configureAllowlist}
+   * @see {@link generateUnsignedRemoveFromAllowlist}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a pool parameter is invalid or the authority differs
+   * from the executing wallet.
+   * @throws {@link CCTTxFailedError} If transaction simulation or submission fails.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.removeFromAllowlist({
+   *   tokenAddress: mint,
+   *   remove: [sender],
+   *   wallet,
+   * })
+   * ```
+   */
+  removeFromAllowlist(
+    opts: ExecuteRemoveFromAllowlistParams,
+  ): Promise<ExecuteRemoveFromAllowlistResult> {
+    return this.#removeFromAllowlist.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds unsigned Solana `setPool` instructions.
+   *
+   * The token must first be registered and its proposed administrator accepted. The `payer` pays
+   * transaction fees; `authority` defaults to `payer`, while Squads/multisig flows should pass
+   * the token admin/vault authority explicitly. For a newly deployed canonical pool, create the
+   * pool signer's ATA before calling this operation.
+   *
+   * @see {@link generateUnsignedRegisterAdmin}
+   * @see {@link generateUnsignedAcceptAdmin}
+   * @see {@link generateUnsignedDeployTokenPool}
+   * @see {@link generateUnsignedCreateTokenAccount}
+   *
+   * @throws {@link CCTParamsInvalidError} If an address or `writableIndexes` is invalid.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedSetPool({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   poolLookupTableAddress: lookupTable,
+   *   payer: squadsVault,
+   *   authority: tokenAdmin,
+   * })
+   * ```
+   */
+  generateUnsignedSetPool(opts: GenerateSetPoolParams): Promise<GenerateSetPoolResult> {
+    return this.#setPool.generate(this.chain, opts)
+  }
+
+  /**
+   * Registers a token pool. The token must first be registered and its proposed administrator
+   * accepted; the wallet must be the token admin authority. For a newly deployed canonical pool,
+   * create the pool signer's ATA before calling this operation.
+   *
+   * @see {@link registerAdmin}
+   * @see {@link acceptAdmin}
+   * @see {@link deployTokenPool}
+   * @see {@link createTokenAccount}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address or `writableIndexes` is invalid.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.setPool({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   poolLookupTableAddress: lookupTable,
+   *   wallet,
+   * })
+   * ```
+   */
+  setPool(opts: ExecuteSetPoolParams): Promise<ExecuteSetPoolResult> {
+    return this.#setPool.execute(this.chain, opts)
+  }
+
+  /**
+   * Builds an unsigned Solana instruction that transfers a token administrator role.
+   *
+   * @remarks
+   * This transfers an already accepted administrator role; it does not register a token. The
+   * proposed administrator must call {@link generateUnsignedAcceptAdmin} before becoming the
+   * current administrator.
+   *
+   * @see {@link generateUnsignedAcceptAdmin}
+   *
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or the authority is not the
+   * current token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const unsigned = await cct.generateUnsignedTransferAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin,
+   *   payer: currentAdmin,
+   * })
+   * ```
+   */
+  generateUnsignedTransferAdmin(
+    opts: GenerateTransferAdminParams,
+  ): Promise<GenerateTransferAdminResult> {
+    return this.#transferAdmin.generate(this.chain, opts)
+  }
+
+  /**
+   * Transfers a token administrator role using the executing wallet as the current administrator.
+   *
+   * @remarks
+   * This transfers an already accepted administrator role; it does not register a token. The
+   * proposed administrator must call {@link acceptAdmin} before becoming the current administrator.
+   *
+   * @see {@link acceptAdmin}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If an address is invalid or `authority` does not match
+   * the executing wallet/current token administrator.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   * @throws {@link CCTTxFailedError} If simulation or the Router rejects the transaction.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * await cct.transferAdmin({
+   *   tokenAddress: mint,
+   *   address: router,
+   *   newAdmin,
+   *   wallet: currentAdminWallet,
+   * })
+   * ```
+   */
+  transferAdmin(opts: ExecuteTransferAdminParams): Promise<ExecuteTransferAdminResult> {
+    return this.#transferAdmin.execute(this.chain, opts)
+  }
+
+  /**
    * Builds an unsigned instruction that records in a token's CCIP 2.0 TokenAdminRegistry which
    * pool interface its pool implements, and how the Router resolves the pool's accounts.
    * `authority` defaults to `payer`.
@@ -2934,6 +2884,265 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
   }
 
   /**
+   * Plans the CCIP 2.0 onboarding steps a token still needs, from on-chain state, without building
+   * any transaction. See {@link onboardToken} for the steps.
+   *
+   * @remarks Before the pool is deployed, the plan reads the token's registry under the Router
+   * the pool program assigns new pools.
+   *
+   * @see {@link generateUnsignedOnboardToken}
+   *
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid, or `authority` is not the mint
+   * authority, pool owner, token administrator, or (for a pool program without self-served pools)
+   * the program's upgrade authority where a remaining step needs it.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const { steps } = await cct.getTokenOnboardingPlan({ ...onboarding, payer: vault })
+   * console.log(steps.map(({ name }) => name)) // e.g. ['applyChainUpdates', 'initChainConfigV2', …]
+   * ```
+   */
+  getTokenOnboardingPlan(opts: GenerateOnboardTokenParams): Promise<TokenOnboardingPlan> {
+    return this.#onboardToken.plan(this.chain, opts)
+  }
+
+  /**
+   * Builds the unsigned transactions of the next CCIP 2.0 onboarding step, for an external signer
+   * such as a Squads vault. Land every returned transaction in order, then call again with the same
+   * params, until `step` is `undefined`. See {@link onboardToken} for the steps.
+   *
+   * @remarks Each call plans from on-chain state, so it returns the step after the last one that
+   * landed; one step at a time, since each operation validates the state the previous ones leave.
+   * `authority` (defaulting to `payer`) must be the token's mint authority: it deploys and
+   * registers the pool and becomes its owner and token administrator. A lookup table is created
+   * from a recent slot that Solana accepts for about 3 minutes, so for a vault awaiting approvals,
+   * pass a hot wallet as `lookupTablePayer`: it creates the table in a `createLookupTable` step it
+   * signs alone (the result's `payer`), and the vault fills and sets it in `setPool`. Whenever a
+   * result has a `lookupTableAddress`, pass it as `poolLookupTableAddress` from then on.
+   *
+   * @see {@link onboardToken}
+   * @see {@link getTokenOnboardingPlan}
+   *
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid, a precondition fails, or the
+   * next step's operation rejects the current state.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const onboarding: GenerateOnboardTokenParams = {
+   *   tokenAddress: mint,
+   *   poolType: 'burn-mint',
+   *   remoteChains: [{
+   *     remoteChainSelector: 16015286601757825753n,
+   *     remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *     remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *     remoteTokenDecimals: 18,
+   *     inboundRateLimiterConfig: { enabled: false },
+   *     outboundRateLimiterConfig: { enabled: false },
+   *     ccvConfig: { outboundCCVs: [committeeVerifier], inboundCCVs: [committeeVerifier] },
+   *   }],
+   *   payer: vault, // the Squads vault: mint authority, payer, and future pool owner
+   *   lookupTablePayer: hotWallet, // creates the pool lookup table, without the vault's delay
+   * }
+   * for (;;) {
+   *   const { step, transactions, payer, lookupTableAddress } =
+   *     await cct.generateUnsignedOnboardToken(onboarding)
+   *   if (!step) break
+   *   for (const tx of transactions) {
+   *     const serialized = await cct.serializeUnsignedTx(tx, payer)
+   *     // createLookupTable: sign with the hot wallet and send it now;
+   *     // otherwise: propose `serialized` to Squads and wait until it executes
+   *   }
+   *   if (lookupTableAddress) onboarding.poolLookupTableAddress = lookupTableAddress
+   * }
+   * ```
+   */
+  generateUnsignedOnboardToken(
+    opts: GenerateOnboardTokenParams,
+  ): Promise<GenerateOnboardTokenResult> {
+    return this.#onboardToken.generate(this.chain, opts)
+  }
+
+  /**
+   * Onboards a token on CCIP 2.0 with its mint authority's wallet, running every remaining step:
+   * 1. `deployTokenPool`, with the pool signer's token account (and `allowlist`, if any)
+   * 2. `registerAdmin` and `acceptAdmin`, making the wallet the token administrator, with
+   *    `upgradeTokenAdminRegistry` first for a registry an older Router created
+   * 3. `setPool`, after creating the pool's lookup table; it also replaces another pool the
+   *    registry points at
+   * 4. `applyChainUpdates`, connecting each remote chain with its pools and rate limits
+   * 5. `initChainConfigV2` per remote chain: allowed finality, fees and CCVs
+   * 6. `initFastFinalityRateLimit` per remote chain with `fastFinalityRateLimits`
+   * 7. `setPoolInterfaceImplementation` to the 2.0 interface, with `accountResolution`
+   * 8. `createTokenMultisig` and `setTokenAuthority` (burn-mint only), making the mint authority a
+   *    1-of-2 SPL multisig of the pool signer, which mints through it alone, and the wallet, which
+   *    keeps its own path to mint or move the mint authority
+   *
+   * @remarks Plans from on-chain state before every step, so a re-run after a failure resumes where
+   * it stopped. Steps already done are skipped; remote chains the pool already has are left as they
+   * are. The wallet must be the token's mint authority, and stays the pool owner and token
+   * administrator.
+   *
+   * @see {@link generateUnsignedOnboardToken}
+   *
+   * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid or a precondition fails.
+   * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
+   * @throws {@link CCTTxFailedError} If a step fails. Once the steps start, every error carries
+   * the steps that landed before it in `context.executedSteps`, and a failed `setPool` the lookup
+   * table it created in `context.lookupTableAddress`: pass it as `poolLookupTableAddress` to
+   * resume with it.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const { steps, poolAddress } = await cct.onboardToken({
+   *   tokenAddress: mint,
+   *   poolType: 'lock-release',
+   *   remoteChains: [{
+   *     remoteChainSelector: 16015286601757825753n,
+   *     remoteTokenAddress: '0x1234567890abcdef1234567890abcdef12345678',
+   *     remotePoolAddresses: ['0x1234567890abcdef1234567890abcdef12345678'],
+   *     remoteTokenDecimals: 18,
+   *     inboundRateLimiterConfig: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *     outboundRateLimiterConfig: { enabled: true, capacity: 1_000_000n, rate: 1_000n },
+   *   }],
+   *   wallet,
+   * })
+   * ```
+   */
+  onboardToken(opts: ExecuteOnboardTokenParams): Promise<ExecuteOnboardTokenResult> {
+    return this.#onboardToken.execute(this.chain, opts)
+  }
+
+  /**
+   * Reads an SPL token mint's metadata, program, supply, initialization state, and mint/freeze
+   * authorities.
+   *
+   * @remarks Metadata comes from {@link SolanaChain.getTokenInfo}; mint state comes directly from
+   * the SPL Token or Token-2022 mint account. Supply is in base units. Solana-only; no EVM CCT
+   * equivalent exists.
+   *
+   * @see {@link setTokenAuthority} Sets the mint or freeze authorities returned here.
+   * @see {@link updateMetadataAuthority} Updates the Metaplex metadata associated with this mint.
+   * @see {@link getTokenPoolState} Reads pool configuration rather than mint state.
+   * @see {@link SolanaChain.getTokenInfo} Reads the underlying token metadata.
+   *
+   * @throws {@link CCTParamsInvalidError} If `tokenAddress` is not a valid Solana public key.
+   * @throws {@link CCIPSplTokenInvalidError} If the token metadata is not a valid SPL token.
+   * @throws {@link CCIPTokenMintNotFoundError} If the mint account does not exist.
+   * @throws {@link CCIPTokenMintInvalidError} If the mint is not owned by an SPL Token program.
+   * @throws {@link CCIPTokenDataParseError} If the mint data cannot be parsed.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const info = await cct.getTokenInfo({ tokenAddress: mint })
+   * console.log(`${info.symbol}: ${info.decimals} decimals`)
+   * ```
+   */
+  getTokenInfo(opts: GetTokenInfoParams): Promise<GetTokenInfoResult> {
+    return this.#getTokenInfo.query(this.chain, opts)
+  }
+
+  /**
+   * Reads all, or one selected, Solana token pool remote-chain configurations.
+   *
+   * @remarks Results are keyed by remote network name. Omit `remoteChainSelector` to scan all
+   * configured remotes; provide it to query one. Rate-limit amounts use the local mint's smallest
+   * unit.
+   *
+   * @throws {@link CCTParamsInvalidError} If the token or pool program address or remote selector is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
+   * @throws {@link CCIPTokenPoolChainConfigNotFoundError} If the selected remote-chain config does not exist.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const remotes = await cct.getTokenPoolRemotes({
+   *   tokenAddress: mint,
+   *   remoteChainSelector: 5009297550715157269n,
+   * })
+   * console.log(remotes)
+   * ```
+   */
+  getTokenPoolRemotes(opts: GetTokenPoolRemotesParams): Promise<GetTokenPoolRemotesResult> {
+    return this.#getTokenPoolRemotes.query(this.chain, opts)
+  }
+
+  /**
+   * Reads a token pool's state account. A lock-release pool's config also reports its liquidity
+   * fields (`rebalancer`, `canAcceptLiquidity`); narrow on their presence.
+   *
+   * @remarks The EVM counterpart, `EVMTokenManager.getTokenPoolState`, returns a different shape:
+   * its fields are flat where these nest under `state.config`, it spells `config.mint` /
+   * `config.decimals` / `config.rmnRemote` as `token` / `tokenDecimals` / `rmnProxy`, and its
+   * `version` is the pool's protocol semver (`'2.0.0'`), not the account-layout number returned
+   * here. `owner`, `rateLimitAdmin` and `router` are named alike on both.
+   *
+   * @throws {@link CCTParamsInvalidError} If the token or pool program address is invalid.
+   * @throws {@link CCIPTokenPoolStateNotFoundError} If the pool state account does not exist.
+   * @throws {@link CCTDataDecodeError} If the pool state account cannot be decoded.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const state = await cct.getTokenPoolState({
+   *   tokenAddress: mint,
+   * })
+   * // config.owner must sign pool writes; config.rateLimitAdmin may set rate limits
+   * console.log(state.config.owner, state.config.mint, state.config.decimals)
+   * // lock-release only: who rebalances the pool, and whether it accepts liquidity
+   * if ('rebalancer' in state.config) {
+   *   console.log(state.config.rebalancer, state.config.canAcceptLiquidity)
+   * }
+   * ```
+   */
+  getTokenPoolState(opts: GetTokenPoolStateParams): Promise<GetTokenPoolStateResult> {
+    return this.#getTokenPoolState.query(this.chain, opts)
+  }
+
+  /**
+   * Reads a token's TokenAdminRegistry administrator, pending administrator, and pool lookup table.
+   *
+   * @throws {@link CCTParamsInvalidError} If `address` or `tokenAddress` is not a valid Solana public key.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   * @throws {@link CCIPTokenNotConfiguredError} If the token is not registered.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const config = await cct.getTokenAdminRegistry({
+   *   address: router,
+   *   tokenAddress: mint,
+   * })
+   * ```
+   */
+  getTokenAdminRegistry(opts: GetTokenAdminRegistryParams): Promise<GetTokenAdminRegistryResult> {
+    return this.#getTokenAdminRegistry.query(this.chain, opts)
+  }
+
+  /**
+   * Lists all SPL token mints configured in a Router's TokenAdminRegistry in a single scan;
+   * pagination is not supported.
+   *
+   * @throws {@link CCTParamsInvalidError} If `address` is not a valid Solana public key.
+   * @throws {@link CCIPContractNotRouterError} If `address` does not resolve to a Router.
+   *
+   * @example
+   * ```ts
+   * const cct = SolanaTokenManager.fromChain(chain)
+   * const tokens = await cct.getSupportedTokens({ address: router })
+   * ```
+   */
+  getSupportedTokens(opts: GetSupportedTokensParams): Promise<string[]> {
+    return this.#getSupportedTokens.query(this.chain, opts)
+  }
+
+  /**
    * Serializes an unsigned Solana CCT tx for external signing.
    *
    * @throws {@link CCTParamsInvalidError} If `encoding` is unsupported or the transaction uses
@@ -2971,3 +3180,15 @@ export type { SerializedSolanaTxEncoding } from './serialize.ts'
 export type * from './token/operations/index.ts'
 export type * from './token-pool/operations/index.ts'
 export type * from './token-admin-registry/operations/index.ts'
+export {
+  type ExecuteOnboardTokenParams,
+  type ExecuteOnboardTokenResult,
+  type ExecutedTokenOnboardingStep,
+  type GenerateOnboardTokenParams,
+  type GenerateOnboardTokenResult,
+  type TokenOnboardingPlan,
+  type TokenOnboardingRemoteChain,
+  type TokenOnboardingStep,
+  type TokenOnboardingStepName,
+  TOKEN_ONBOARDING_STEPS,
+} from './onboarding/onboard-token.ts'

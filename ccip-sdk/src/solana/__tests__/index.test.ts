@@ -807,6 +807,13 @@ describe('SolanaChain token pool readers', () => {
           fastFinalityBpsFee: 20,
           isEnabled: true,
         },
+        ccvConfig: {
+          thresholdAmount: new BN(0),
+          outboundCcvs: [],
+          thresholdOutboundCcvs: [],
+          inboundCcvs: [],
+          thresholdInboundCcvs: [],
+        },
       }))
     const overrideData =
       override &&

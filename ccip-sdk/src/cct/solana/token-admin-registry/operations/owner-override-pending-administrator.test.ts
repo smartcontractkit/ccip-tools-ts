@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { Keypair, PublicKey } from '@solana/web3.js'
+import { MULTISIG_SIZE, MultisigLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
@@ -23,13 +24,51 @@ const WALLET = {
   signTransaction: async <T>(tx: T) => tx,
 }
 
+/** A mint whose mint authority is `mintAuthority`. */
+function mintAccount(mintAuthority: PublicKey) {
+  const data = Buffer.alloc(82)
+  data.writeUInt32LE(1, 0)
+  mintAuthority.toBuffer().copy(data, 4)
+  data[44] = 9
+  data[45] = 1
+  return { data, executable: false, lamports: 1, owner: TOKEN_PROGRAM_ID, rentEpoch: 0 }
+}
+
+/** An initialized `m`-of-N SPL multisig of `signers`, owned by the mint's token program. */
+function multisigAccount(m: number, signers: PublicKey[]) {
+  const data = Buffer.alloc(MULTISIG_SIZE)
+  MultisigLayout.encode(
+    {
+      m,
+      n: signers.length,
+      isInitialized: true,
+      ...Object.fromEntries(
+        Array.from({ length: 11 }, (_, i) => [`signer${i + 1}`, signers[i] ?? PublicKey.default]),
+      ),
+    } as never,
+    data,
+  )
+  return { data, executable: false, lamports: 1, owner: TOKEN_PROGRAM_ID, rentEpoch: 0 }
+}
+
+/**
+ * A chain whose token has `mintAuthority` (the owner by default); `mintAuthorityAccount` is that
+ * account, e.g. a multisig.
+ */
 function stubChain(
   administrator = PublicKey.default.toBase58(),
   onAddress?: (address: string) => void,
+  mintAuthority = new PublicKey(OWNER),
+  mintAuthorityAccount: ReturnType<typeof multisigAccount> | null = null,
 ): SolanaChain {
   return {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
     connection: {
+      getAccountInfo: async (address: PublicKey) => {
+        if (address.toBase58() === TOKEN) return mintAccount(mintAuthority)
+        if (address.equals(mintAuthority)) return mintAuthorityAccount
+        return assert.fail('unexpected account lookup')
+      },
       simulateTransaction: async () => ({ value: { err: null, logs: [], unitsConsumed: 1 } }),
       getLatestBlockhash: async () => ({
         blockhash: PublicKey.default.toBase58(),
@@ -104,6 +143,67 @@ describe('OwnerOverridePendingAdministrator (cct/solana)', () => {
       )
 
       assert.equal(requestedAddress, ADDRESS)
+    })
+  })
+
+  describe('multisig mint authority', () => {
+    const MULTISIG = Keypair.generate().publicKey
+
+    function generateMultisig(m: number, authority = OWNER) {
+      const chain = stubChain(
+        undefined,
+        undefined,
+        MULTISIG,
+        multisigAccount(m, [Keypair.generate().publicKey, new PublicKey(OWNER)]),
+      )
+      return new OwnerOverridePendingAdministrator().generate(chain, {
+        tokenAddress: TOKEN,
+        address: ADDRESS,
+        newAdmin: NEW_ADMIN,
+        payer: OWNER,
+        authority,
+      })
+    }
+
+    it('overrides through a signer of a 1-of-N multisig', async () => {
+      const [instruction] = (await generateMultisig(1)).instructions
+
+      assert.equal(instruction!.programId.toBase58(), ROUTER)
+      // multisig_owner_override_pending_administrator, from the program's IDL
+      assert.equal(instruction!.data.subarray(0, 8).toString('hex'), 'd0a8330336a6fdb9')
+      assert.deepEqual(instruction!.data.subarray(8), new PublicKey(NEW_ADMIN).toBuffer())
+      assert.deepEqual(
+        instruction!.keys.map(({ pubkey, isSigner, isWritable }) => [
+          pubkey.toBase58(),
+          isSigner,
+          isWritable,
+        ]),
+        [
+          [deriveRouterConfigPda(new PublicKey(ROUTER)).toBase58(), false, false],
+          [
+            deriveTokenAdminRegistryPda(new PublicKey(ROUTER), new PublicKey(TOKEN)).toBase58(),
+            false,
+            true,
+          ],
+          [TOKEN, false, false],
+          [OWNER, true, true],
+          [MULTISIG.toBase58(), false, false],
+          [SystemProgram.programId.toBase58(), false, false],
+        ],
+      )
+    })
+
+    it('rejects a non-signer or a multisig threshold above 1', async () => {
+      for (const [m, authority] of [
+        [1, NEW_ADMIN],
+        [2, OWNER],
+      ] as const) {
+        await assert.rejects(
+          () => generateMultisig(m, authority),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+        )
+      }
     })
   })
 

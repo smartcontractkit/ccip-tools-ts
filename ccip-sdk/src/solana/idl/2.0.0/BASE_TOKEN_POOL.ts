@@ -2,12 +2,14 @@
  * Minimal CCIP v2 (`burnmint-token-pool 2.0.0-dev`) token pool IDL.
  *
  * Describes the accounts the SDK reads from canonical token pools: the pool `State`, the per-remote
- * `ChainConfig`, the 2.0 per-remote `ChainConfigV2` (finality and fee config), and the
+ * `ChainConfig`, the 2.0 per-remote `ChainConfigV2` (finality, fee and CCV config), and the
  * faster-than-finality (FTF) `ChainConfigOverride`. `State` and `ChainConfig` are Borsh-identical to
  * their 1.6 layouts, so this IDL reads both 1.6 and 2.0 pools. Some structs only declare their
  * leading fields, as Borsh ignores trailing bytes: `BaseConfig` stops at `router` (so pools whose
- * `State` carries extra or older trailing fields still decode), and `ChainConfigV2` before its
- * `ccv_config`. The `CrossChainGas` and `UsdCents` newtypes are declared as their `u32`. `ChainConfig` is the burn-mint and
+ * `State` carries extra or older trailing fields still decode). `ChainConfigV2` is complete: every
+ * canonical 2.0 pool (burn-mint, lock-release, CCTP, Lombard) ends it with the same `CCVConfig`,
+ * and Lombard's swapped leading `version`/`bump` bytes don't change the layout. The
+ * `CrossChainGas` and `UsdCents` newtypes are declared as their `u32`. `ChainConfig` is the burn-mint and
  * lock-release layout; CCTP and Lombard pools prefix it with a schema version byte. Instructions are
  * not listed. Anchor 0.29 IDL format.
  */
@@ -44,6 +46,7 @@ export type BaseTokenPoolV2 = {
           { name: 'mint'; type: 'publicKey' },
           { name: 'allowedFinalityConfig'; type: { defined: 'FinalityConfig' } },
           { name: 'tokenTransferFeeConfig'; type: { defined: 'TokenTransferFeeConfig' } },
+          { name: 'ccvConfig'; type: { defined: 'CCVConfig' } },
         ]
       }
     },
@@ -108,6 +111,19 @@ export type BaseTokenPoolV2 = {
           { name: 'finalityBpsFee'; type: 'u16' },
           { name: 'fastFinalityBpsFee'; type: 'u16' },
           { name: 'isEnabled'; type: 'bool' },
+        ]
+      }
+    },
+    {
+      name: 'CCVConfig'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'thresholdAmount'; type: 'u64' },
+          { name: 'outboundCcvs'; type: { vec: 'publicKey' } },
+          { name: 'thresholdOutboundCcvs'; type: { vec: 'publicKey' } },
+          { name: 'inboundCcvs'; type: { vec: 'publicKey' } },
+          { name: 'thresholdInboundCcvs'; type: { vec: 'publicKey' } },
         ]
       }
     },
@@ -204,6 +220,7 @@ export const IDL: BaseTokenPoolV2 = {
           { name: 'mint', type: 'publicKey' },
           { name: 'allowedFinalityConfig', type: { defined: 'FinalityConfig' } },
           { name: 'tokenTransferFeeConfig', type: { defined: 'TokenTransferFeeConfig' } },
+          { name: 'ccvConfig', type: { defined: 'CCVConfig' } },
         ],
       },
     },
@@ -271,6 +288,19 @@ export const IDL: BaseTokenPoolV2 = {
           { name: 'finalityBpsFee', type: 'u16' },
           { name: 'fastFinalityBpsFee', type: 'u16' },
           { name: 'isEnabled', type: 'bool' },
+        ],
+      },
+    },
+    {
+      name: 'CCVConfig',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'thresholdAmount', type: 'u64' },
+          { name: 'outboundCcvs', type: { vec: 'publicKey' } },
+          { name: 'thresholdOutboundCcvs', type: { vec: 'publicKey' } },
+          { name: 'inboundCcvs', type: { vec: 'publicKey' } },
+          { name: 'thresholdInboundCcvs', type: { vec: 'publicKey' } },
         ],
       },
     },

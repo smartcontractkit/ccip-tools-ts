@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { describe, it } from 'node:test'
 
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import { MULTISIG_SIZE, MultisigLayout, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
@@ -49,6 +49,23 @@ function mintAccount(mintAuthority: PublicKey | null = MINT_AUTHORITY) {
   return { data, executable: false, lamports: 1, owner: TOKEN_PROGRAM_ID, rentEpoch: 0 }
 }
 
+/** An initialized `m`-of-N SPL multisig of `signers`, owned by the mint's token program. */
+function multisigAccount(m: number, signers: PublicKey[]) {
+  const data = Buffer.alloc(MULTISIG_SIZE)
+  MultisigLayout.encode(
+    {
+      m,
+      n: signers.length,
+      isInitialized: true,
+      ...Object.fromEntries(
+        Array.from({ length: 11 }, (_, i) => [`signer${i + 1}`, signers[i] ?? PublicKey.default]),
+      ),
+    } as never,
+    data,
+  )
+  return { data, executable: false, lamports: 1, owner: TOKEN_PROGRAM_ID, rentEpoch: 0 }
+}
+
 function tokenAdminRegistryAccount(
   owner = new PublicKey(ROUTER),
   data = Buffer.alloc(169),
@@ -63,9 +80,11 @@ function stubChain(
   mintAuthority: PublicKey | null = MINT_AUTHORITY,
   configAvailable = true,
   registryAccount = registered ? tokenAdminRegistryAccount() : null,
+  mintAuthorityAccount: ReturnType<typeof multisigAccount> | null = null,
 ): SolanaChain {
   const getAccountInfo = async (address: PublicKey) => {
     if (address.equals(TOKEN)) return mintAccount(mintAuthority)
+    if (mintAuthority && address.equals(mintAuthority)) return mintAuthorityAccount
     if (address.equals(TOKEN_ADMIN_REGISTRY)) return registryAccount
     if (address.equals(CONFIG)) return configAvailable ? configAccount() : null
     return assert.fail('unexpected account lookup')
@@ -163,6 +182,85 @@ describe('RegisterAdmin (cct/solana)', () => {
       )
 
       assert.equal(unsigned.instructions.length, 1)
+    })
+  })
+
+  describe('multisig mint authority', () => {
+    const MULTISIG = Keypair.generate().publicKey
+    const SIGNER = Keypair.generate().publicKey
+
+    function generateMultisig(m: number, opts = {}) {
+      const chain = stubChain(false, MULTISIG, true, null, multisigAccount(m, [MULTISIG, SIGNER]))
+      return new RegisterAdmin().generate(chain, {
+        tokenAddress: TOKEN.toBase58(),
+        address: ADDRESS,
+        payer: PAYER,
+        authority: SIGNER.toBase58(),
+        ...opts,
+      })
+    }
+
+    it('registers through a signer of a 1-of-N multisig, proposing it as admin', async () => {
+      const [instruction] = (await generateMultisig(1)).instructions
+
+      assert.equal(instruction!.programId.toBase58(), ROUTER)
+      // multisig_owner_propose_administrator, from the program's IDL
+      assert.equal(instruction!.data.subarray(0, 8).toString('hex'), '794295f46762cd31')
+      assert.deepEqual(instruction!.data.subarray(8), SIGNER.toBuffer())
+      assert.deepEqual(
+        instruction!.keys.map(({ pubkey, isSigner, isWritable }) => [
+          pubkey.toBase58(),
+          isSigner,
+          isWritable,
+        ]),
+        [
+          [CONFIG.toBase58(), false, false],
+          [TOKEN_ADMIN_REGISTRY.toBase58(), false, true],
+          [TOKEN.toBase58(), false, false],
+          [SIGNER.toBase58(), true, true],
+          [MULTISIG.toBase58(), false, false],
+          [SystemProgram.programId.toBase58(), false, false],
+        ],
+      )
+    })
+
+    it('proposes an explicit administrator', async () => {
+      const [instruction] = (await generateMultisig(1, { administrator: ADMINISTRATOR.toBase58() }))
+        .instructions
+      assert.deepEqual(instruction!.data.subarray(8), ADMINISTRATOR.toBuffer())
+    })
+
+    it('rejects a non-signer or a multisig threshold above 1', async () => {
+      for (const [m, authority] of [
+        [1, PAYER],
+        [2, SIGNER.toBase58()],
+      ] as const) {
+        await assert.rejects(
+          () => generateMultisig(m, { authority }),
+          (err: unknown) =>
+            err instanceof CCTParamsInvalidError && err.context.param === 'authority',
+        )
+      }
+    })
+
+    it('requires an administrator for ccip-admin registration', async () => {
+      await assert.rejects(
+        () =>
+          generateMultisig(1, {
+            registrationMethod: 'ccip-admin',
+            authority: CCIP_ADMIN.toBase58(),
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'administrator',
+      )
+      const [instruction] = (
+        await generateMultisig(1, {
+          registrationMethod: 'ccip-admin',
+          authority: CCIP_ADMIN.toBase58(),
+          administrator: ADMINISTRATOR.toBase58(),
+        })
+      ).instructions
+      assert.equal(instruction!.data.subarray(0, 8).toString('hex'), 'da258b6b8ee433db')
     })
   })
 
