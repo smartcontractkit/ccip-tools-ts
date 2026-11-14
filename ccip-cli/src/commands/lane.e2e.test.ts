@@ -383,14 +383,13 @@ describe('e2e command lane EVM <-> Solana (v1.6 and v2.0)', () => {
 
     const envelope = JSON.parse(result.stdout)
     assert.match(envelope.onRamp, new RegExp(SOLANA_ONRAMP))
-    // the default is the lane messages are sent over. The 2.0 lane to Sepolia has its sender
-    // allowlist enabled (in testing, read 2026-11-10), so messages go over the 1.6 lane. Change
-    // these to the 2.0 values of the test above when the allowlist is lifted.
-    assert.equal(envelope.version, '1.6.0')
-    assert.equal(envelope.onRampConfig.laneVersion, '1.6.0')
+    // the default is the lane messages are sent over: the 2.0 lane, since its sender allowlist
+    // was lifted (read 2026-11-14). Same values as the explicit v2.0 test above.
+    assert.equal(envelope.version, '2.0.0')
+    assert.equal(envelope.onRampConfig.laneVersion, '2.0.0')
     assert.match(envelope.onRampConfig.typeAndVersion, /^ccip-router 2\./)
-    assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP, 'i'))
-    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 1\.6\.0/)
+    assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP_V2, 'i'))
+    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\./)
   })
 
   it('should show lane config Sepolia -> Solana (v2.0)', { timeout: 120000 }, async () => {
