@@ -68,6 +68,7 @@ import {
 import { hashedRawInstanceAddress } from './ccv-addresses.ts'
 import { type Message, EdsClientProvider } from './clients/eds/client.ts'
 import {
+  type CreatedEvent,
   type DisclosedContract,
   type JsCommands,
   type JsSubmitAndWaitForTransactionResponse,
@@ -854,6 +855,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         synchronizerId: contract.synchronizerId,
         signatories: created.signatories,
         createArgument: created.createArgument,
+        createdAtOffset: created.offset,
       }
       if (match(active.createArgument)) {
         out.push(active)
@@ -1825,20 +1827,22 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       if (signatories.length !== 1) continue
       const got = hashedRawInstanceAddress(`${instanceId}@${signatories[0]}`)
       if (got !== target) continue
+      // Re-registrations/redeploys can leave several live contracts at one
+      // instance address — take the latest-created; refuse when order is
+      // indeterminate.
       if (match) {
-        throw new CCIPError(
-          CCIPErrorCode.CANTON_API_ERROR,
-          `findActiveContractByInstanceAddress: multiple active contracts match ${instanceAddress}`,
-        )
+        const prev = match.createdAtOffset
+        const next = created.offset
+        if (prev === undefined || prev === next) {
+          throw new CCIPError(
+            CCIPErrorCode.CANTON_API_ERROR,
+            `findActiveContractByInstanceAddress: multiple active contracts match ${instanceAddress} and creation order is indeterminate`,
+          )
+        }
+        if (next > prev) match = toActiveContract(created, contract.synchronizerId, ids[0]!)
+        continue
       }
-      match = {
-        contractId: created.contractId,
-        templateId: typeof created.templateId === 'string' ? created.templateId : ids[0]!,
-        createdEventBlob: created.createdEventBlob ?? '',
-        synchronizerId: contract.synchronizerId,
-        signatories,
-        createArgument: created.createArgument,
-      }
+      match = toActiveContract(created, contract.synchronizerId, ids[0]!)
     }
     return match
   }
@@ -2640,6 +2644,23 @@ function resolveIndexerBaseUrl(
  */
 function stripHexPrefix(hex: string): string {
   return hex.startsWith('0x') ? hex.slice(2) : hex
+}
+
+/** Map an ACS `CreatedEvent` to a {@link CantonActiveContract}. */
+function toActiveContract(
+  created: CreatedEvent,
+  synchronizerId: string,
+  fallbackTemplateId: string,
+): CantonActiveContract {
+  return {
+    contractId: created.contractId,
+    templateId: typeof created.templateId === 'string' ? created.templateId : fallbackTemplateId,
+    createdEventBlob: created.createdEventBlob ?? '',
+    synchronizerId,
+    signatories: created.signatories,
+    createArgument: created.createArgument,
+    createdAtOffset: created.offset,
+  }
 }
 
 /**
