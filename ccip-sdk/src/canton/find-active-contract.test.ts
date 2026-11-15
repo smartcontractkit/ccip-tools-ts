@@ -51,8 +51,9 @@ describe('findActiveContractByInstanceAddress', () => {
       TEMPLATE_ID,
       TARGET,
     )
-    assert.equal(got?.contractId, '#cid-10')
-    assert.equal(got?.createdAtOffset, 10)
+    assert.ok(got)
+    assert.equal(got.contractId, '#cid-10')
+    assert.equal(got.createdAtOffset, 10)
   })
 
   it('returns null when nothing matches', async () => {
@@ -65,8 +66,9 @@ describe('findActiveContractByInstanceAddress', () => {
       TEMPLATE_ID,
       TARGET,
     )) as CantonActiveContract | null
-    assert.equal(got?.contractId, '#cid-20')
-    assert.equal(got?.createdAtOffset, 20)
+    assert.ok(got)
+    assert.equal(got.contractId, '#cid-20')
+    assert.equal(got.createdAtOffset, 20)
   })
 
   it('refuses duplicates whose creation order is indeterminate', async () => {
