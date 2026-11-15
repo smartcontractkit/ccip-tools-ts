@@ -288,10 +288,7 @@ describe('deployTokenPool command building', () => {
 
   it('derives different command IDs for different params', async () => {
     const a = await op.generate(mockChain('canton:TestNet'), baseParams())
-    const b = await op.generate(
-      mockChain('canton:TestNet'),
-      baseParams({ instanceId: 'pool-2' }),
-    )
+    const b = await op.generate(mockChain('canton:TestNet'), baseParams({ instanceId: 'pool-2' }))
     assert.notEqual(a.commands.commandId, b.commands.commandId)
   })
 

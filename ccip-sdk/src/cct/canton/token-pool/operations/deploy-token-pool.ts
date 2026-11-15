@@ -402,7 +402,8 @@ export class DeployTokenPool extends CantonOperation<
     }
     return {
       commands,
-      commandId: p.commandId ?? stableCommandId(`cct-deploy-${p.poolType}-pool`, commandIdSeed, actAs),
+      commandId:
+        p.commandId ?? stableCommandId(`cct-deploy-${p.poolType}-pool`, commandIdSeed, actAs),
       // Initialize's controller is `poolOwner, admin` — both must authorize;
       // dedup covers the common case where they're the same party.
       actAs,
