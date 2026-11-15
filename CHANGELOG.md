@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- TON: `getExecutionReceipts` avoids scanning the OffRamp's whole history where it can. One-shot (no `watch`, no `since`) with `verifications` holding the commit report, it reads the executions through the report's `MerkleRoot` contract (address derived from the OffRamp and the merkle root): a constant number of RPC calls, whatever the OffRamp's traffic and the age of the commit, and an immediate answer for a message that is not executed yet. Otherwise, with a `sourceChainSelector` and an index-served scan (`startTime`, or a `since` hint with its `index`), the TonCenter v3 index returns only that source chain's execution rows. Both apply to OffRamp 1.6.0-1.6.2 and 1.7.0; other versions, and any failure of the first shortcut, use the scan as before. `show` uses them on TON destinations
+
 ## [1.17.0] - 2026-11-10
 
 - SDK (EVM): `getLogs` and receipt searches ignore a `0x0` `blockTimestamp` placeholder in RPC logs (`eth_getLogs` on Arbitrum Nitro chains, e.g. Arbitrum Sepolia and Robinhood Chain testnet) and read the block's timestamp instead. Before, such logs were dated 1970 and dropped by `startTime`, so `show --no-api` found no execution on these chains

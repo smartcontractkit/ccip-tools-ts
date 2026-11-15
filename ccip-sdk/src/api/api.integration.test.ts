@@ -8,6 +8,7 @@ import {
   CCIPMessageIdNotFoundError,
   CCIPMessageNotFoundInTxError,
 } from '../errors/index.ts'
+import { createRateLimitedFetch } from '../fetch.ts'
 import { MessageStatus } from '../types.ts'
 import { CCIPAPIClient } from './index.ts'
 
@@ -36,7 +37,19 @@ describe(
       // Pin staging (api.ccip.cldev.cloud): the fromUrl() default is prod
       // (api.ccip.chain.link), which can lack data for low-traffic testnet
       // lanes (e.g. getLaneLatency -> INSUFFICIENT_DATA there, but not here).
-      api = CCIPAPIClient.fromUrl(STAGING_API_URL)
+      //
+      // Staging now and then answers one request with a 503 DATA_UNAVAILABLE and
+      // serves the identical request again right after (seen in CI: 1 run in 7, with
+      // the requests just before and after it fine). That says nothing about the SDK,
+      // so every request of this suite goes through the SDK's own retrying fetch: a
+      // 429/5xx answer is sent again with a jittered backoff, up to 7 attempts in
+      // all (~8s, at most ~16s, inside each test's timeout), and the test sees the
+      // first answer that is not one. 4xx answers are final, so the tests that expect
+      // a not-found error still get it on the first attempt. Each retry is logged
+      // (debug), which keeps the 503s visible in the CI output.
+      api = CCIPAPIClient.fromUrl(STAGING_API_URL, {
+        fetch: createRateLimitedFetch({ maxRetries: 6 }),
+      })
     })
 
     describe('getLaneLatency', () => {
@@ -52,8 +65,7 @@ describe(
         'should return totalMs for valid testnet lane with numberOfBlocks (staging)',
         { timeout: 30000 },
         async () => {
-          const staging = CCIPAPIClient.fromUrl(STAGING_API_URL)
-          const result = await staging.getLaneLatency(SEPOLIA_SELECTOR, FUJI_SELECTOR, 10)
+          const result = await api.getLaneLatency(SEPOLIA_SELECTOR, FUJI_SELECTOR, 10)
 
           assert.equal(typeof result.totalMs, 'number')
           assert.ok(result.totalMs > 0, `Expected positive totalMs, got ${result.totalMs}`)
