@@ -688,6 +688,8 @@ describe('SolanaChain getRegistryTokenConfig', () => {
       administrator: administrator.toBase58(),
       pendingAdministrator: pendingAdministrator.toBase58(),
       tokenPool: tokenPool.toBase58(),
+      interfaceVersion: 1,
+      accountResolution: 'NoResolution',
     })
   })
 
@@ -699,6 +701,8 @@ describe('SolanaChain getRegistryTokenConfig', () => {
     assert.deepEqual(await chain.getRegistryTokenConfig(router.toBase58(), mint.toBase58()), {
       administrator: administrator.toBase58(),
       pendingAdministrator: pendingAdministrator.toBase58(),
+      interfaceVersion: 1,
+      accountResolution: 'NoResolution',
     })
   })
 })

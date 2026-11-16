@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Solana: decode v4 TokenAdminRegistry accounts (173 B), whose resolution is a flag plus `skip_lookup_table_additional_entries`. `accountResolution` was reported as `Standard` instead of `WithoutExtendedLookupTable` for them
 - Solana: `getTokenPoolRemotes` without a remote chain selector reads the pool's `ChainConfig` PDAs of the chains of its network type with `getMultipleAccountsInfo`, in pages of 100, instead of a `getProgramAccounts` scan of the pool program. The scan returned the configs of every token of a shared pool program (hundreds on devnet), which public RPCs throttle, and matched each one against every known selector: up to a minute per call.
 - SDK (TON): errors of TonCenter v2 requests no longer carry the endpoint URL with its `api_key`. `createAxiosFetchAdapter` redacts the URLs of the axios errors it rejects with and drops their `Request` objects, so a logged error does not show the key.
+- SDK (EVM): `getRequiredCCVs` (`send --only-ccvs`) encodes the sender for the source chain's family. A non-EVM sender, e.g. a Solana sender to Sepolia, failed with `invalid address`
+- Solana: `getRegistryTokenConfig` also returns the token's pool `interfaceVersion` (1 = legacy 1.6-compatible pool, 2 = CCIP 2.0) and `accountResolution`, and `get-supported-tokens` shows them
+- Solana: 2.0 sends from the prod testnet Router (`Ccip842…`) use its `ccip_send` lookup table, as staging already did
 
 ## [1.17.0] - 2026-11-10
 

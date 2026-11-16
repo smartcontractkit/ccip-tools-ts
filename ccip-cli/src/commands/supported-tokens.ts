@@ -212,6 +212,8 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
             ...(jsonFeeTokens !== undefined && { feeTokens: jsonFeeTokens }),
             ...info,
             tokenPool,
+            // chain-specific registry fields, e.g. Solana's pool interfaceVersion
+            ...omit(registryConfig, 'administrator', 'pendingAdministrator', 'tokenPool'),
             ...poolConfig,
           },
           2,
@@ -249,6 +251,8 @@ async function getSupportedTokens(ctx: Ctx, argv: Parameters<typeof handler>[0])
         source.network.family,
       ),
     }),
+    // chain-specific registry fields, e.g. Solana's pool interfaceVersion and accountResolution
+    ...omit(registryConfig, 'administrator', 'pendingAdministrator', 'tokenPool'),
     ...(poolConfig.finalityDepth != null && {
       finalityDepth: poolConfig.finalityDepth === 0 ? '0 (finalized)' : poolConfig.finalityDepth,
       finalitySafe: poolConfig.finalitySafe ? 'true (FCR)' : false,

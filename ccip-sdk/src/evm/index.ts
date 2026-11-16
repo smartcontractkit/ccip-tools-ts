@@ -3749,8 +3749,9 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
       destChainSelector: this.network.chainSelector,
       ccipReceiveGasLimit: Number(message.ccipReceiveGasLimit ?? message.gasLimit ?? 0),
       finality: toBeHex(encodeFinality(message.finality ?? 'finalized'), 4),
-      // Source-side addresses are abi.encode(address) (32 bytes); dest-side receiver is raw 20 bytes.
-      sender: message.sender ? zeroPadValue(getAddress(message.sender), 32) : ZeroHash,
+      // Source-side addresses are in the source family's format, left-padded to 32 bytes (EVM
+      // abi.encode(address), Solana/Aptos/Sui raw 32B, TON 36B unpadded); dest-side receiver is raw 20 bytes.
+      sender: message.sender ? encodeAddressToEvm(message.sender) : ZeroHash,
       receiver: getAddress(message.receiver),
       data: message.data != null ? hexlify(message.data) : '0x',
       tokenTransfer,

@@ -147,6 +147,7 @@ import {
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import {
+  type TokenAccountResolution,
   decodeTokenAdminRegistryConfig,
   getTokenAdminRegistryConfig,
 } from './token-admin-registry.ts'
@@ -2063,6 +2064,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     administrator: string
     pendingAdministrator?: string
     tokenPool?: string
+    /** Pool interface the Router uses for the token: 1 (CCIP 1.6-compatible, legacy) or 2 (CCIP 2.0). */
+    interfaceVersion: number
+    /** How the Router resolves the pool's accounts. */
+    accountResolution: TokenAccountResolution
   }> {
     const router = new PublicKey(registry)
     const config = await getTokenAdminRegistryConfig(this.connection, router, new PublicKey(token))
@@ -2072,6 +2077,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         pendingAdministrator: config.pendingAdministrator.toBase58(),
       }),
       ...(config.tokenPool && { tokenPool: config.tokenPool.toBase58() }),
+      interfaceVersion: config.interfaceVersion,
+      accountResolution: config.accountResolution,
     }
   }
 
