@@ -17,8 +17,9 @@
  *
  * Derived params: `poolOwner` is `instrumentId.admin`; the TAR is
  * `deps.tokenAdminRegistry` and `ccipOwner` its signatory; `admin` defaults to
- * `poolOwner`; a TokenConfig still awaiting an admin (third-party-admin flow)
- * is passed as `existingTokenConfigCid`, else `null`.
+ * `poolOwner`; a TokenConfig already administered by `admin` (re-deploy or
+ * migration of a registered instrument) is passed as `existingTokenConfigCid`,
+ * else `null`.
  *
  * `Initialize`'s controller is `poolOwner, admin` — BOTH parties must
  * authorize (Daml's multi-controller semantics require every listed party's
@@ -290,10 +291,11 @@ export class DeployTokenPool extends CantonOperation<
       },
     ]
 
-    // Third-party-admin flow: a TokenConfig proposed out of band (no admin yet)
-    // is passed by CID and disclosed — Initialize's internal ProposeAdministrator
-    // fetches it, and the sender is not a signatory on it. One that already has
-    // an admin would be rejected on-ledger, so it is not passed.
+    // An instrument already registered with this exact admin (re-deploying or
+    // migrating a pool) is passed by CID and reused: Initialize validates
+    // `admin` via IsAdministrator and then SetPool, without re-proposing.
+    // Registering instead would create a second TokenConfig for the instrument
+    // and leave the existing one stale.
     const tokenConfigAddress = deriveTokenConfigInstanceAddress(p.instrumentId, ccipOwner)
     const tokenConfig = await chain.findActiveContractByInstanceAddress(
       TOKEN_CONFIG_TEMPLATE_ID,
@@ -304,21 +306,32 @@ export class DeployTokenPool extends CantonOperation<
       const currentAdmin = decodeOptionalParty(
         decodeDamlRecord(tokenConfig.createArgument)['admin'],
       )
+      // Initialize reuses a config only when its accepted admin is `admin`; the
+      // fresh-registration branch would create a duplicate config here.
       if (currentAdmin === undefined) {
-        existingTokenConfigCid = tokenConfig.contractId
-        disclosedContracts.push({
-          // oxlint-disable-next-line typescript/no-unnecessary-condition
-          templateId: tokenConfig.templateId ?? TOKEN_CONFIG_TEMPLATE_ID,
-          contractId: tokenConfig.contractId,
-          createdEventBlob: tokenConfig.createdEventBlob,
-          synchronizerId: tokenConfig.synchronizerId,
-        })
-      } else {
-        chain.logger.warn(
-          `${this.name}: TokenConfig ${tokenConfigAddress} already has admin ${currentAdmin}; ` +
-            'Initialize will attempt a fresh registration for the instrument',
+        throw new CCTParamsInvalidError(
+          this.name,
+          'admin',
+          `TokenConfig ${tokenConfigAddress} exists but has no accepted admin; ` +
+            'complete its admin proposal/acceptance, then deploy',
         )
       }
+      if (currentAdmin !== p.admin) {
+        throw new CCTParamsInvalidError(
+          this.name,
+          'admin',
+          `TokenConfig ${tokenConfigAddress} is administered by ${currentAdmin}, not ${p.admin}; ` +
+            'transfer the admin role first',
+        )
+      }
+      existingTokenConfigCid = tokenConfig.contractId
+      disclosedContracts.push({
+        // oxlint-disable-next-line typescript/no-unnecessary-condition
+        templateId: tokenConfig.templateId ?? TOKEN_CONFIG_TEMPLATE_ID,
+        contractId: tokenConfig.contractId,
+        createdEventBlob: tokenConfig.createdEventBlob,
+        synchronizerId: tokenConfig.synchronizerId,
+      })
     }
 
     // Lock-release: auto-wire the pool owner's transfer preapproval into the
@@ -366,11 +379,31 @@ export class DeployTokenPool extends CantonOperation<
         },
       },
     ]
+    // Deterministic per deployment, derived from the CALLER'S PARAMS — not the
+    // resolved contract CIDs. A regenerated retry after a committed-but-
+    // unacknowledged first attempt re-resolves CIDs (SetPool recreates the
+    // TokenConfig), which would shift a content-derived ID and silently deploy
+    // a second pool; a params-derived ID is stable across rebuilds, so the
+    // retry is rejected as DUPLICATE_COMMAND instead. Resolved state (TAR CID,
+    // TokenConfig CID, auto-wired preapproval) is deliberately excluded.
+    const commandIdSeed = {
+      poolType: p.poolType,
+      instanceId: p.instanceId,
+      instrumentId: `${p.instrumentId.admin}::${p.instrumentId.id}`,
+      decimals: p.decimals,
+      observers: [...p.observers].sort(),
+      rateLimitAdmin: p.rateLimitAdmin ?? null,
+      admin: p.admin,
+      deps: p.deps ?? null,
+      poolReceiveContext: p.poolReceiveContext ?? null,
+      poolReceiveMetadata: p.poolReceiveMetadata ?? null,
+      transferTimeout: p.transferTimeout ?? null,
+      lanes: p.lanes,
+    }
     return {
       commands,
-      // Deterministic per deployment: a retry after an ambiguous submission
-      // failure dedupes on the ledger instead of deploying a second pool.
-      commandId: p.commandId ?? stableCommandId(`cct-deploy-${p.poolType}-pool`, commands, actAs),
+      commandId:
+        p.commandId ?? stableCommandId(`cct-deploy-${p.poolType}-pool`, commandIdSeed, actAs),
       // Initialize's controller is `poolOwner, admin` — both must authorize;
       // dedup covers the common case where they're the same party.
       actAs,
