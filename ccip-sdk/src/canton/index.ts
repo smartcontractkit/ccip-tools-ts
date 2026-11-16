@@ -208,6 +208,9 @@ export {
   validateAuthorizationCallback,
 } from './authentication/index.ts'
 
+// Node-side Canton Ledger API provider (dApp-RPC `Provider` implementation)
+export { type TransactionSigner, CantonJsonRpcProvider } from './provider.ts'
+
 const PerPartyRouterIdentifier_PkgId = CantonIdentifier.fromString(
   'b8e4dfb8d64853c7f9aee4e93385462587745bdc703fceb750993f2723ebd984:CCIP.ClientV2:PerPartyRouter',
 ) // Used for getting InterfaceViews, they don't contain the packageName only the packageId
