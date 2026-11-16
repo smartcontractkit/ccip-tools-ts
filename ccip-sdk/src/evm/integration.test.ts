@@ -486,6 +486,26 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
 
             // Simulate the SDK-built transaction without broadcasting it.
             await hederaChain.provider.call(sendTx)
+
+            // Regression: Hedera substitutes caller 0x2 for the OnRamp in the pool simulation.
+            // Build the reported ERC20 send without broadcasting or assuming token approvals.
+            const token = '0xf8238fd7dd2bebedaa65c3974175d98e6110beb1'
+            const tokenSender = '0x4444638f73a73977098f364533dfad6a274f1e88'
+            const tokenSend = await hederaChain.generateUnsignedSendMessage({
+              sender: tokenSender,
+              router: HEDERA_ROUTER,
+              destChainSelector: SEPOLIA_SELECTOR,
+              message: {
+                receiver: tokenSender,
+                feeToken: ZeroAddress,
+                tokenAmounts: [{ token, amount: 1_000_000_000_000_000n }],
+              },
+            })
+            const tokenTx = tokenSend.transactions.at(-1)!
+            assert.equal(tokenTx.to, HEDERA_ROUTER)
+            const [, message] = interfaces.Router.decodeFunctionData('ccipSend', tokenTx.data!)
+            assert.equal(message.tokenAmounts[0].token.toLowerCase(), token)
+            assert.equal(message.tokenAmounts[0].amount, 1_000_000_000_000_000n)
             abort.throwIfAborted()
             return
           } catch (err) {

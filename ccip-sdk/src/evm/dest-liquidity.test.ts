@@ -519,34 +519,64 @@ describe('EVMChain.simulateLockOrBurn — OnRamp-version dispatch', () => {
     assert.ok(!sendCalls.some((c) => c.data?.startsWith(lobV2Sel)))
   })
 
-  function makeSourceEvmChain(revert: string) {
-    const ONRAMP = getAddress(hexlify(randomBytes(20)))
+  function makeSourceEvmChain(
+    revert: string | Error,
+    onRamp = getAddress(hexlify(randomBytes(20))),
+    network = {
+      name: 'ethereum-testnet-sepolia',
+      chainSelector: SOURCE_SELECTOR,
+      family: ChainFamily.EVM,
+      networkType: NetworkType.Testnet,
+    },
+  ) {
+    const ONRAMP = onRamp
+    const sendError =
+      typeof revert === 'string'
+        ? Object.assign(new Error('execution reverted'), { data: revert })
+        : revert
+    const provider = {
+      call: mock.fn(async () => {
+        throw Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION' })
+      }),
+      send: mock.fn(async () => {
+        throw sendError
+      }),
+    }
+    const getTokenAdminRegistryFor = mock.fn(async () => getAddress(hexlify(randomBytes(20))))
+    const getRegistryTokenConfig = mock.fn(async () => ({ tokenPool: POOL }))
+    const getTokenPoolRemote = mock.fn(async () => ({
+      outboundRateLimiterState: {
+        tokens: 1_000_000n,
+        lastUpdated: 0n,
+        isEnabled: true,
+        capacity: 1_000_000n,
+        rate: 1n,
+      },
+    }))
+    const getOnRampForRouter = mock.fn(async () => ONRAMP)
     const chain = Object.create(EVMChain.prototype) as EVMChain
     Object.assign(chain, {
-      provider: {
-        call: mock.fn(async () => {
-          throw Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION' })
-        }),
-        send: mock.fn(async () => {
-          throw Object.assign(new Error('execution reverted'), { data: revert })
-        }),
-      },
+      provider,
       logger: { debug() {}, info() {}, warn() {}, error() {} },
-      network: {
-        name: 'ethereum-testnet-sepolia',
-        chainSelector: SOURCE_SELECTOR,
-        family: ChainFamily.EVM,
-        networkType: NetworkType.Testnet,
-      },
-      getTokenAdminRegistryFor: mock.fn(async () => getAddress(hexlify(randomBytes(20)))),
-      getRegistryTokenConfig: mock.fn(async () => ({ tokenPool: POOL })),
+      network,
+      getTokenAdminRegistryFor,
+      getRegistryTokenConfig,
+      getTokenPoolRemote,
+      getOnRampForRouter,
       typeAndVersion: mock.fn(async (address: string) =>
-        address === ONRAMP
+        address.toLowerCase() === ONRAMP.toLowerCase()
           ? (['EVM2EVMOnRamp', '1.5.0', 'EVM2EVMOnRamp 1.5.0'] as const)
           : (['BurnMintTokenPool', '1.5.1', 'BurnMintTokenPool 1.5.1'] as const),
       ),
     })
-    return { chain, ONRAMP }
+    return {
+      chain,
+      ONRAMP,
+      provider,
+      getTokenAdminRegistryFor,
+      getRegistryTokenConfig,
+      getTokenPoolRemote,
+    }
   }
   const lobOpts = (chain: EVMChain, onRamp: string) => ({
     onRamp,
@@ -556,6 +586,26 @@ describe('EVMChain.simulateLockOrBurn — OnRamp-version dispatch', () => {
     originalSender: RECEIVER,
     receiver: RECEIVER,
   })
+  const sendOpts = {
+    router: OFFRAMP,
+    destChainSelector: DEST_SELECTOR,
+    message: {
+      receiver: RECEIVER,
+      tokenAmounts: [{ token: TOKEN, amount: 1000n }],
+    },
+    sender: RECEIVER,
+  }
+  const callerRevert = (caller: string) =>
+    pool.encodeErrorResult('CallerIsNotARampOnRouter', [caller])
+  // values from the reported Hedera case; the artifact depends only on caller != onRamp
+  const HEDERA_REWRITTEN_CALLER = '0x0000000000000000000000000000000000000002'
+  const HEDERA_ONRAMP = getAddress('0x023b31f937cfb8ce59a264c73d3d4cb345fb3aef')
+  const HEDERA_NETWORK = {
+    name: 'hedera-testnet',
+    chainSelector: 222782988166878823n,
+    family: ChainFamily.EVM,
+    networkType: NetworkType.Testnet,
+  }
 
   it('genuine source-gate revert => typed CCIPSourcePoolRevertError with raw revert', async () => {
     const revert = interfaces.Custom.encodeErrorResult('SenderNotAllowed', [
@@ -584,6 +634,98 @@ describe('EVMChain.simulateLockOrBurn — OnRamp-version dispatch', () => {
       () => chain.simulateLockOrBurn(lobOpts(chain, ONRAMP)),
       (err: Error) => {
         assert.ok(!(err instanceof CCIPSourcePoolRevertError), 'artifact must not block')
+        return true
+      },
+    )
+  })
+
+  it('Hedera report: CallerIsNotARampOnRouter(0x…02) is a simulation artifact => raw error kept', async () => {
+    const raw = Object.assign(new Error('execution reverted'), {
+      data: callerRevert(HEDERA_REWRITTEN_CALLER),
+    })
+    const { chain } = makeSourceEvmChain(raw, HEDERA_ONRAMP, HEDERA_NETWORK)
+    await assert.rejects(
+      () => chain.simulateLockOrBurn(lobOpts(chain, HEDERA_ONRAMP)),
+      (err: Error) => {
+        assert.equal(err, raw, 'must rethrow the provider error unchanged')
+        assert.ok(!(err instanceof CCIPSourcePoolRevertError), 'artifact must not block')
+        return true
+      },
+    )
+  })
+
+  it('CallerIsNotARampOnRouter(requested onRamp) is a genuine mismatch => typed block', async () => {
+    const revert = callerRevert(HEDERA_ONRAMP)
+    const { chain } = makeSourceEvmChain(revert, HEDERA_ONRAMP, HEDERA_NETWORK)
+    await assert.rejects(
+      () => chain.simulateLockOrBurn(lobOpts(chain, HEDERA_ONRAMP)),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPSourcePoolRevertError, String(err))
+        assert.equal(err.context['revert'], revert)
+        return true
+      },
+    )
+  })
+
+  it('compares the decoded caller to the requested onRamp without checksum/case sensitivity', async () => {
+    const ONRAMP = getAddress(hexlify(randomBytes(20)))
+    const revert = callerRevert(ONRAMP)
+    const { chain } = makeSourceEvmChain(revert, ONRAMP)
+    for (const requested of [ONRAMP.toLowerCase(), '0x' + ONRAMP.slice(2).toUpperCase()]) {
+      await assert.rejects(
+        () => chain.simulateLockOrBurn(lobOpts(chain, requested)),
+        (err: CCIPError) => {
+          assert.ok(err instanceof CCIPSourcePoolRevertError, `${requested}: ${String(err)}`)
+          return true
+        },
+      )
+    }
+  })
+
+  it('malformed CallerIsNotARampOnRouter data cannot prove an artifact => typed block', async () => {
+    const selector = pool.getError('CallerIsNotARampOnRouter')!.selector
+    // 32-byte word, but nonzero high address padding: decoding fails only when the value is read
+    const dirtyPadding = selector + 'ff'.repeat(12) + HEDERA_REWRITTEN_CALLER.slice(2)
+    for (const revert of [selector, selector + '00'.repeat(20), dirtyPadding]) {
+      const { chain } = makeSourceEvmChain(revert, HEDERA_ONRAMP, HEDERA_NETWORK)
+      await assert.rejects(
+        () => chain.simulateLockOrBurn(lobOpts(chain, HEDERA_ONRAMP)),
+        (err: CCIPError) => {
+          assert.ok(err instanceof CCIPSourcePoolRevertError, `${revert}: ${String(err)}`)
+          assert.equal(err.context['revert'], revert)
+          return true
+        },
+      )
+    }
+  })
+
+  // checkSendMessage reuses the same fixture: registry and rate-limit reads run before the
+  // simulateLockOrBurn path, so the rewritten caller must fall back to a pass.
+  it('checkSendMessage passes on the rewritten caller after registry and rate-limit reads', async () => {
+    const {
+      chain,
+      provider,
+      getTokenAdminRegistryFor,
+      getRegistryTokenConfig,
+      getTokenPoolRemote,
+    } = makeSourceEvmChain(callerRevert(HEDERA_REWRITTEN_CALLER), HEDERA_ONRAMP, HEDERA_NETWORK)
+    assert.equal(await chain.checkSendMessage(sendOpts), true)
+    assert.ok(getTokenAdminRegistryFor.mock.callCount() >= 1, 'registry read')
+    assert.ok(getRegistryTokenConfig.mock.callCount() >= 1, 'token config read')
+    assert.equal(getTokenPoolRemote.mock.callCount(), 1, 'rate-limit read')
+    assert.equal(provider.send.mock.callCount(), 1, 'simulation ran')
+  })
+
+  it('checkSendMessage blocks when the decoded caller is the requested onRamp', async () => {
+    const revert = callerRevert(HEDERA_ONRAMP)
+    const { chain } = makeSourceEvmChain(revert, HEDERA_ONRAMP, HEDERA_NETWORK)
+    await assert.rejects(
+      () => chain.checkSendMessage(sendOpts),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPSourcePoolRevertError, String(err))
+        assert.equal(err.context['revert'], revert)
+        assert.equal(err.context['onRamp'], HEDERA_ONRAMP)
+        assert.equal(err.context['network'], 'hedera-testnet')
         return true
       },
     )
