@@ -239,12 +239,14 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
       assert.equal(decoded[0]!.message.tokenAmounts[0]?.amount, 1_000_000n)
     })
 
-    // WARNING: fails once the mainnet router gets CCIP 2.0 support; see the note on this suite
-    it('should reject GenericExtraArgsV3 on a router without CCIP 2.0', async () => {
+    // WARNING: depends on live mainnet state: it fails once the router has CCIP 2.0 enabled on the
+    // Ethereum lane; see the note on this suite
+    it('should reject GenericExtraArgsV3 on a router or lane without CCIP 2.0', async () => {
       assert.ok(solanaChain, 'chain should be initialized')
       assert.ok(wallet, 'wallet should be initialized')
 
-      // the legacy sends above went over 1.6: this router doesn't have 2.0 support yet
+      // the legacy sends above went over 1.6: the router has 2.0 support now, but this lane is not
+      // configured for it yet ('lane-not-configured'; it used to be 'router-without-v2-support')
       await assert.rejects(
         solanaChain.getFee({
           router: SOLANA_ROUTER,
@@ -256,7 +258,8 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
         }),
         (err: unknown) =>
           err instanceof CCIPSolanaV2LaneUnavailableError &&
-          err.context.reason === 'router-without-v2-support',
+          (err.context.reason === 'lane-not-configured' ||
+            err.context.reason === 'router-without-v2-support'),
       )
     })
   })
