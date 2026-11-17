@@ -498,7 +498,7 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
         assert.equal(config.finalitySafe, undefined)
         assert.deepEqual(config.tokenTransferFeeConfig, fee)
 
-        // a full replacement: the omitted fee config resets to disabled
+        // an edit replaces only the parts it passes: the omitted fees and CCVs are kept
         const edit = {
           tokenAddress,
           remoteChainSelector,
@@ -510,6 +510,23 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
         )
         config = await laneConfig()
         assert.equal(config.finalityDepth, 0)
+        assert.equal(config.finalitySafe, true)
+        assert.deepEqual(config.tokenTransferFeeConfig, fee)
+        const ccvs = await cct.getCCVConfig({ tokenAddress, remoteChainSelector })
+        assert.deepEqual(ccvs.outboundCCVs, [ccv])
+        assert.deepEqual(ccvs.inboundCCVs, [ccv])
+
+        // a passed part is replaced in full
+        const disableFees = {
+          tokenAddress,
+          remoteChainSelector,
+          tokenTransferFeeConfig: { ...fee, isEnabled: false },
+        }
+        await run(
+          (wallet) => cct.editChainConfigV2({ ...disableFees, wallet }),
+          (payer) => cct.generateUnsignedEditChainConfigV2({ ...disableFees, payer }),
+        )
+        config = await laneConfig()
         assert.equal(config.finalitySafe, true)
         assert.equal(config.tokenTransferFeeConfig?.isEnabled, false)
 
