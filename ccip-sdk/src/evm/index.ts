@@ -101,7 +101,12 @@ import {
 import type { LeafHasher } from '../hasher/common.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../networks.ts'
-import { type TokenVerifier, CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
+import {
+  type TokenVerifier,
+  CCTP_FINALITY_FAST,
+  CCTP_V2_CCV_TAG,
+  getUsdcBurnFees,
+} from '../offchain.ts'
 import { buildMessageForDest, decodeMessage } from '../requests.ts'
 import { supportedChains } from '../supported-chains.ts'
 import {
@@ -3275,6 +3280,36 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   }
 
   /**
+   * Stand-in `sourcePoolData` for a transfer into a `USDCTokenPoolProxy` 2.0 over an IPoolV2
+   * dispatch, used when the source pool's real data is not in hand. The proxy routes on the
+   * payload's 4-byte tag: `CCTP_V2_CCV_TAG` to `CCTPThroughCCVTokenPool`, `LOCK_RELEASE_FLAG` to
+   * the siloed lock-release pool. The tag follows the mechanism the proxy has configured for the
+   * source chain, which also picks the child whose `getRemotePools` supplies the source-pool
+   * wiring, so the simulation enters that child's full `_validateReleaseOrMint`. Neither child
+   * reads past the tag. Each payload has the shape the matching source pool emits.
+   *
+   * @returns the tagged payload, or `undefined` when the configured mechanism has no 2.0 inbound
+   *   route (none set, or a legacy CCTP v1/v2 mechanism)
+   */
+  private async getUsdcProxyInboundPoolData(
+    tokenPool: string,
+    sourceChainSelector: bigint,
+  ): Promise<string | undefined> {
+    const proxy = new Contract(
+      tokenPool,
+      interfaces.USDCTokenPoolProxy_v2_0,
+      this.provider,
+    ) as unknown as TypedContract<typeof USDCTokenPoolProxy_2_0_ABI>
+    // USDCTokenPoolProxy.LockOrBurnMechanism: 3 = LOCK_RELEASE, 4 = CCV
+    switch (Number(await proxy.getLockOrBurnMechanism(sourceChainSelector))) {
+      case 3:
+        return defaultAbiCoder.encode(['bytes4'], [USDC_LOCK_RELEASE_FLAG])
+      case 4:
+        return CCTP_V2_CCV_TAG
+    }
+  }
+
+  /**
    * Pre-flight check that the token transfers in a message can execute on this (destination)
    * chain: a simulation of each destination pool's `releaseOrMint` (`eth_call` with `from` set to
    * the registered OffRamp; the registry-registered pool is the OffRamp's own callee, so proxy
@@ -3429,10 +3464,38 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         // pauses, records and inbound bucket): a synthesized payload would false-block. Skip its
         // simulation; a verdict deferred for this token stands
         if (poolTypeAndVersion && isMultiTokenPoolType(poolTypeAndVersion[0])) continue
-        // the dest token's own (optional) view, else the pool's declared decimals, else the
-        // family default — see resolveTokenDecimals
-        const decimals = await resolveTokenDecimals(this, token, tokenPool!)
-        sourcePoolData = defaultAbiCoder.encode(['uint256'], [decimals])
+        if (
+          poolTypeAndVersion?.[0] === 'USDCTokenPoolProxy' &&
+          resolvePoolInterfaceHint(offRampVersion, poolTypeAndVersion) === 'IPoolV2'
+        ) {
+          // A 2.0 USDC proxy routes the 2-arg releaseOrMint on the payload's 4-byte tag and
+          // reverts `InvalidMessageVersion` on anything else (e.g. the decimals default), so
+          // without the source's real data (non-EVM sources; failed source simulation) the
+          // payload is synthesized for the mechanism this proxy runs for the source chain.
+          try {
+            sourcePoolData = await this.getUsdcProxyInboundPoolData(
+              tokenPool,
+              message.sourceChainSelector,
+            )
+          } catch (err) {
+            if (!getErrorData(err))
+              throw (
+                deferred ??
+                new CCIPDestSimulationUnavailableError('transport', {
+                  cause: err instanceof Error ? err : undefined,
+                  context: { tokenPool, token, offRamp, network: this.network.name },
+                })
+              )
+          }
+          // no 2.0 inbound route to infer: skip the simulation rather than false-block (base
+          // checks already ran; a verdict deferred for this token stands)
+          if (sourcePoolData === undefined) continue
+        } else {
+          // the dest token's own (optional) view, else the pool's declared decimals, else the
+          // family default — see resolveTokenDecimals
+          const decimals = await resolveTokenDecimals(this, token, tokenPool!)
+          sourcePoolData = defaultAbiCoder.encode(['uint256'], [decimals])
+        }
       }
 
       // Attestation-consuming pools (USDC/CCTP v1.x, Lombard v1.x) decode offchain token data

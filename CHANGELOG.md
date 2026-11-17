@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDK (EVM): `getRequiredCCVs` (`send --only-ccvs`) encodes the sender for the source chain's family. A non-EVM sender, e.g. a Solana sender to Sepolia, failed with `invalid address`
 - Solana: `getRegistryTokenConfig` also returns the token's pool `interfaceVersion` (1 = legacy 1.6-compatible pool, 2 = CCIP 2.0) and `accountResolution`, and `get-supported-tokens` shows them
 - Solana: 2.0 sends from the prod testnet Router (`Ccip842…`) use its `ccip_send` lookup table, as staging already did
+- SDK (EVM): the destination preflight (`estimateReceiveExecution`, `send`, `send --only-get-fee`) no longer blocks USDC transfers into a `USDCTokenPoolProxy` 2.0 on a 2.0 lane when the source pool's data is unknown, e.g. from Solana. It failed with `InvalidMessageVersion`, because the proxy routes on a 4-byte tag that the decimals placeholder lacks. The simulation now uses the tag of the mechanism the proxy has set for the source chain: `CCTP_V2_CCV` for CCTP, the lock-release flag for lock-release. With no 2.0 mechanism set, it skips the simulation
 
 ## [1.17.0] - 2026-11-10
 
