@@ -67,6 +67,7 @@ import {
   type EVMExtraArgsV2,
   type ExtraArgs,
   type FinalityAllowed,
+  type FinalityRequested,
   type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
@@ -135,6 +136,7 @@ import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
+import { simulateLockOrBurn as simulateLockOrBurnSolana } from './lock-or-burn.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import {
   type SolanaSendLane,
@@ -1759,6 +1761,63 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
     const tx = await this.getTransaction(hash)
     return this.getExecutionReceiptInTx(tx)
+  }
+
+  /**
+   * {@inheritDoc Chain.simulateLockOrBurn}
+   *
+   * Simulates the pool instruction the router would call: `lock_or_burn_tokens_v2` for a 2.0 pool
+   * on a lane that takes CCIP 2.0 messages (see {@link SolanaChain.getFee}), `lock_or_burn_tokens`
+   * otherwise. See {@link simulateLockOrBurnSolana} for how the router's signer and transfer are
+   * stood in for. Without `originalSender`, a pool revert isn't a verdict and is thrown raw.
+   * @throws {@link CCIPSourcePoolRevertError} if the pool itself rejects the transfer
+   */
+  override async simulateLockOrBurn(opts: {
+    onRamp: string
+    destChainSelector: bigint
+    token: string
+    amount: bigint
+    originalSender?: string
+    receiver?: string
+    tokenReceiver?: string
+    tokenArgs?: string
+    finality?: FinalityRequested
+  }): Promise<{
+    sourcePoolAddress: string
+    destTokenAddress: string
+    destPoolData: string
+    destTokenAmount: bigint
+  }> {
+    const { onRamp, destChainSelector } = opts
+    const [, version] = await this.typeAndVersion(onRamp)
+    const laneV2 =
+      version >= CCIPVersion.V2_0 &&
+      !v2LaneUnavailableReason(await this._observeDestChainV2(onRamp, destChainSelector))
+    const tokenReceiver = opts.tokenReceiver?.match(/^(0x)?0*$/) ? undefined : opts.tokenReceiver
+    const receiverBytes = getAddressBytes(tokenReceiver ?? opts.receiver ?? new Uint8Array(32))
+    const receiver = new Uint8Array(Math.max(32, receiverBytes.length))
+    receiver.set(receiverBytes, receiver.length - receiverBytes.length)
+    const result = await simulateLockOrBurnSolana(this, {
+      router: new PublicKey(onRamp),
+      laneV2,
+      rmnRemote: (await this._getRouterConfig(onRamp)).rmnRemote,
+      destChainSelector,
+      mint: new PublicKey(opts.token),
+      amount: opts.amount,
+      ...(opts.originalSender && { originalSender: new PublicKey(opts.originalSender) }),
+      receiver,
+      finality: opts.finality,
+      tokenArgs: getDataBytes(opts.tokenArgs ?? '0x'),
+    })
+    return {
+      sourcePoolAddress: result.sourcePoolAddress.toBase58(),
+      destTokenAddress: decodeAddress(
+        result.destTokenAddress,
+        networkInfo(destChainSelector).family,
+      ),
+      destPoolData: hexlify(result.destPoolData),
+      destTokenAmount: result.destTokenAmount,
+    }
   }
 
   /** {@inheritDoc Chain.estimateReceiveExecution} */
