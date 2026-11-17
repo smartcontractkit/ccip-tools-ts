@@ -87,7 +87,8 @@ const failsWith = (name: string) => (err: unknown) => inspect(err, { depth: 6 })
 const testLogger = new Console(process.stdout, process.stderr)
 if (!VERBOSE) testLogger.debug = () => {}
 
-describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600_000 }, () => {
+// the fork fetches devnet accounts lazily, so the suite's runtime follows the upstream RPC: ~10 min
+describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 1_200_000 }, () => {
   useResourceForDescribe(['solana-devnet'])
 
   const fork: { surfpool?: SurfpoolInstance; connection?: Connection } = {}
