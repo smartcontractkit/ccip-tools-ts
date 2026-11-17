@@ -354,9 +354,11 @@ export class DeployTokenPool extends CantonOperation<
         )
       } else {
         chain.logger.warn(
-          `${this.name}: no TransferPreapproval found for ${p.poolOwner} covering ${p.instrumentId.id}; ` +
-            'sends from parties other than the pool owner will abort until one is pinned ' +
-            `(see ${TRANSFER_PREAPPROVAL_CONTEXT_KEY} receive-context entry)`,
+          `${this.name}: SETUP REQUIRED — no TransferPreapproval found for ${p.poolOwner} covering ` +
+            `${p.instrumentId.id}. The pool is deployed but NOT ready: sends from parties other than ` +
+            'the pool owner will abort until the owner creates a preapproval and pins it with ' +
+            `addPoolReceiveContextContractValue (key "${TRANSFER_PREAPPROVAL_CONTEXT_KEY}"). ` +
+            'Validate the pool afterwards to confirm.',
         )
       }
     }

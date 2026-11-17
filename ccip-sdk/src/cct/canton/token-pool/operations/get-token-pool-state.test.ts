@@ -73,6 +73,8 @@ function poolContract(
     rateLimitAdminField?: unknown
     remoteChainConfigs?: Record<string, unknown>
     observers?: string[]
+    /** Raw `poolReceiveContext` field value (natural JSON); omitted from the contract when unset. */
+    poolReceiveContext?: unknown
   } = {},
 ): CantonActiveContract {
   return {
@@ -103,6 +105,9 @@ function poolContract(
           'observers',
           (opts.observers ?? []).map((p) => party(p)),
         ),
+        ...('poolReceiveContext' in opts
+          ? [field('poolReceiveContext', opts.poolReceiveContext)]
+          : []),
       ],
     },
   }
@@ -154,6 +159,53 @@ describe('CantonTokenManager.getTokenPoolState (mocked chain)', () => {
     })
 
     assert.deepEqual(result.observers, [RATE_LIMIT_ADMIN, INSTRUMENT_ADMIN])
+  })
+
+  it('returns an empty poolReceiveContext when the pool has none pinned', async () => {
+    const manager = CantonTokenManager.fromChain(chainWith(poolContract()))
+    const result = await manager.getTokenPoolState({
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
+      poolOwner: POOL_OWNER,
+    })
+    assert.deepEqual(result.poolReceiveContext, {})
+
+    const emptyValues = CantonTokenManager.fromChain(
+      chainWith(poolContract({ poolReceiveContext: { values: {} } })),
+    )
+    assert.deepEqual(
+      (
+        await emptyValues.getTokenPoolState({
+          poolInstanceAddress: POOL_INSTANCE_ADDRESS,
+          poolOwner: POOL_OWNER,
+        })
+      ).poolReceiveContext,
+      {},
+    )
+  })
+
+  it('decodes a pinned transfer-preapproval contract ID from poolReceiveContext (natural JSON)', async () => {
+    const manager = CantonTokenManager.fromChain(
+      chainWith(
+        poolContract({
+          poolReceiveContext: {
+            values: {
+              'transfer-preapproval': { tag: 'AV_ContractId', value: '00preapproval' },
+              'some-scalar': { tag: 'AV_Text', value: 'hello' },
+            },
+          },
+        }),
+      ),
+    )
+
+    const result = await manager.getTokenPoolState({
+      poolInstanceAddress: POOL_INSTANCE_ADDRESS,
+      poolOwner: POOL_OWNER,
+    })
+
+    assert.deepEqual(result.poolReceiveContext, {
+      'transfer-preapproval': '00preapproval',
+      'some-scalar': 'hello',
+    })
   })
 
   it('decodes the rate-limit admin when set (Optional Party)', async () => {

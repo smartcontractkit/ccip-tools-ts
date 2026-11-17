@@ -28,18 +28,26 @@ import { deriveTokenConfigInstanceAddress } from './token-admin-registry/shared.
 import {
   type ApplyChainUpdatesParams,
   type DeployTokenPoolParams,
+  type ExecuteAddPoolReceiveContextContractValueParams,
+  type ExecuteAddPoolReceiveContextContractValueResult,
   type ExecuteApplyChainUpdatesParams,
   type ExecuteApplyChainUpdatesResult,
   type ExecuteDeployTokenPoolParams,
   type ExecuteDeployTokenPoolResult,
+  type ExecuteRemovePoolReceiveContextValueParams,
+  type ExecuteRemovePoolReceiveContextValueResult,
   type ExecuteSetObserversParams,
   type ExecuteSetObserversResult,
   type ExecuteSetRateLimitConfigParams,
   type ExecuteSetRateLimitConfigResult,
+  type GenerateAddPoolReceiveContextContractValueParams,
+  type GenerateAddPoolReceiveContextContractValueResult,
   type GenerateApplyChainUpdatesParams,
   type GenerateApplyChainUpdatesResult,
   type GenerateDeployTokenPoolParams,
   type GenerateDeployTokenPoolResult,
+  type GenerateRemovePoolReceiveContextValueParams,
+  type GenerateRemovePoolReceiveContextValueResult,
   type GenerateSetObserversParams,
   type GenerateSetObserversResult,
   type GenerateSetRateLimitConfigParams,
@@ -51,16 +59,19 @@ import {
   type PoolType,
   type SetObserversParams,
   type SetRateLimitConfigParams,
+  AddPoolReceiveContextContractValue,
   ApplyChainUpdates,
   DeployTokenPool,
   GetRateLimiterState,
   GetTokenPoolState,
+  RemovePoolReceiveContextValue,
   SetObservers,
   SetRateLimitConfig,
 } from './token-pool/operations/index.ts'
 export {
   TRANSFER_PREAPPROVAL_CONTEXT_KEY,
   TRANSFER_PREAPPROVAL_TEMPLATE_ID,
+  listTransferPreapprovalCids,
   resolveTransferPreapprovalCid,
 } from './token-pool/preapproval.ts'
 export { CCIP_PUBLIC_LABEL, CIP112_RECEIVER_ID_META_KEY } from './token-pool/shared.ts'
@@ -83,6 +94,8 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   readonly #applyChainUpdates = new ApplyChainUpdates()
   readonly #setRateLimitConfig = new SetRateLimitConfig()
   readonly #setObservers = new SetObservers()
+  readonly #addPoolReceiveContextContractValue = new AddPoolReceiveContextContractValue()
+  readonly #removePoolReceiveContextValue = new RemovePoolReceiveContextValue()
 
   // Read operations.
   readonly #getTokenAdminRegistry = new GetTokenAdminRegistry()
@@ -183,6 +196,37 @@ export class CantonTokenManager extends TokenManager<typeof ChainFamily.Canton> 
   /** Updates a pool's EDS observer parties. */
   async setObservers(opts: ExecuteSetObserversParams): Promise<ExecuteSetObserversResult> {
     return this.#setObservers.execute(this.chain, opts)
+  }
+
+  /** Builds unsigned `addPoolReceiveContextContractValue` commands (lock-release pools). */
+  async generateUnsignedAddPoolReceiveContextContractValue(
+    opts: GenerateAddPoolReceiveContextContractValueParams,
+  ): Promise<GenerateAddPoolReceiveContextContractValueResult> {
+    return this.#addPoolReceiveContextContractValue.generate(this.chain, opts)
+  }
+
+  /**
+   * Pins (or replaces) a contract ID under a receive-context key on a lock-release
+   * pool — e.g. the owner's `transfer-preapproval`. Owner only.
+   */
+  async addPoolReceiveContextContractValue(
+    opts: ExecuteAddPoolReceiveContextContractValueParams,
+  ): Promise<ExecuteAddPoolReceiveContextContractValueResult> {
+    return this.#addPoolReceiveContextContractValue.execute(this.chain, opts)
+  }
+
+  /** Builds unsigned `removePoolReceiveContextValue` commands (lock-release pools). */
+  async generateUnsignedRemovePoolReceiveContextValue(
+    opts: GenerateRemovePoolReceiveContextValueParams,
+  ): Promise<GenerateRemovePoolReceiveContextValueResult> {
+    return this.#removePoolReceiveContextValue.generate(this.chain, opts)
+  }
+
+  /** Removes a receive-context entry from a lock-release pool. Owner only. */
+  async removePoolReceiveContextValue(
+    opts: ExecuteRemovePoolReceiveContextValueParams,
+  ): Promise<ExecuteRemovePoolReceiveContextValueResult> {
+    return this.#removePoolReceiveContextValue.execute(this.chain, opts)
   }
 
   // ─── TAR: reads ─────────────────────────────────────────────────────────
