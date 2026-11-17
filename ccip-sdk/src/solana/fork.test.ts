@@ -77,9 +77,6 @@ const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isSurfpoolAvailable()
 const testLogger = new Console(process.stdout, process.stderr)
 if (!VERBOSE) testLogger.debug = () => {}
 
-// WARNING: these assume the mainnet router has no CCIP 2.0 support yet, so sends go over 1.6.
-// Once mainnet gets 2.0 support (an in-place upgrade), the sends switch to ccip_send_v2 and the
-// 2.0 rejection test below fails: update them then.
 describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   let solanaChain: SolanaChain | undefined
   let surfpoolInstance: SurfpoolInstance | undefined
@@ -237,30 +234,6 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       assert.equal(decoded[0]!.message.tokenAmounts.length, 1)
       assert.equal(decoded[0]!.message.tokenAmounts[0]?.amount, 1_000_000n)
-    })
-
-    // WARNING: depends on live mainnet state: it fails once the router has CCIP 2.0 enabled on the
-    // Ethereum lane; see the note on this suite
-    it('should reject GenericExtraArgsV3 on a router or lane without CCIP 2.0', async () => {
-      assert.ok(solanaChain, 'chain should be initialized')
-      assert.ok(wallet, 'wallet should be initialized')
-
-      // the legacy sends above went over 1.6: the router has 2.0 support now, but this lane is not
-      // configured for it yet ('lane-not-configured'; it used to be 'router-without-v2-support')
-      await assert.rejects(
-        solanaChain.getFee({
-          router: SOLANA_ROUTER,
-          destChainSelector: ETH_MAINNET_SELECTOR,
-          message: {
-            receiver: '0x9eC0e4A4c411493773E01e2ABF4D42395788846b',
-            extraArgs: { finality: 'finalized' },
-          },
-        }),
-        (err: unknown) =>
-          err instanceof CCIPSolanaV2LaneUnavailableError &&
-          (err.context.reason === 'lane-not-configured' ||
-            err.context.reason === 'router-without-v2-support'),
-      )
     })
   })
 
