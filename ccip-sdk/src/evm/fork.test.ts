@@ -4,7 +4,15 @@ import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
 import { Connection } from '@solana/web3.js'
-import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
+import {
+  type JsonRpcProvider,
+  AbiCoder,
+  Contract,
+  Wallet,
+  keccak256,
+  parseUnits,
+  toBeHex,
+} from 'ethers'
 import { Instance } from 'prool'
 import { createPublicClient, http } from 'viem'
 
@@ -24,6 +32,7 @@ import {
   rankExecFixtures,
   tryExecFixtures,
 } from './exec-fixtures.test.helpers.ts'
+import { forkProvider } from './fork-retry.test.helpers.ts'
 import {
   SOLANA_DEVNET_EXEC_INPUT_TEST_MSG,
   SOLANA_DEVNET_EXEC_TEST_MSG,
@@ -277,9 +286,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
     )
     await Promise.all([startForkWithRetries(sepoliaInstance), startForkWithRetries(fujiInstance)])
 
-    const sepoliaProvider = new JsonRpcProvider(
-      `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-    )
+    const sepoliaProvider = await forkProvider(sepoliaInstance, { logger: testLogger })
 
     sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, {
       apiClient: null,
@@ -680,7 +687,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
         assert.ok(fujiInstance, 'fuji anvil should be running')
 
         // Create a fuji chain with staging API client (execution-inputs endpoint)
-        const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+        const fujiProvider = await forkProvider(fujiInstance, { logger: testLogger })
         const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
           apiClient: stagingApi,
           logger: testLogger,
@@ -720,7 +727,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
       async () => {
         assert.ok(fujiInstance, 'fuji anvil should be running')
 
-        const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+        const fujiProvider = await forkProvider(fujiInstance, { logger: testLogger })
         const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
           apiClient: stagingApi,
           logger: testLogger,
@@ -763,9 +770,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
 
         const messageId = '0xe913d21d8bc14316286646539db34bc7dd14b11c6ae3b0c307e7e52f6af02805'
 
-        const sepoliaProvider = new JsonRpcProvider(
-          `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-        )
+        const sepoliaProvider = await forkProvider(sepoliaInstance, { logger: testLogger })
         const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
           apiClient: stagingApi,
           logger: testLogger,
@@ -801,9 +806,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
 
         const msg = TON_TO_SEPOLIA[0]!
 
-        const sepoliaProvider = new JsonRpcProvider(
-          `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-        )
+        const sepoliaProvider = await forkProvider(sepoliaInstance, { logger: testLogger })
         const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
           apiClient: stagingApi,
           logger: testLogger,
@@ -844,9 +847,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
       async () => {
         assert.ok(sepoliaInstance, 'sepolia anvil should be running')
 
-        const sepoliaProvider = new JsonRpcProvider(
-          `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-        )
+        const sepoliaProvider = await forkProvider(sepoliaInstance, { logger: testLogger })
         const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
           apiClient: stagingApi,
           logger: testLogger,
@@ -984,7 +985,6 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
       { timeout: 60_000 },
       async () => {
         assert.ok(sepoliaInstance, 'sepolia anvil should be running')
-        const anvilUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
         const walletAddress = await wallet.getAddress()
 
         const oversizedAmount = await overCapacityAmount()
@@ -992,7 +992,8 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
         await setERC20Balance(ethersProvider, FTF_TOKEN_SEPOLIA, walletAddress, oversizedAmount)
 
         // Dedicated EVMChain for this test (see describe-block preamble).
-        const ethersChainLocal = await EVMChain.fromProvider(new JsonRpcProvider(anvilUrl), {
+        const provider = await forkProvider(sepoliaInstance, { logger: testLogger })
+        const ethersChainLocal = await EVMChain.fromProvider(provider, {
           apiClient: null,
           logger: testLogger,
         })
