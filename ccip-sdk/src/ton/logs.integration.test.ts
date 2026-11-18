@@ -7,6 +7,7 @@ import { NetworkType } from '../networks.ts'
 import type { ChainLog } from '../types.ts'
 import {
   type TonIndex,
+  V2_RETENTION_S,
   newestLogRows,
   patientIndexFetch,
   txBlock,
@@ -85,10 +86,9 @@ const EVENT_TOPICS = ['OCR3Base_Transmitted', 'CommitReportAccepted', 'Execution
 const EVENT_TOPIC_HASHES = EVENT_TOPICS.map((topic) => crc32(topic))
 const HOUR_S = 3_600
 const DAY_S = 24 * HOUR_S
-/** Age band of the preferred window (see WINDOW above): at least this old ... */
+/** Age band of the preferred window (see WINDOW above): at least this old, and not past
+ * the age the public v2 endpoint serves transactions reliably ({@link V2_RETENTION_S}). */
 const DEEP_AGE_S = 25 * HOUR_S
-/** ... and not past the age the public v2 endpoint serves transactions reliably. */
-const V2_RETENTION_S = 48 * HOUR_S
 /** The window spans this many log-carrying transactions. */
 const WINDOW_TXS = 4
 

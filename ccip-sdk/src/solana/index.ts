@@ -2197,71 +2197,48 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       // Custom pool programs may not implement `typeVersion`
     }
 
-    // Get all supported chains by fetching ChainConfig PDAs
-    // We need to scan for all ChainConfig accounts owned by this token pool program
     const remotes: Record<string, TokenPoolRemote> = {}
 
-    // Fetch all ChainConfig accounts for this token pool
-    let selectors: { selector: bigint }[] = Object.values(SELECTORS)
+    // The pool's ChainConfig PDA for each candidate remote: the one asked for, else every selector
+    // the SDK knows of this network type (lanes never cross mainnet and testnet). A ChainConfig of
+    // a selector the SDK doesn't know can't be named, so it is skipped either way. Reading the
+    // derived PDAs takes a few light `getMultipleAccountsInfo` pages, where a `getProgramAccounts`
+    // scan returns the ChainConfigs of every token of a shared pool program (hundreds on devnet),
+    // is throttled or refused by public RPCs, and left each account to be matched against every
+    // selector.
+    const selectors = remoteChainSelector
+      ? [remoteChainSelector]
+      : Object.values(SELECTORS).flatMap(({ selector, network_type }) =>
+          network_type === this.network.networkType ? [selector] : [],
+        )
+    const chainConfigAddrs = selectors.map(
+      (selector) =>
+        PublicKey.findProgramAddressSync(
+          [
+            Buffer.from('ccip_tokenpool_chainconfig'),
+            toLeArray(selector, 8),
+            config.mint.toBuffer(),
+          ],
+          tokenPoolProgram,
+        )[0],
+    )
     let accounts
     if (remoteChainSelector) {
-      selectors = [{ selector: remoteChainSelector }]
-      const [chainConfigAddr] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from('ccip_tokenpool_chainconfig'),
-          toLeArray(remoteChainSelector, 8),
-          config.mint.toBuffer(),
-        ],
-        tokenPoolProgram,
-      )
-      const chainConfigAcc = await this.connection.getAccountInfo(chainConfigAddr)
+      const chainConfigAcc = await this.connection.getAccountInfo(chainConfigAddrs[0]!)
       if (!chainConfigAcc)
         throw new CCIPTokenPoolChainConfigNotFoundError(
-          chainConfigAddr.toBase58(),
+          chainConfigAddrs[0]!.toBase58(),
           tokenPool,
           networkInfo(remoteChainSelector).name,
         )
-      accounts = [
-        {
-          pubkey: chainConfigAddr,
-          account: chainConfigAcc,
-        },
-      ]
-    } else
-      accounts = await this.connection.getProgramAccounts(tokenPoolProgram, {
-        filters: [
-          {
-            memcmp: {
-              offset: 0,
-              bytes: encodeBase58(BorshAccountsCoder.accountDiscriminator('ChainConfig')),
-            },
-          },
-        ],
-      })
+      accounts = [chainConfigAcc]
+    } else accounts = await this._getMultipleAccountsInfo(chainConfigAddrs)
 
-    for (const acc of accounts) {
+    for (const [i, account] of accounts.entries()) {
+      if (!account) continue
       try {
-        const base = decodeTokenPoolChainConfig(acc.account.data, poolType)
-
-        let remoteChainSelector
-        // test all selectors, to find the correct seed
-        for (const { selector } of Object.values(selectors)) {
-          const [chainConfigAddr] = PublicKey.findProgramAddressSync(
-            [
-              Buffer.from('ccip_tokenpool_chainconfig'),
-              toLeArray(selector, 8),
-              config.mint.toBuffer(),
-            ],
-            tokenPoolProgram,
-          )
-          if (chainConfigAddr.equals(acc.pubkey)) {
-            remoteChainSelector = selector
-            break
-          }
-        }
-        if (!remoteChainSelector) continue
-
-        const remoteNetwork = networkInfo(remoteChainSelector)
+        const base = decodeTokenPoolChainConfig(account.data, poolType)
+        const remoteNetwork = networkInfo(selectors[i]!)
 
         const remoteToken = decodeAddress(base.remote.tokenAddress.address, remoteNetwork.family)
 
@@ -2293,10 +2270,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         deriveTokenPoolChainConfigV2Pda(tokenPoolProgram, chainSelector, config.mint),
       ]
     })
-    const pdaAccounts = []
-    for (let i = 0; i < pdas.length; i += 100) {
-      pdaAccounts.push(...(await this.connection.getMultipleAccountsInfo(pdas.slice(i, i + 100))))
-    }
+    const pdaAccounts = await this._getMultipleAccountsInfo(pdas)
     for (const [i, name] of names.entries()) {
       const [override, chainConfigV2] = pdaAccounts.slice(2 * i, 2 * i + 2)
       // a pool of unknown version without 2.0 accounts may not be a 2.0 pool
@@ -2321,6 +2295,18 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     return remotes
+  }
+
+  /**
+   * `getMultipleAccountsInfo` over any number of keys, one page of 100 (the RPC limit) at a time.
+   * @param keys - Accounts to read.
+   * @returns Each account, or null where it doesn't exist, in the order of `keys`.
+   */
+  private async _getMultipleAccountsInfo(keys: PublicKey[]) {
+    const accounts = []
+    for (let i = 0; i < keys.length; i += 100)
+      accounts.push(...(await this.connection.getMultipleAccountsInfo(keys.slice(i, i + 100))))
+    return accounts
   }
 
   /**
