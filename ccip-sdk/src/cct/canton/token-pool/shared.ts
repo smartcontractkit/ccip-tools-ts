@@ -140,8 +140,10 @@ export function resolvePoolFactoryDeps(
 }
 
 /**
- * Deterministic command ID from the command content, so retries of the same
- * operation dedupe on the ledger (DUPLICATE_COMMAND) instead of double-executing.
+ * Default command ID, derived from the command content. It does NOT make a retry dedupe:
+ * the content includes on-ledger contract IDs, so a command rebuilt after the first attempt
+ * landed gets a different ID. To retry safely, pass an explicit `commandId` and reuse it
+ * (the ledger then rejects the repeat as DUPLICATE_COMMAND).
  * Builders use fixed key order, so plain JSON.stringify is stable; the replacer
  * only guards against bigints.
  */
