@@ -23,6 +23,7 @@ import {
   resolveExistingPoolProgram,
   validateAuthorityMatchesWallet,
   validatePoolProgramAtLeast2,
+  validatePoolProgramHasFeeVault,
 } from '../../validate.ts'
 import {
   type ChainConfigV2Params,
@@ -76,6 +77,7 @@ export class InitChainConfigV2 extends SolanaOperation<
       opts.poolProgramAddress,
     )
     await validatePoolProgramAtLeast2(this.name, chain, poolProgram)
+    await validatePoolProgramHasFeeVault(this.name, chain, poolProgram, opts.poolProgramAddress)
     const tokenProgram = await resolveTokenProgram(chain.connection, mint)
     const feeVault = deriveTokenPoolFeeVaultPda(poolProgram, mint)
 

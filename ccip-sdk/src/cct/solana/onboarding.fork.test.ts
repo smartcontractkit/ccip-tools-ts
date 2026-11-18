@@ -575,7 +575,7 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
         const iface = {
           ...registry,
           interfaceVersion: 2 as const,
-          accountResolution: 'Standard' as const,
+          accountResolution: 'WithoutExtendedLookupTable' as const,
         }
         await run(
           (wallet) => cct.setPoolInterfaceImplementation({ ...iface, wallet }),
@@ -583,7 +583,7 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
         )
         const updated = await cct.getTokenAdminRegistry(registry)
         assert.equal(updated.interfaceVersion, 2)
-        assert.equal(updated.accountResolution, 'Standard')
+        assert.equal(updated.accountResolution, 'WithoutExtendedLookupTable')
       })
 
       it('transfers pool ownership and the token admin role', async () => {

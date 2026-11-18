@@ -2436,8 +2436,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link initChainConfigV2}
    * @see {@link generateUnsignedEditChainConfigV2}
    *
-   * @throws {@link CCTParamsInvalidError} If a parameter is malformed or the pool program would
-   * reject the config.
+   * @throws {@link CCTParamsInvalidError} If a parameter is malformed, the pool program would
+   * reject the config, or the pool is a CCTP or Lombard pool, which keeps no fee vault.
    * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
    *
    * @example
@@ -2469,8 +2469,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link editChainConfigV2}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If a parameter is invalid or the authority differs from
-   * the executing wallet.
+   * @throws {@link CCTParamsInvalidError} If a parameter is invalid, the pool is a CCTP or Lombard
+   * pool, or the authority differs from the executing wallet.
    * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
    * @throws {@link CCTTxFailedError} If the config already exists, the wallet is not the pool
    * owner, or simulation/submission fails.
@@ -2762,7 +2762,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @see {@link withdrawFeeTokens}
    *
-   * @throws {@link CCTParamsInvalidError} If a public key or the amount is invalid.
+   * @throws {@link CCTParamsInvalidError} If a public key or the amount is invalid, or the pool is
+   * a CCTP or Lombard pool, which withdraws fees with its own instruction.
    * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
    *
    * @example
@@ -2792,8 +2793,8 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * @see {@link generateUnsignedWithdrawFeeTokens}
    *
    * @throws {@link CCIPWalletInvalidError} If `wallet` cannot sign Solana transactions.
-   * @throws {@link CCTParamsInvalidError} If a public key or the amount is invalid, or the
-   * authority differs from the executing wallet.
+   * @throws {@link CCTParamsInvalidError} If a public key or the amount is invalid, the pool is a
+   * CCTP or Lombard pool, or the authority differs from the executing wallet.
    * @throws {@link CCTOperationUnsupportedError} If the pool program predates CCIP 2.0.
    * @throws {@link CCTTxFailedError} If there are no fees to withdraw, the wallet is not the pool
    * owner, or simulation/submission fails.
@@ -2820,7 +2821,9 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *
    * @remarks On-chain execution requires `authority` to be the token administrator, and the
    * registry to be at the Router's latest layout; migrate an older one with
-   * `generateUnsignedUpgradeTokenAdminRegistry`. Account resolution requires interface version 2.
+   * `generateUnsignedUpgradeTokenAdminRegistry`. The Router accepts one account resolution per
+   * interface version, which `accountResolution` defaults to: `NoResolution` for 1,
+   * `WithoutExtendedLookupTable` for 2.
    *
    * @see {@link setPoolInterfaceImplementation}
    * @see {@link generateUnsignedUpgradeTokenAdminRegistry}
@@ -2835,7 +2838,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   address: router,
    *   interfaceVersion: 2,
-   *   accountResolution: 'Standard',
+   *   accountResolution: 'WithoutExtendedLookupTable',
    *   payer,
    *   authority,
    * })
@@ -2869,7 +2872,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    *   tokenAddress: mint,
    *   address: router,
    *   interfaceVersion: 2,
-   *   accountResolution: 'Standard',
+   *   accountResolution: 'WithoutExtendedLookupTable',
    *   wallet,
    * })
    * ```

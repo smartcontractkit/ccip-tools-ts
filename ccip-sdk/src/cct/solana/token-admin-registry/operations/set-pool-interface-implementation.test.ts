@@ -44,16 +44,16 @@ const keysOf = (instruction: {
   ])
 
 describe('SetPoolInterfaceImplementation (cct/solana)', () => {
-  it('builds set_pool_interface_implementation for each account resolution', async () => {
-    for (const [accountResolution, variant] of [
-      [undefined, 0],
-      ['NoResolution', 0],
-      ['Standard', 1],
-      ['WithoutExtendedLookupTable', 2],
+  it('builds set_pool_interface_implementation for each interface version', async () => {
+    for (const [interfaceVersion, accountResolution, variant] of [
+      [1, undefined, 0],
+      [1, 'NoResolution', 0],
+      [2, undefined, 2],
+      [2, 'WithoutExtendedLookupTable', 2],
     ] as const) {
       const { instructions } = await new SetPoolInterfaceImplementation().generate(chain(), {
         ...base,
-        interfaceVersion: 2,
+        interfaceVersion,
         accountResolution,
       })
       const [instruction] = instructions
@@ -61,7 +61,7 @@ describe('SetPoolInterfaceImplementation (cct/solana)', () => {
       // discriminator from the router's IDL, mint, interface version, `ResolutionType`
       assert.deepEqual(
         [...instruction!.data],
-        [121, 95, 65, 76, 190, 0, 152, 64, ...MINT.toBytes(), 2, variant],
+        [121, 95, 65, 76, 190, 0, 152, 64, ...MINT.toBytes(), interfaceVersion, variant],
       )
       assert.deepEqual(keysOf(instruction!), [
         [deriveRouterConfigPda(ROUTER).toBase58(), false, false],
@@ -78,7 +78,14 @@ describe('SetPoolInterfaceImplementation (cct/solana)', () => {
       [{ interfaceVersion: 3 }, 'interfaceVersion'],
       [{ interfaceVersion: 0 }, 'interfaceVersion'],
       [{ interfaceVersion: 1, accountResolution: 'Standard' }, 'accountResolution'],
+      [
+        { interfaceVersion: 1, accountResolution: 'WithoutExtendedLookupTable' },
+        'accountResolution',
+      ],
       [{ interfaceVersion: 2, accountResolution: 'standard' }, 'accountResolution'],
+      // PoolV2RequiresWithoutExtendedLookupTable, from router 2.0.2
+      [{ interfaceVersion: 2, accountResolution: 'NoResolution' }, 'accountResolution'],
+      [{ interfaceVersion: 2, accountResolution: 'Standard' }, 'accountResolution'],
     ] as const) {
       await assert.rejects(
         () => new SetPoolInterfaceImplementation().generate(chain(), { ...base, ...opts } as never),

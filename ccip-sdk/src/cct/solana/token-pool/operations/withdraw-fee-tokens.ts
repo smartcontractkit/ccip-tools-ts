@@ -30,6 +30,7 @@ import {
   validateAuthorityMatchesWallet,
   validateBigInt,
   validatePoolProgramAtLeast2,
+  validatePoolProgramHasFeeVault,
 } from '../../validate.ts'
 
 /** Parameters shared by Solana token pool fee withdrawal generation and execution. */
@@ -125,6 +126,7 @@ export class WithdrawFeeTokens extends SolanaOperation<
       opts.poolProgramAddress,
     )
     await validatePoolProgramAtLeast2(this.name, chain, poolProgram)
+    await validatePoolProgramHasFeeVault(this.name, chain, poolProgram, opts.poolProgramAddress)
     const { ata: recipient, tokenProgram: feeTokenProgram } = await resolveATA(
       chain.connection,
       feeMint,

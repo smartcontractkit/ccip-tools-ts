@@ -42,9 +42,10 @@ type SetPoolInterfaceImplementationParams = {
    */
   interfaceVersion: 1 | 2
   /**
-   * How the Router resolves the pool's accounts on transfers. `'Standard'` and
-   * `'WithoutExtendedLookupTable'` require `interfaceVersion` 2. Defaults to `'NoResolution'`:
-   * only the pool's lookup table entries.
+   * How the Router resolves the pool's accounts on transfers. Defaults from `interfaceVersion`,
+   * the only resolution the Router accepts for it: `'NoResolution'` (only the pool's lookup table
+   * entries) for 1, `'WithoutExtendedLookupTable'` (the lookup table's required entries, plus the
+   * accounts the pool resolves on-chain) for 2.
    */
   accountResolution?: TokenAccountResolution
   /** Token administrator. Defaults to `payer` for single-signer transactions. */
@@ -94,7 +95,9 @@ export class SetPoolInterfaceImplementation extends SolanaOperation<
   ): ParsedSetPoolInterfaceImplementationParams {
     if (!([1, 2] as unknown[]).includes(params.interfaceVersion))
       throw new CCTParamsInvalidError(this.name, 'interfaceVersion', 'must be 1 or 2')
-    const accountResolution = params.accountResolution ?? 'NoResolution'
+    const accountResolution =
+      params.accountResolution ??
+      (params.interfaceVersion === 2 ? 'WithoutExtendedLookupTable' : 'NoResolution')
     if (!ACCOUNT_RESOLUTIONS.includes(accountResolution))
       throw new CCTParamsInvalidError(
         this.name,
@@ -106,6 +109,13 @@ export class SetPoolInterfaceImplementation extends SolanaOperation<
         this.name,
         'accountResolution',
         `${accountResolution} requires interfaceVersion 2`,
+      )
+    // Routers from 2.0.2 reject a v2 pool on any other resolution
+    if (params.interfaceVersion === 2 && accountResolution !== 'WithoutExtendedLookupTable')
+      throw new CCTParamsInvalidError(
+        this.name,
+        'accountResolution',
+        'interfaceVersion 2 requires WithoutExtendedLookupTable',
       )
     const payer = parsePublicKey(this.name, 'payer', params.payer)
     return {

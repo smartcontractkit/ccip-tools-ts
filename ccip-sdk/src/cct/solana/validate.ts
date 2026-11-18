@@ -398,6 +398,41 @@ export async function validateLockReleasePoolProgram(
 }
 
 /**
+ * Rejects a resolved pool program that reports a CCTP or Lombard pool type. Their 2.0 programs
+ * keep no in-token fee vault: `init_chain_config_v2` takes no fee vault accounts, and they
+ * withdraw fees with `withdraw_pool_fee_tokens`. A custom program of unknown type is accepted; it
+ * must have the burn-mint/lock-release account layout.
+ * @throws {@link CCTParamsInvalidError} if the pool program is a CCTP or Lombard pool.
+ */
+export async function validatePoolProgramHasFeeVault(
+  operation: string,
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  poolProgramAddress?: PublicKey,
+): Promise<void> {
+  if (canonicalPoolProgramType(poolProgram)) return
+  let type: string
+  try {
+    ;[type] = await chain.typeAndVersion(poolProgram.toBase58())
+  } catch {
+    // Custom pool programs may not implement `typeVersion`.
+    return
+  }
+  if (!/cctp|lombard/i.test(type)) return
+  throw poolProgramAddress
+    ? new CCTParamsInvalidError(
+        operation,
+        'poolProgramAddress',
+        `must be a burn-mint or lock-release token pool program, got ${type}`,
+      )
+    : new CCTParamsInvalidError(
+        operation,
+        'tokenAddress',
+        `token pool is ${type}; ${operation} requires a burn-mint or lock-release pool`,
+      )
+}
+
+/**
  * Resolves the program of an existing lock-release token pool for a mint.
  * @see {@link resolveExistingPoolProgram}
  * @throws {@link CCTParamsInvalidError} if the resolved pool program is burn-mint.
