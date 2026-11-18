@@ -1762,9 +1762,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     reason: string = 'submit command',
     opts?: { commandIdSupplied?: boolean },
   ): Promise<JsSubmitAndWaitForTransactionResponse> {
-    let tx
-    try {
-      ;({ tx } = await this.provider.request({
+    const tx = await this.provider
+      .request({
         method: 'prepareExecuteAndWait',
         params: {
           commandId: commands.commandId,
@@ -1774,20 +1773,21 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
           disclosedContracts: commands.disclosedContracts,
           synchronizerId: commands.synchronizerId,
         },
-      }))
-    } catch (error) {
-      // Callers that pass `commandIdSupplied: false` generated their own ID, so a rebuilt retry
-      // gets a new ID and could run twice: an unknown outcome is retryable only with a supplied ID.
-      if (opts?.commandIdSupplied === false && CCIPError.isCCIPError(error) && error.isTransient) {
-        throw new CCIPError(error.code, error.message, {
-          cause: error,
-          context: { ...error.context, commandId: commands.commandId },
-          isTransient: false,
-          recovery: 'Outcome unknown. Check the ledger, or retry with an explicit commandId.',
-        })
-      }
-      throw error
-    }
+      })
+      .then((r) => r.tx)
+      .catch((error: unknown) => {
+        // Callers that pass `commandIdSupplied: false` generated their own ID, so a rebuilt retry
+        // gets a new ID and could run twice: an unknown outcome is retryable only with a supplied ID.
+        if (opts?.commandIdSupplied === false && CCIPError.isCCIPError(error) && error.isTransient) {
+          throw new CCIPError(error.code, error.message, {
+            cause: error,
+            context: { ...error.context, commandId: commands.commandId },
+            isTransient: false,
+            recovery: 'Outcome unknown. Check the ledger, or retry with an explicit commandId.',
+          })
+        }
+        throw error
+      })
     this.logger.debug(`Canton: submitted command (${reason}), update ${tx.payload.updateId}`)
 
     // The executed event only reports the update ID — fetch the full

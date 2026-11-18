@@ -39,7 +39,11 @@ describe('CantonOperation.execute error propagation', () => {
     })
 
     await assert.rejects(
-      () => op.execute(chain, { wallet, commandId: 'my-id' } as unknown as CantonExecuteParams<Record<string, never>>),
+      () =>
+        op.execute(chain, {
+          wallet,
+          commandId: 'my-id',
+        } as unknown as CantonExecuteParams<Record<string, never>>),
       (err: unknown) => {
         assert.ok(err instanceof CCTTxFailedError)
         assert.equal(err.isTransient, true)
@@ -69,7 +73,10 @@ describe('CantonOperation.execute error propagation', () => {
       throw new CCIPError(CCIPErrorCode.CANTON_API_ERROR, 'timeout', { isTransient: true })
     })
     const run = (extra: object) =>
-      op.execute(chain, { wallet, ...extra } as unknown as CantonExecuteParams<Record<string, never>>)
+      op.execute(chain, {
+        wallet,
+        ...extra,
+      } as unknown as CantonExecuteParams<Record<string, never>>)
 
     await assert.rejects(run({}), (err: unknown) => {
       assert.ok(err instanceof CCTTxFailedError)
