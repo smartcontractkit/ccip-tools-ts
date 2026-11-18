@@ -35,6 +35,7 @@ import {
   validateInteger,
   validateNonEmptyString,
   validateOptionalPublicKey,
+  validatePoolProgramHasFeeVault,
   validatePoolProgramType,
   validatePoolType,
   validatePublicKey,
@@ -275,6 +276,33 @@ describe('Validate (cct/solana)', () => {
             validated,
             (err: unknown) =>
               err instanceof CCTParamsInvalidError && err.context.param === 'poolProgramAddress',
+          )
+        }
+      }
+    })
+
+    it('rejects CCTP and Lombard pool programs, which keep no fee vault', async () => {
+      // [program, custom program type, poolProgramAddress given, rejected param]
+      for (const [program, type, given, param] of [
+        [BURN_MINT, undefined, false, undefined],
+        [LOCK_RELEASE, undefined, false, undefined],
+        [CUSTOM, 'BurnMintTokenPool', true, undefined],
+        [CUSTOM, undefined, true, undefined],
+        [CUSTOM, 'CctpTokenPool', true, 'poolProgramAddress'],
+        [CUSTOM, 'cctp-token-pool', false, 'tokenAddress'],
+        [CUSTOM, 'LombardTokenPool', true, 'poolProgramAddress'],
+      ] as const) {
+        const validated = validatePoolProgramHasFeeVault(
+          'op',
+          poolChain([], type).chain,
+          program,
+          given ? program : undefined,
+        )
+        if (!param) await validated
+        else {
+          await assert.rejects(
+            validated,
+            (err: unknown) => err instanceof CCTParamsInvalidError && err.context.param === param,
           )
         }
       }

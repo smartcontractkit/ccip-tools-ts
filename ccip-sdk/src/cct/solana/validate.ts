@@ -12,6 +12,7 @@ import { ChainFamily } from '../../networks.ts'
 import type { SolanaChain } from '../../solana/index.ts'
 import { resolveATA } from '../../solana/utils.ts'
 import {
+  CCTOperationUnsupportedError,
   CCTParamsInvalidError,
   CCTTokenAccountMintMismatchError,
   CCTTxFailedError,
@@ -397,6 +398,41 @@ export async function validateLockReleasePoolProgram(
 }
 
 /**
+ * Rejects a resolved pool program that reports a CCTP or Lombard pool type. Their 2.0 programs
+ * keep no in-token fee vault: `init_chain_config_v2` takes no fee vault accounts, and they
+ * withdraw fees with `withdraw_pool_fee_tokens`. A custom program of unknown type is accepted; it
+ * must have the burn-mint/lock-release account layout.
+ * @throws {@link CCTParamsInvalidError} if the pool program is a CCTP or Lombard pool.
+ */
+export async function validatePoolProgramHasFeeVault(
+  operation: string,
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  poolProgramAddress?: PublicKey,
+): Promise<void> {
+  if (canonicalPoolProgramType(poolProgram)) return
+  let type: string
+  try {
+    ;[type] = await chain.typeAndVersion(poolProgram.toBase58())
+  } catch {
+    // Custom pool programs may not implement `typeVersion`.
+    return
+  }
+  if (!/cctp|lombard/i.test(type)) return
+  throw poolProgramAddress
+    ? new CCTParamsInvalidError(
+        operation,
+        'poolProgramAddress',
+        `must be a burn-mint or lock-release token pool program, got ${type}`,
+      )
+    : new CCTParamsInvalidError(
+        operation,
+        'tokenAddress',
+        `token pool is ${type}; ${operation} requires a burn-mint or lock-release pool`,
+      )
+}
+
+/**
  * Resolves the program of an existing lock-release token pool for a mint.
  * @see {@link resolveExistingPoolProgram}
  * @throws {@link CCTParamsInvalidError} if the resolved pool program is burn-mint.
@@ -522,6 +558,28 @@ export function validateDelegation(
 /** Whether a pool program version is CCIP 2.0 or later; `undefined` (unknown) counts as earlier. */
 export function isPoolVersionAtLeast2(version: string | undefined): version is string {
   return version !== undefined && Number.parseInt(version, 10) >= 2
+}
+
+/**
+ * Rejects a pool program that reports a version before CCIP 2.0, which lacks the 2.0-only pool
+ * instructions. A custom program without `typeVersion` is accepted; its transaction fails on-chain
+ * if it lacks them.
+ * @throws {@link CCTOperationUnsupportedError} if the pool program reports a pre-2.0 version.
+ * @throws if `typeVersion` fails for a canonical program; see {@link resolvePoolProgramTypeAndVersion}.
+ */
+export async function validatePoolProgramAtLeast2(
+  operation: string,
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+): Promise<void> {
+  const { version } = await resolvePoolProgramTypeAndVersion(chain, poolProgram)
+  if (version === undefined || isPoolVersionAtLeast2(version)) return
+  throw new CCTOperationUnsupportedError(operation, version, {
+    context: {
+      poolProgram: poolProgram.toBase58(),
+      reason: `${operation} requires a CCIP 2.0 token pool program`,
+    },
+  })
 }
 
 /**

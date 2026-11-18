@@ -7,6 +7,7 @@ import {
   type TokenPoolConfig,
   LOCK_RELEASE_TOKEN_POOL_IDL,
   TOKEN_POOL_IDL,
+  TOKEN_POOL_V2_IDL,
   tokenPoolCoder,
 } from '../../../solana/idl/token-pool-coder.ts'
 export type { TokenPoolConfig } from '../../../solana/idl/token-pool-coder.ts'
@@ -85,6 +86,18 @@ export function createLockReleaseTokenPoolProgram(
   return newProgram(LOCK_RELEASE_TOKEN_POOL_IDL, poolProgram, simulationProvider(chain, payer))
 }
 
+/**
+ * Creates an Anchor Program client for the CCIP 2.0 instructions of a burn-mint or lock-release
+ * token pool program.
+ */
+export function createTokenPoolV2Program(
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+  payer: PublicKey,
+) {
+  return newProgram(TOKEN_POOL_V2_IDL, poolProgram, simulationProvider(chain, payer))
+}
+
 /** Decodes a canonical token pool state account. */
 export function decodeTokenPoolState(
   data: Buffer,
@@ -156,4 +169,20 @@ export function deriveTokenPoolProgramDataPda(poolProgram: PublicKey): PublicKey
     [poolProgram.toBuffer()],
     new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111'),
   )[0]
+}
+
+/**
+ * Derives a 2.0 token pool's fee vault PDA for a mint: the authority of the associated token
+ * accounts that hold the fees the pool accrues while serving the mint, one per fee token.
+ */
+export function deriveTokenPoolFeeVaultPda(poolProgram: PublicKey, mint: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from('fee_vault'), mint.toBuffer()],
+    poolProgram,
+  )[0]
+}
+
+/** Derives the Anchor `event_cpi` authority PDA of a program, which emits its events. */
+export function deriveEventAuthorityPda(program: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync([Buffer.from('__event_authority')], program)[0]
 }
