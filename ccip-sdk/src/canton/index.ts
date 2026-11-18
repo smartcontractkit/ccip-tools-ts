@@ -1250,7 +1250,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     const jsCommands: JsCommands = {
       commands: [exerciseCommand],
       commandId:
-        cantonArgs?.commandId ?? `ccip-send-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        cantonArgs?.commandId ??
+        `ccip-send-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       actAs: [sender],
       disclosedContracts: disclosedContracts,
     }
@@ -1778,7 +1779,11 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       .catch((error: unknown) => {
         // Callers that pass `commandIdSupplied: false` generated their own ID, so a rebuilt retry
         // gets a new ID and could run twice: an unknown outcome is retryable only with a supplied ID.
-        if (opts?.commandIdSupplied === false && CCIPError.isCCIPError(error) && error.isTransient) {
+        if (
+          opts?.commandIdSupplied === false &&
+          CCIPError.isCCIPError(error) &&
+          error.isTransient
+        ) {
           throw new CCIPError(error.code, error.message, {
             cause: error,
             context: { ...error.context, commandId: commands.commandId },
