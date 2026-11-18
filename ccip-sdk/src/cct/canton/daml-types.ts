@@ -91,6 +91,8 @@ export type BurnMintTokenPoolArg = {
 export type LockReleaseTokenPoolArg = BurnMintTokenPoolArg & {
   /** Labels on pool-owned holdings (for DA's holdings disclosure API). Mandatory on this template. */
   poolReceiveMetadata: MetadataArg
+  /** Metadata passed on the pool's release transfers; carries the sender label that keeps the change labelled. */
+  poolReleaseMetadata: MetadataArg
 }
 
 /** `RateLimiterDeploySpec` (per-lane rate limiter to deploy via Initialize). */

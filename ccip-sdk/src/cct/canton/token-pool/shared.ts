@@ -40,6 +40,7 @@ import {
   type PoolType,
   CCIP_PUBLIC_LABEL,
   CIP112_RECEIVER_ID_META_KEY,
+  CIP112_SENDER_ID_META_KEY,
   FACTORY_TEMPLATE_ID,
   POOL_TEMPLATE_IDS,
   RATE_LIMITER_TEMPLATE_ID,
@@ -49,6 +50,7 @@ export {
   BURN_MINT_POOL_TEMPLATE_ID,
   CCIP_PUBLIC_LABEL,
   CIP112_RECEIVER_ID_META_KEY,
+  CIP112_SENDER_ID_META_KEY,
   FACTORY_TEMPLATE_ID,
   LOCK_RELEASE_POOL_TEMPLATE_ID,
   POOL_TEMPLATE_IDS,
@@ -406,6 +408,10 @@ export interface PoolCreateArgsInput {
   /** Holdings labels for lock-release pools (defaults to {@link CCIP_PUBLIC_LABEL};
    * pass `{}` to opt out). Ignored for burn-mint. */
   poolReceiveMetadata?: Record<string, string>
+  /** Metadata on the pool's release transfers for lock-release pools (defaults to the
+   * sender label `{ 'cip-112/sender.id': CCIP_PUBLIC_LABEL }`, which keeps the pool's change
+   * labelled; pass `{}` to opt out). Ignored for burn-mint. */
+  poolReleaseMetadata?: Record<string, string>
 }
 
 /**
@@ -442,7 +448,12 @@ export function buildPoolCreateArguments(
   // lacks; default it to the standard CCIP holdings label.
   if (p.poolType === 'lockRelease') {
     const labels = p.poolReceiveMetadata ?? { [CIP112_RECEIVER_ID_META_KEY]: CCIP_PUBLIC_LABEL }
-    return { ...args, poolReceiveMetadata: { values: labels } }
+    const releaseLabels = p.poolReleaseMetadata ?? { [CIP112_SENDER_ID_META_KEY]: CCIP_PUBLIC_LABEL }
+    return {
+      ...args,
+      poolReceiveMetadata: { values: labels },
+      poolReleaseMetadata: { values: releaseLabels },
+    }
   }
   return args
 }

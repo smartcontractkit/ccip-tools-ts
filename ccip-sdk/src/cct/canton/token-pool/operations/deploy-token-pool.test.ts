@@ -261,6 +261,39 @@ describe('deployTokenPool command building', () => {
     })
   })
 
+  it('defaults lock-release poolReleaseMetadata to the sender label', async () => {
+    const lockRelease = await op.generate(
+      mockChain('canton:TestNet'),
+      baseParams({ poolType: 'lockRelease' }),
+    )
+    assert.deepEqual(createAndExercise(lockRelease).createArguments.poolReleaseMetadata, {
+      values: { 'cip-112/sender.id': 'ccip-public' },
+    })
+  })
+
+  it('passes a custom poolReleaseMetadata through and lets {} opt out', async () => {
+    const custom = await op.generate(
+      mockChain('canton:TestNet'),
+      baseParams({ poolType: 'lockRelease', poolReleaseMetadata: { 'cip-112/sender.id': 'x' } }),
+    )
+    assert.deepEqual(createAndExercise(custom).createArguments.poolReleaseMetadata, {
+      values: { 'cip-112/sender.id': 'x' },
+    })
+
+    const optOut = await op.generate(
+      mockChain('canton:TestNet'),
+      baseParams({ poolType: 'lockRelease', poolReleaseMetadata: {} }),
+    )
+    assert.deepEqual(createAndExercise(optOut).createArguments.poolReleaseMetadata, {
+      values: {},
+    })
+  })
+
+  it('omits poolReleaseMetadata for burn-mint pools', async () => {
+    const burnMint = await op.generate(mockChain('canton:TestNet'), baseParams())
+    assert.equal(createAndExercise(burnMint).createArguments.poolReleaseMetadata, undefined)
+  })
+
   // The command ID is derived from the CALLER'S PARAMS, not the resolved
   // contract CIDs: a regenerated retry after a committed-but-unacknowledged
   // deploy re-resolves CIDs (SetPool recreates the TokenConfig) and must still
