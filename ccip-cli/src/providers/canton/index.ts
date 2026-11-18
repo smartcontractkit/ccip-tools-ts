@@ -11,6 +11,10 @@
  *   launching, env-var resolution) that composes the SDK's runtime-agnostic
  *   protocol helpers and hands the result to `cantonConfig`.
  *
+ * The Canton `CantonJsonRpcProvider` itself lives in the SDK
+ * (`@chainlink/ccip-sdk`, `canton/provider.ts`), so third parties can use it
+ * too; this folder resolves the config/JWT and hands it the wallet's signer.
+ *
  * The SDK (`@chainlink/ccip-sdk`) is runtime-agnostic: it consumes only what
  * it's given (`jwt`) and never orchestrates an OAuth flow.
  */
@@ -33,4 +37,3 @@ export {
   Ed25519TransactionSigner,
   loadCantonWallet,
 } from './wallet.ts'
-export { JsonRpcProvider } from './provider.ts'

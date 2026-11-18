@@ -8,9 +8,10 @@ import type { CantonAuthConfig, CantonConfig, Logger } from '@chainlink/ccip-sdk
  *
  * Two groups of fields:
  *
- * - **CLI-only** — consumed by the CLI to build its `JsonRpcProvider` and
- *   resolve authentication: `apiUrl`, `apiType`, `chainId`, `party`, and
- *   `jwt`/`auth`. The file may carry either a static `jwt` string or an `auth`
+ * - **CLI-only** — consumed by the CLI to build the SDK's
+ *   `CantonJsonRpcProvider` and resolve authentication: `apiUrl`, `apiType`,
+ *   `chainId`, `party`, and `jwt`/`auth`. The file may carry either a static
+ *   `jwt` string or an `auth`
  *   block (OIDC: `static` / `clientCredentials` / `authorizationCode`); the CLI
  *   resolves `auth` upfront (see {@link resolveCantonTokenGetter}) and hands
  *   the provider the resulting token — the SDK never sees `auth`.
