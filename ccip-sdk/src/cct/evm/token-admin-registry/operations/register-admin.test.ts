@@ -69,7 +69,11 @@ const accessControlInterface = new Interface([
   'function hasRole(bytes32, address) view returns (bool)',
 ])
 
-type TokenConfig = { administrator: string; pendingAdministrator: string; tokenPool: string }
+type TokenConfig = {
+  administrator: string
+  pendingAdministrator: string
+  tokenPool: string
+}
 
 const UNREGISTERED: TokenConfig = {
   administrator: ZeroAddress,
@@ -98,6 +102,7 @@ function stubChain(
     hasRole?: boolean
     moduleTypeAndVersion?: [string, string]
     calls?: RecordedCall[]
+    callError?: { selector: string; error: Error }
     overrides?: Partial<EVMChain>
   } = {},
 ): EVMChain {
@@ -116,6 +121,7 @@ function stubChain(
       const data = tx.data ?? '0x'
       const sel = data.slice(0, 10)
       opts.calls?.push({ to: tx.to, data })
+      if (sel === opts.callError?.selector) throw opts.callError.error
       // Recording alone leaves the TAR-side probes unpinned unless a test bothers to inspect
       // `calls`. Asserting here instead pins them for EVERY test: without this, swapping an
       // argument (e.g. `getTokenConfig(registryModule)`, which silently disables the
@@ -247,7 +253,11 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
             },
           },
         }),
-        { tokenAddress: TOKEN, registryModule: REGISTRY_MODULE, address: ROUTER },
+        {
+          tokenAddress: TOKEN,
+          registryModule: REGISTRY_MODULE,
+          address: ROUTER,
+        },
       )
       assert.equal(seen, ROUTER)
       assert.ok(unsigned)
@@ -320,6 +330,85 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
     })
   })
 
+  describe('token permission read errors', () => {
+    for (const [method, getter, selector] of [
+      [undefined, 'owner', OWNER_GETTER_SELECTOR],
+      ['owner', 'owner', OWNER_GETTER_SELECTOR],
+      ['ccip-admin', 'getCCIPAdmin', CCIP_ADMIN_GETTER_SELECTOR],
+      ['access-control-default-admin', 'owner', DEFAULT_ADMIN_ROLE_SELECTOR],
+      ['access-control-default-admin', 'owner', HAS_ROLE_SELECTOR],
+    ] as const) {
+      const label = `${method ?? 'default'} (${selector})`
+
+      it(`wraps an unsupported getter for ${label} and preserves its cause`, async () => {
+        const error = makeError('execution reverted', 'CALL_EXCEPTION')
+        await assert.rejects(
+          () =>
+            new RegisterAdmin().generate(stubChain({ getter, callError: { selector, error } }), {
+              tokenAddress: TOKEN,
+              registryModule: REGISTRY_MODULE,
+              address: ROUTER,
+              registrationMethod: method,
+              sender: ADMIN,
+            }),
+          (err: unknown) => {
+            assert.ok(err instanceof CCTParamsInvalidError)
+            assert.equal(err.context.operation, 'registerAdmin')
+            assert.equal(err.context.param, 'tokenAddress')
+            assert.equal(
+              err.context.reason,
+              `Could not read token permissions for registration method "${
+                method ?? 'owner'
+              }". Make sure the token supports the selected registration method.`,
+            )
+            assert.equal(err.cause, error)
+            return true
+          },
+        )
+      })
+    }
+
+    for (const error of [
+      new Error('unrelated failure'),
+      makeError('network unavailable', 'NETWORK_ERROR'),
+      makeError('RPC server unavailable', 'SERVER_ERROR'),
+      makeError('RPC timed out', 'TIMEOUT'),
+      makeError('invalid response', 'BAD_DATA'),
+    ]) {
+      it(`passes through ${error.message} unchanged`, async () => {
+        await assert.rejects(
+          () =>
+            new RegisterAdmin().generate(
+              stubChain({ callError: { selector: OWNER_GETTER_SELECTOR, error } }),
+              {
+                tokenAddress: TOKEN,
+                registryModule: REGISTRY_MODULE,
+                address: ROUTER,
+                sender: ADMIN,
+              },
+            ),
+          (err: unknown) => err === error,
+        )
+      })
+    }
+
+    for (const selector of [IS_REGISTRY_MODULE_SELECTOR, GET_TOKEN_CONFIG_SELECTOR]) {
+      it(`does not wrap CALL_EXCEPTION from registry reads (${selector})`, async () => {
+        const error = makeError('execution reverted', 'CALL_EXCEPTION')
+        await assert.rejects(
+          () =>
+            new RegisterAdmin().generate(stubChain({ callError: { selector, error } }), {
+              tokenAddress: TOKEN,
+              registryModule: REGISTRY_MODULE,
+              address: ROUTER,
+              sender: ADMIN,
+            }),
+          (err: unknown) => err === error,
+        )
+      })
+    }
+  })
+
   describe('validation', () => {
     it('rejects an invalid tokenAddress before any RPC', async () => {
       let called = false
@@ -331,7 +420,11 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
                 getTokenAdminRegistryFor: () => ((called = true), Promise.resolve(TAR)),
               },
             }),
-            { tokenAddress: 'nope', registryModule: REGISTRY_MODULE, address: ROUTER },
+            {
+              tokenAddress: 'nope',
+              registryModule: REGISTRY_MODULE,
+              address: ROUTER,
+            },
           ),
         (err: unknown) =>
           err instanceof CCTParamsInvalidError &&
@@ -401,7 +494,9 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
       await assert.rejects(
         () =>
           new RegisterAdmin().generate(
-            stubChain({ moduleTypeAndVersion: ['RegistryModuleOwnerCustom', '1.5.0'] }),
+            stubChain({
+              moduleTypeAndVersion: ['RegistryModuleOwnerCustom', '1.5.0'],
+            }),
             {
               tokenAddress: TOKEN,
               registryModule: REGISTRY_MODULE,
@@ -425,7 +520,10 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
     ] as const) {
       it(`accepts a v1.5.0 module for registrationMethod "${method}"`, async () => {
         const unsigned = await new RegisterAdmin().generate(
-          stubChain({ moduleTypeAndVersion: ['RegistryModuleOwnerCustom', '1.5.0'], getter }),
+          stubChain({
+            moduleTypeAndVersion: ['RegistryModuleOwnerCustom', '1.5.0'],
+            getter,
+          }),
           {
             tokenAddress: TOKEN,
             registryModule: REGISTRY_MODULE,
@@ -457,8 +555,14 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
       await assert.rejects(
         () =>
           new RegisterAdmin().generate(
-            stubChain({ moduleTypeAndVersion: ['RegistryModuleOwnerCustom', '9.9.9'] }),
-            { tokenAddress: TOKEN, registryModule: REGISTRY_MODULE, address: ROUTER },
+            stubChain({
+              moduleTypeAndVersion: ['RegistryModuleOwnerCustom', '9.9.9'],
+            }),
+            {
+              tokenAddress: TOKEN,
+              registryModule: REGISTRY_MODULE,
+              address: ROUTER,
+            },
           ),
         (err: unknown) => err instanceof CCTContractVersionUnsupportedError,
       )
@@ -502,7 +606,11 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
                 tokenPool: ZeroAddress,
               },
             }),
-            { tokenAddress: TOKEN, registryModule: REGISTRY_MODULE, address: ROUTER },
+            {
+              tokenAddress: TOKEN,
+              registryModule: REGISTRY_MODULE,
+              address: ROUTER,
+            },
           ),
         // The two already-registered cases carry different remediation (hand the role over vs
         // wait for the pending admin to accept), so each pins its own message — asserting only
@@ -527,7 +635,11 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
                 tokenPool: ZeroAddress,
               },
             }),
-            { tokenAddress: TOKEN, registryModule: REGISTRY_MODULE, address: ROUTER },
+            {
+              tokenAddress: TOKEN,
+              registryModule: REGISTRY_MODULE,
+              address: ROUTER,
+            },
           ),
         // Stricter than the contract on purpose: proposeAdministrator would silently overwrite a
         // pending proposal (it only reverts once `administrator` is non-zero), so this guard is
@@ -560,7 +672,9 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
             tokenAddress: TOKEN,
             registryModule: REGISTRY_MODULE,
             address: ROUTER,
-            wallet: fakeSigner({ waitError: makeError('execution reverted', 'CALL_EXCEPTION') }),
+            wallet: fakeSigner({
+              waitError: makeError('execution reverted', 'CALL_EXCEPTION'),
+            }),
           }),
         (err: unknown) =>
           err instanceof CCIPExecTxRevertedError && err.context.operation === 'registerAdmin',
