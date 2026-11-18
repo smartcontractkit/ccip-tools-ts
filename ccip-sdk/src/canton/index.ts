@@ -1797,10 +1797,18 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     // The executed event only reports the update ID — fetch the full
     // committed transaction so callers can parse receipts and events.
-    const { update } = await this.ledgerApiClient.getUpdateById(
-      tx.payload.updateId,
-      this.transactionUpdateFormat(),
-    )
+    // This fetch runs after the commit: a 429/5xx or network error here is not a failed submit,
+    // so it must not be reported as retryable.
+    const { update } = await this.ledgerApiClient
+      .getUpdateById(tx.payload.updateId, this.transactionUpdateFormat())
+      .catch((error: unknown) => {
+        throw new CCIPTxOutcomeUnavailableError(
+          'CantonChain.submitCommands',
+          tx.payload.updateId,
+          'the committed Transaction update',
+          { cause: error instanceof Error ? error : undefined },
+        )
+      })
     if (!update || !('Transaction' in update)) {
       // Committed on-ledger; the response just lacks the expected result
       // events. Non-transient: the command already committed, so retrying
