@@ -185,14 +185,14 @@ export const TOKEN_ONBOARDING_STEPS = [
   'registerAdmin',
   'upgradeTokenAdminRegistry',
   'acceptAdmin',
-  'createLookupTable',
-  'setPool',
   'applyChainUpdates',
   'initChainConfigV2',
   'initFastFinalityRateLimit',
-  'setPoolInterfaceImplementation',
   'createTokenMultisig',
   'setTokenAuthority',
+  'createLookupTable',
+  'setPool',
+  'setPoolInterfaceImplementation',
 ] as const
 
 /** A token onboarding operation. */
@@ -205,10 +205,11 @@ export type TokenOnboardingStepName = (typeof TOKEN_ONBOARDING_STEPS)[number]
  * Router's other registry instructions reject. `createLookupTable` only runs with
  * `lookupTablePayer`, creating an empty pool lookup table. `setPool` creates and fills the table
  * (or fills an empty one given as `poolLookupTableAddress`), then sets it, also replacing a pool
- * the registry already had. For a burn-mint token, `createTokenMultisig` creates a 1-of-2 SPL
+ * the registry already had. It runs once the pool is configured, so a live pool it replaces keeps
+ * serving transfers until then. For a burn-mint token, `createTokenMultisig` creates a 1-of-2 SPL
  * multisig of the pool signer and the authority, and `setTokenAuthority` makes it the mint
  * authority: the pool mints through it alone, and the authority keeps its own path to mint or move
- * the mint authority. They run last, since the steps before them check the mint authority.
+ * the mint authority. They run after deployment and registration, which check the mint authority.
  */
 export type TokenOnboardingStep = {
   name: TokenOnboardingStepName
@@ -554,12 +555,9 @@ export function planTokenOnboarding(
   if (!registry) steps.push({ name: 'registerAdmin' })
   else if (!registry.latestLayout) steps.push({ name: 'upgradeTokenAdminRegistry' })
   if (!registry?.administrator.equals(authority)) steps.push({ name: 'acceptAdmin' })
-  if (!registry?.tokenPool?.equals(deriveTokenPoolConfigPda(poolProgram, tokenMint))) {
-    if (params.poolLookupTable) validatePoolLookupTable(params, state.poolLookupTable)
-    else if (params.lookupTablePayer) steps.push({ name: 'createLookupTable' })
-    steps.push({ name: 'setPool' })
-  }
 
+  // the pool is configured before setPool makes it the token's pool, so that replacing a live
+  // pool doesn't fail transfers while the new one still lacks its remote chains or mint access
   const applyChainUpdates = remotesWhere(params, state, (_, existing) => !existing.chainConfig)
   if (applyChainUpdates.length)
     steps.push({ name: 'applyChainUpdates', remoteChainSelectors: applyChainUpdates })
@@ -573,14 +571,6 @@ export function planTokenOnboarding(
   )
   if (initFastFinality.length)
     steps.push({ name: 'initFastFinalityRateLimit', remoteChainSelectors: initFastFinality })
-
-  // 2.0 lanes take a v2 pool only with WithoutExtendedLookupTable; a registry on another
-  // resolution (one onboarded before routers enforced it) is moved to it
-  if (
-    registry?.interfaceVersion !== 2 ||
-    registry.accountResolution !== 'WithoutExtendedLookupTable'
-  )
-    steps.push({ name: 'setPoolInterfaceImplementation' })
 
   // a burn-mint pool mints through a multisig, or, set up before, as the sole mint authority
   const handsOverMint =
@@ -598,6 +588,20 @@ export function planTokenOnboarding(
       )
     steps.push({ name: 'setTokenAuthority' })
   }
+
+  if (!registry?.tokenPool?.equals(deriveTokenPoolConfigPda(poolProgram, tokenMint))) {
+    if (params.poolLookupTable) validatePoolLookupTable(params, state.poolLookupTable)
+    else if (params.lookupTablePayer) steps.push({ name: 'createLookupTable' })
+    steps.push({ name: 'setPool' })
+  }
+  // 2.0 lanes take a v2 pool only with WithoutExtendedLookupTable; a registry on another
+  // resolution (one onboarded before routers enforced it) is moved to it. It follows setPool,
+  // which would otherwise switch the interface of the pool being replaced
+  if (
+    registry?.interfaceVersion !== 2 ||
+    registry.accountResolution !== 'WithoutExtendedLookupTable'
+  )
+    steps.push({ name: 'setPoolInterfaceImplementation' })
 
   // deploy (self-served) and registration authorize the mint authority, which the handover moves
   const needsMintAuthority = !pool || !registry || handsOverMint

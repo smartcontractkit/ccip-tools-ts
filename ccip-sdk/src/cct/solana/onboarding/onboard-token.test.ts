@@ -101,13 +101,13 @@ describe('planTokenOnboarding (cct/solana)', () => {
       { name: 'deployTokenPool' },
       { name: 'registerAdmin' },
       { name: 'acceptAdmin' },
-      { name: 'setPool' },
       { name: 'applyChainUpdates', remoteChainSelectors: [SEPOLIA] },
       { name: 'initChainConfigV2', remoteChainSelectors: [SEPOLIA] },
       { name: 'initFastFinalityRateLimit', remoteChainSelectors: [SEPOLIA] },
-      { name: 'setPoolInterfaceImplementation' },
       { name: 'createTokenMultisig' },
       { name: 'setTokenAuthority' },
+      { name: 'setPool' },
+      { name: 'setPoolInterfaceImplementation' },
     ])
   })
 
@@ -117,9 +117,9 @@ describe('planTokenOnboarding (cct/solana)', () => {
       'deployTokenPool',
       'registerAdmin',
       'acceptAdmin',
-      'setPool',
       'applyChainUpdates',
       'initChainConfigV2',
+      'setPool',
       'setPoolInterfaceImplementation',
     ])
   })
@@ -148,12 +148,12 @@ describe('planTokenOnboarding (cct/solana)', () => {
     })
     assert.deepEqual(names(plan(state)), [
       'acceptAdmin',
-      'setPool',
       'applyChainUpdates',
       'initChainConfigV2',
-      'setPoolInterfaceImplementation',
       'createTokenMultisig',
       'setTokenAuthority',
+      'setPool',
+      'setPoolInterfaceImplementation',
     ])
   })
 
@@ -208,12 +208,10 @@ describe('planTokenOnboarding (cct/solana)', () => {
 
   it('creates the lookup table in its own step with a lookup table payer', () => {
     const lookupTablePayer = OTHER.toBase58()
-    assert.deepEqual(names(plan(fresh(), { lookupTablePayer })).slice(0, 5), [
-      'deployTokenPool',
-      'registerAdmin',
-      'acceptAdmin',
+    assert.deepEqual(names(plan(fresh(), { lookupTablePayer })).slice(-3), [
       'createLookupTable',
       'setPool',
+      'setPoolInterfaceImplementation',
     ])
     // once the table it created is passed back, only setPool remains for it
     const registered = onboarded({
@@ -225,7 +223,7 @@ describe('planTokenOnboarding (cct/solana)', () => {
       names(
         plan(registered, { lookupTablePayer, poolLookupTableAddress: LOOKUP_TABLE.toBase58() }),
       ),
-      ['setPool', 'setPoolInterfaceImplementation', 'createTokenMultisig', 'setTokenAuthority'],
+      ['createTokenMultisig', 'setTokenAuthority', 'setPool', 'setPoolInterfaceImplementation'],
     )
   })
 
@@ -304,6 +302,13 @@ describe('planTokenOnboarding (cct/solana)', () => {
     // a lookup table without a pool in it, or one that is gone, names no pool
     const unresolved = onboarded({ registry: { ...REGISTRY, tokenPool: undefined } })
     assert.deepEqual(names(plan(unresolved)), ['setPool'])
+    // replacing a live pool, the new one is connected first, so transfers don't fail meanwhile
+    const unconnected = { ...repointed, remotes: new Map([[SEPOLIA, missing]]) }
+    assert.deepEqual(names(plan(unconnected)), [
+      'applyChainUpdates',
+      'initChainConfigV2',
+      'setPool',
+    ])
     // the given lookup table is then checked as for a registry without one
     assert.throws(
       () =>

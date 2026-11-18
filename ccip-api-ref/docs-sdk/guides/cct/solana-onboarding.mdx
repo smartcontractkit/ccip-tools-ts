@@ -38,29 +38,31 @@ Onboarding runs these steps in order. Before each step, it reads the on-chain st
 | `registerAdmin`                  | Proposes the authority as token administrator                    | The token is registered                                                |
 | `upgradeTokenAdminRegistry`      | Migrates a registry an older Router created to the latest layout | The registry has the latest layout                                     |
 | `acceptAdmin`                    | Accepts the administrator role                                   | The authority is the administrator                                     |
-| `createLookupTable`              | Creates an empty pool lookup table, paid by `lookupTablePayer`   | Without `lookupTablePayer`, or with `poolLookupTableAddress`           |
-| `setPool`                        | Creates or fills the pool's lookup table, then sets the pool     | The registry's lookup table names this pool                            |
 | `applyChainUpdates`              | Connects remote chains: remote token, pools and rate limits      | Per remote chain, when it is connected                                 |
 | `initChainConfigV2`              | Sets each lane's 2.0 config: allowed finality, fees and CCVs     | Per remote chain, when it has a 2.0 config                             |
 | `initFastFinalityRateLimit`      | Sets each lane's faster-than-finality (FTF) rate limits          | Per remote chain without `fastFinalityRateLimits`, or when it has them |
-| `setPoolInterfaceImplementation` | Sets the 2.0 interface, with `WithoutExtendedLookupTable`        | The registry is on v2, with `WithoutExtendedLookupTable`               |
 | `createTokenMultisig`            | Creates the mint authority multisig (burn-mint only)             | The multisig exists, or the handover is done                           |
 | `setTokenAuthority`              | Makes the multisig the mint authority (burn-mint only)           | The pool can mint through the mint authority                           |
+| `createLookupTable`              | Creates an empty pool lookup table, paid by `lookupTablePayer`   | Without `lookupTablePayer`, or with `poolLookupTableAddress`           |
+| `setPool`                        | Creates or fills the pool's lookup table, then sets the pool     | The registry's lookup table names this pool                            |
+| `setPoolInterfaceImplementation` | Sets the 2.0 interface, with `WithoutExtendedLookupTable`        | The registry is on v2, with `WithoutExtendedLookupTable`               |
 
 A token that is already registered keeps its registry entry. If the entry was created by an older Router, `upgradeTokenAdminRegistry` migrates it first, since the Router's other registry instructions reject the older layout. If the entry points at another pool, such as a 1.6 pool or a pool of the other type, `setPool` points it at the onboarded pool and logs a warning. Check `getTokenOnboardingPlan` first on a token that is already live.
+
+`setPool` is what makes the pool live: from then on, the Router sends the token's transfers to it. So onboarding configures the pool first, connecting its remote chains and handing it the mint authority, and a live pool it replaces keeps serving transfers until then. `setPoolInterfaceImplementation` follows `setPool`, so that it never switches the interface of the pool being replaced.
 
 ### The mint authority of a burn-mint token
 
 A burn-mint pool mints through its pool signer PDA. On Solana, a mint has a single mint authority, so onboarding does not hand it to the pool signer alone: then nobody else could ever mint, or move the authority. See [the multisig handoff](./solana#hand-the-mint-authority-to-a-multisig) for why.
 
-Instead, the last two steps make the mint authority a 1-of-2 SPL multisig:
+Instead, two steps make the mint authority a 1-of-2 SPL multisig:
 
 - the pool signer, which mints through it alone, so CCIP transfers never wait on a person;
 - the authority, which keeps its own path to mint, or to move the mint authority later.
 
 Its address is fixed by the authority and the mint, so a resumed onboarding finds it. The plan and results return it as `mintMultisigAddress`.
 
-These steps run last, because the earlier steps need the authority to be the mint authority itself. Once the pool is deployed and registered, a mint authority that the pool can already mint through alone, such as a multisig you set up with the pool signer, counts as done.
+These steps run after deployment and registration, which need the authority to be the mint authority itself, and before `setPool`, so the pool can mint once it is live. Once the pool is deployed and registered, a mint authority that the pool can already mint through alone, such as a multisig you set up with the pool signer, counts as done.
 
 ## Onboard with a wallet
 
@@ -159,7 +161,7 @@ The fee payer and the authority can differ. Pass the vault as `authority` and an
 
 ```typescript
 const { steps } = await cct.getTokenOnboardingPlan({ ...onboarding, payer: vault })
-console.log(steps.map(({ name }) => name)) // e.g. ['setPoolInterfaceImplementation', 'setTokenAuthority']
+console.log(steps.map(({ name }) => name)) // e.g. ['setTokenAuthority', 'setPool', 'setPoolInterfaceImplementation']
 ```
 
 Every call plans from the on-chain state. To resume an interrupted onboarding, call `onboardToken` or `generateUnsignedOnboardToken` again with the same parameters.

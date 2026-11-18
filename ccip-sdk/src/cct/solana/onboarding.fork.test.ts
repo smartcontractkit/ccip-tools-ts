@@ -711,13 +711,13 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
             'deployTokenPool',
             'registerAdmin',
             'acceptAdmin',
-            ...(hotLookupTable ? ['createLookupTable'] : []),
-            'setPool',
             'applyChainUpdates',
             'initChainConfigV2',
             'initFastFinalityRateLimit',
-            'setPoolInterfaceImplementation',
             ...(poolType === 'burn-mint' ? ['createTokenMultisig', 'setTokenAuthority'] : []),
+            ...(hotLookupTable ? ['createLookupTable'] : []),
+            'setPool',
+            'setPoolInterfaceImplementation',
           ]
           const planned = await cct.getTokenOnboardingPlan(onboarding)
           assert.deepEqual(
@@ -826,7 +826,7 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
     const { steps } = await cct.onboardToken({ ...onboarding, poolType: 'burn-mint' })
     assert.deepEqual(
       steps.map(({ name }) => name),
-      ['deployTokenPool', 'setPool', 'createTokenMultisig', 'setTokenAuthority'],
+      ['deployTokenPool', 'createTokenMultisig', 'setTokenAuthority', 'setPool'],
     )
     const registry = await cct.getTokenAdminRegistry({
       tokenAddress,
@@ -862,10 +862,10 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
       steps.map(({ name }) => name),
       [
         'acceptAdmin',
-        'setPool',
-        'setPoolInterfaceImplementation',
         'createTokenMultisig',
         'setTokenAuthority',
+        'setPool',
+        'setPoolInterfaceImplementation',
       ],
     )
   })
