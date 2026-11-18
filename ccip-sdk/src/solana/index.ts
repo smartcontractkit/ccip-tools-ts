@@ -651,12 +651,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     opts?: { version?: CCIPVersion },
   ) {
     const [, version, typeAndVersion] = await this.typeAndVersion(onRamp)
+    // the lane version is the send interface, not the Router build: a 2.x Router (e.g. 2.1.0)
+    // serves the 2.0 lane
     const laneVersion =
       opts?.version ??
-      (version >= CCIPVersion.V2_0 &&
-      v2LaneUnavailableReason(await this._observeDestChainV2(onRamp, destChainSelector))
-        ? CCIPVersion.V1_6
-        : (version as CCIPVersion))
+      (version < CCIPVersion.V2_0
+        ? (version as CCIPVersion)
+        : v2LaneUnavailableReason(await this._observeDestChainV2(onRamp, destChainSelector))
+          ? CCIPVersion.V1_6
+          : CCIPVersion.V2_0)
     const routerConfig = await this._getRouterConfig(onRamp)
 
     // CCIP v2 router (`ccip-router 2.0.0-dev`) stores the per-lane dest chain state under a
