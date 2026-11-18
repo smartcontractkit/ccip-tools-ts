@@ -61,7 +61,7 @@ const REGISTRY: NonNullable<TokenOnboardingState['registry']> = {
   tokenPool: BURN_MINT_POOL,
   latestLayout: true,
   interfaceVersion: 2,
-  accountResolution: 'Standard',
+  accountResolution: 'WithoutExtendedLookupTable',
 }
 
 /** State of a token whose onboarding finished, with `overrides` applied. */
@@ -179,18 +179,14 @@ describe('planTokenOnboarding (cct/solana)', () => {
     ])
   })
 
-  it('sets the 2.0 interface again for a different account resolution', () => {
-    assert.deepEqual(
-      names(plan(onboarded(), { accountResolution: 'WithoutExtendedLookupTable' })),
-      ['setPoolInterfaceImplementation'],
-    )
+  it('sets the 2.0 interface with WithoutExtendedLookupTable, which 2.0 lanes require', () => {
     const v1 = onboarded({ registry: { ...REGISTRY, interfaceVersion: 1 } })
     assert.deepEqual(names(plan(v1)), ['setPoolInterfaceImplementation'])
-    // omitted, a 2.0 registry keeps its own resolution
-    const custom = onboarded({
-      registry: { ...REGISTRY, accountResolution: 'WithoutExtendedLookupTable' },
-    })
-    assert.deepEqual(plan(custom), [])
+    // a 2.0 registry on any other resolution is moved to WithoutExtendedLookupTable
+    for (const accountResolution of ['NoResolution', 'Standard'] as const) {
+      const other = onboarded({ registry: { ...REGISTRY, accountResolution } })
+      assert.deepEqual(names(plan(other)), ['setPoolInterfaceImplementation'])
+    }
   })
 
   it('requires the mint authority while the pool is not deployed, registered and minting', () => {
@@ -397,18 +393,10 @@ describe('parseOnboardTokenParams (cct/solana)', () => {
     }
   })
 
-  it('rejects duplicate remote chains and unknown account resolutions', () => {
+  it('rejects duplicate remote chains', () => {
     assert.throws(
       () => parseOnboardTokenParams(params({ remoteChains: [remote(SEPOLIA), remote(SEPOLIA)] })),
       CCTParamsInvalidError,
-    )
-    assert.throws(
-      () =>
-        parseOnboardTokenParams(
-          params({ accountResolution: 'Everything' as unknown as 'Standard' }),
-        ),
-      (err: unknown) =>
-        err instanceof CCTParamsInvalidError && err.context.param === 'accountResolution',
     )
   })
 })

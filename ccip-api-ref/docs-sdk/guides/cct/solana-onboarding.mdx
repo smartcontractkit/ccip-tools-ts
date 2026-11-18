@@ -43,7 +43,7 @@ Onboarding runs these steps in order. Before each step, it reads the on-chain st
 | `applyChainUpdates`              | Connects remote chains: remote token, pools and rate limits      | Per remote chain, when it is connected                                 |
 | `initChainConfigV2`              | Sets each lane's 2.0 config: allowed finality, fees and CCVs     | Per remote chain, when it has a 2.0 config                             |
 | `initFastFinalityRateLimit`      | Sets each lane's faster-than-finality (FTF) rate limits          | Per remote chain without `fastFinalityRateLimits`, or when it has them |
-| `setPoolInterfaceImplementation` | Moves the pool to the 2.0 interface, with the account resolution | The registry is on v2, with `accountResolution` if given               |
+| `setPoolInterfaceImplementation` | Sets the 2.0 interface, with `WithoutExtendedLookupTable`        | The registry is on v2, with `WithoutExtendedLookupTable`               |
 | `createTokenMultisig`            | Creates the mint authority multisig (burn-mint only)             | The multisig exists, or the handover is done                           |
 | `setTokenAuthority`              | Makes the multisig the mint authority (burn-mint only)           | The pool can mint through the mint authority                           |
 
@@ -164,7 +164,7 @@ console.log(steps.map(({ name }) => name)) // e.g. ['setPoolInterfaceImplementat
 
 Every call plans from the on-chain state. To resume an interrupted onboarding, call `onboardToken` or `generateUnsignedOnboardToken` again with the same parameters.
 
-To add a remote chain to an onboarded token, call onboarding again with the new chain in `remoteChains`. Onboarding configures only the chains and lane configs that the pool does not have yet, and keeps the registry's account resolution unless you pass `accountResolution`.
+To add a remote chain to an onboarded token, call onboarding again with the new chain in `remoteChains`. Onboarding configures only the chains and lane configs that the pool does not have yet, and moves a registry on another account resolution to `WithoutExtendedLookupTable`.
 
 ## Parameters
 
@@ -172,10 +172,9 @@ To add a remote chain to an onboarded token, call onboarding again with the new 
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tokenAddress`           | The token mint.                                                                                                                                                                                                       |
 | `poolType`               | `burn-mint` or `lock-release`.                                                                                                                                                                                        |
-| `poolProgramAddress`     | The pool program. Defaults to the canonical program for `poolType`. It must be a CCIP 2.0 program.                                                                                                                    |
+| `poolProgramAddress`     | The pool program. Defaults to the canonical program for `poolType`. It must be a CCIP 2.0 burn-mint or lock-release program: CCTP and Lombard pools are not supported.                                                |
 | `remoteChains`           | The remote chains to connect. See below.                                                                                                                                                                              |
 | `allowlist`              | Senders to allowlist when the pool is deployed. Setting it enables the allowlist.                                                                                                                                     |
-| `accountResolution`      | How the Router resolves the pool's accounts on 2.0 lanes. Defaults to `Standard`; omitted, a registry already on the 2.0 interface keeps its own.                                                                     |
 | `poolLookupTableAddress` | A lookup table to set instead of creating one: one that onboarding created, or your own. It must be empty, with the authority as its authority, or start with the pool's CCIP addresses.                              |
 | `payer`                  | `generateUnsignedOnboardToken` and `getTokenOnboardingPlan` only. Pays every transaction, except `createLookupTable`'s.                                                                                               |
 | `authority`              | `generateUnsignedOnboardToken` and `getTokenOnboardingPlan` only. The mint authority, future pool owner and token administrator. Defaults to `payer`.                                                                 |

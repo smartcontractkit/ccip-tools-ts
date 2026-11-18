@@ -757,7 +757,7 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
           assert.equal(registry.administrator, admin58)
           assert.ok(registry.lookupTable, 'the pool lookup table should be set')
           assert.equal(registry.interfaceVersion, 2)
-          assert.equal(registry.accountResolution, 'Standard')
+          assert.equal(registry.accountResolution, 'WithoutExtendedLookupTable')
 
           const { config } = await cct.getTokenPoolState({ tokenAddress })
           assert.equal(config.owner, admin58)

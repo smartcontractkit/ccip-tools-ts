@@ -15,7 +15,6 @@ import type { FinalityAllowed } from '../../../extra-args.ts'
 import type { SolanaChain } from '../../../solana/index.ts'
 import {
   type TokenAccountResolution,
-  TOKEN_ACCOUNT_RESOLUTIONS,
   decodeTokenAdminRegistryConfig,
   getLookupTableTokenPool,
   isLatestTokenAdminRegistryLayout,
@@ -79,6 +78,7 @@ import {
   validateBigInt,
   validateInteger,
   validatePoolProgramAtLeast2,
+  validatePoolProgramHasFeeVault,
   validatePoolProgramType,
   validatePoolType,
   validateUniqueChainSelectors,
@@ -140,12 +140,6 @@ type OnboardTokenParams = {
   remoteChains: TokenOnboardingRemoteChain[]
   /** Addresses to seed into the pool allowlist at deployment, which also enables it. */
   allowlist?: string[]
-  /**
-   * How the Router resolves the pool's accounts on 2.0 lanes. Defaults to `'Standard'`: every
-   * lookup table entry, plus the accounts the pool resolves on-chain. Omitted, a registry already
-   * on the 2.0 interface keeps its resolution.
-   */
-  accountResolution?: TokenAccountResolution
   /**
    * Lookup table to set for the pool instead of creating one: the `lookupTableAddress` of an
    * earlier `createLookupTable` or `setPool` step, or a table of your own. It must be empty, which
@@ -282,7 +276,6 @@ type ParsedOnboardTokenParams = {
   /** Validated remote chains, as given. */
   remoteChains: TokenOnboardingRemoteChain[]
   allowlist?: string[]
-  accountResolution?: TokenAccountResolution
   poolLookupTable?: PublicKey
   lookupTablePayer?: PublicKey
 }
@@ -426,14 +419,6 @@ export function parseOnboardTokenParams(
       params.allowlist.map((address, i) => parsePublicKey(NAME, `allowlist[${i}]`, address)),
     )
   }
-  const { accountResolution } = params
-  if (accountResolution !== undefined && !TOKEN_ACCOUNT_RESOLUTIONS.includes(accountResolution))
-    throw new CCTParamsInvalidError(
-      NAME,
-      'accountResolution',
-      `must be one of ${TOKEN_ACCOUNT_RESOLUTIONS.join(', ')}`,
-    )
-
   if (!Array.isArray(params.remoteChains))
     throw new CCTParamsInvalidError(NAME, 'remoteChains', 'must be an array')
   const remoteChains = params.remoteChains.map((remote, i) =>
@@ -456,7 +441,6 @@ export function parseOnboardTokenParams(
       params.authority === undefined ? payer : parsePublicKey(NAME, 'authority', params.authority),
     remoteChains,
     ...(params.allowlist !== undefined && { allowlist: params.allowlist }),
-    ...(accountResolution !== undefined && { accountResolution }),
     poolLookupTable: parseOptionalPublicKey(
       NAME,
       'poolLookupTableAddress',
@@ -590,10 +574,11 @@ export function planTokenOnboarding(
   if (initFastFinality.length)
     steps.push({ name: 'initFastFinalityRateLimit', remoteChainSelectors: initFastFinality })
 
+  // 2.0 lanes take a v2 pool only with WithoutExtendedLookupTable; a registry on another
+  // resolution (one onboarded before routers enforced it) is moved to it
   if (
     registry?.interfaceVersion !== 2 ||
-    (params.accountResolution !== undefined &&
-      registry.accountResolution !== params.accountResolution)
+    registry.accountResolution !== 'WithoutExtendedLookupTable'
   )
     steps.push({ name: 'setPoolInterfaceImplementation' })
 
@@ -935,6 +920,8 @@ export class OnboardToken extends Operation<
     const parsed = this.prepare(params)
     await validatePoolProgramType(NAME, chain, parsed.poolProgram, parsed.poolType)
     await validatePoolProgramAtLeast2(NAME, chain, parsed.poolProgram)
+    // initChainConfigV2 needs the burn-mint/lock-release fee vault
+    await validatePoolProgramHasFeeVault(NAME, chain, parsed.poolProgram, parsed.poolProgram)
     return parsed
   }
 
@@ -1089,7 +1076,7 @@ export class OnboardToken extends Operation<
           tokenAddress,
           address: router,
           interfaceVersion: 2,
-          accountResolution: params.accountResolution ?? 'Standard',
+          accountResolution: 'WithoutExtendedLookupTable',
           authority,
         })
       // the pool signer, and the authority as the mint authority, sign it 1-of-2

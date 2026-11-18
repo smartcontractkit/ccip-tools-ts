@@ -2979,7 +2979,7 @@ export class SolanaTokenManager extends TokenManager<typeof ChainFamily.Solana> 
    * 4. `applyChainUpdates`, connecting each remote chain with its pools and rate limits
    * 5. `initChainConfigV2` per remote chain: allowed finality, fees and CCVs
    * 6. `initFastFinalityRateLimit` per remote chain with `fastFinalityRateLimits`
-   * 7. `setPoolInterfaceImplementation` to the 2.0 interface, with `accountResolution`
+   * 7. `setPoolInterfaceImplementation` to the 2.0 interface, with `WithoutExtendedLookupTable`
    * 8. `createTokenMultisig` and `setTokenAuthority` (burn-mint only), making the mint authority a
    *    1-of-2 SPL multisig of the pool signer, which mints through it alone, and the wallet, which
    *    keeps its own path to mint or move the mint authority
