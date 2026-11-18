@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { Connection, PublicKey } from '@solana/web3.js'
+import { PublicKey } from '@solana/web3.js'
 
 import { raceRpcEndpoint, rpcEndpoint } from '../../../../scripts/test-endpoints.ts'
 import { useResourceForDescribe } from '../../../../scripts/useResource.ts'
@@ -10,6 +10,7 @@ import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
 import { networkInfo } from '../../index.ts'
 import { CCIPVersion, ExecutionState } from '../../types.ts'
+import { withRetry } from '../../utils.ts'
 import {
   FUJI_TO_SOLANA,
   SOLANA_ESTIMATE_RECEIVER_MESSAGE,
@@ -347,16 +348,35 @@ describe('SolanaChain Mainnet CCIP Integration', { skip, timeout: 60_000 }, () =
   useResourceForDescribe(['solana-mainnet'])
   let solanaChain: SolanaChain
 
-  before(async () => {
-    const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed')
-    solanaChain = new SolanaChain(connection, networkInfo('solana-mainnet'), { apiClient: null })
+  before(() => {
+    // the SDK's connection (rate-limited fetch): the public RPC answers 429 per method in bursts
+    const connection = SolanaChain._getConnection('https://api.mainnet-beta.solana.com', {
+      logger: testLogger,
+    })
+    solanaChain = new SolanaChain(connection, networkInfo('solana-mainnet'), {
+      apiClient: null,
+      logger: testLogger,
+    })
   })
+
+  // The fixture transaction is months old, so the RPC reads it from long-term storage, which at
+  // times answers null for a transaction it holds (seen on CI). Read it once for both tests, and
+  // retry a not-found (a transient error) before the test fails.
+  const msg = SOLANA_TO_ETHEREUM[0]!
+  let fixtureTx: ReturnType<SolanaChain['getTransaction']> | undefined
+  const getFixtureTx = () =>
+    (fixtureTx ??= withRetry(() => solanaChain.getTransaction(msg.txHash), {
+      maxAttempts: 3,
+      maxDelayMs: 5_000,
+      logger: testLogger,
+    }).catch((err: unknown) => {
+      fixtureTx = undefined // let the next test read it again
+      throw err
+    }))
 
   describe('getMessagesInTx', () => {
     it('should decode CCIP messages from a known Solana mainnet transaction', async () => {
-      const msg = SOLANA_TO_ETHEREUM[0]!
-      const tx = await solanaChain.getTransaction(msg.txHash)
-      const requests = await solanaChain.getMessagesInTx(tx)
+      const requests = await solanaChain.getMessagesInTx(await getFixtureTx())
 
       assert.ok(requests.length > 0, 'should find at least one CCIP message')
       const request = requests.find((r) => r.message.messageId === msg.messageId)
@@ -373,9 +393,7 @@ describe('SolanaChain Mainnet CCIP Integration', { skip, timeout: 60_000 }, () =
 
   describe('getBalance', () => {
     it('should return native SOL balance for a known CCIP participant', async () => {
-      const msg = SOLANA_TO_ETHEREUM[0]!
-      const tx = await solanaChain.getTransaction(msg.txHash)
-      const requests = await solanaChain.getMessagesInTx(tx)
+      const requests = await solanaChain.getMessagesInTx(await getFixtureTx())
       const request = requests.find((r) => r.message.messageId === msg.messageId)
       assert.ok(request, 'should find the message')
 

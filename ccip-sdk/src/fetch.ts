@@ -664,38 +664,52 @@ function rebuildResponse(
   return rebuilt
 }
 
-/** Largest response body inspected for an in-band JSON-RPC rate-limit error. */
+/** Largest response body inspected for an in-band JSON-RPC transient error. */
 const MAX_INSPECTED_BODY_BYTES = 16_384
 
+/** An upstream connection reset, as a relaying server (e.g. an anvil fork) reports it in-band. */
+const CONNECTION_RESET_RE = /\bconnection reset\b|\bECONNRESET\b/i
+
 /**
- * Some RPCs return HTTP 200 with JSON-RPC `-32007` or `429` when they limit requests.
- * Inspect only small responses and retry only when every member reports a rate limit.
+ * Some RPCs return HTTP 200 with a JSON-RPC error for a transient failure: `-32007` or `429`
+ * when they limit requests, or a server error (negative code) whose message reports a reset
+ * connection to their own upstream (an anvil fork answers `-32603 ... connection reset` when
+ * the forked RPC drops it). Both get the treatment of a 429/503.
+ * Inspect only small responses and retry only when every member reports a transient error.
  * Do not retry a batch with a completed member: it can contain a successful write.
  * Preserve the response body for callers. Leave unknown or large content lengths streaming.
  */
-async function readJsonRpcRateLimit(
+async function readJsonRpcTransient(
   response: Response,
-): Promise<{ response: Response; limited: boolean }> {
+): Promise<{ response: Response; transient: boolean }> {
   const length = Number(response.headers.get('content-length'))
   if (!response.body || !(length > 0 && length <= MAX_INSPECTED_BODY_BYTES))
-    return { response, limited: false }
+    return { response, transient: false }
   const text = await response.text()
-  let limited = false
-  if (/(?:^|[^\w.-])(?:-32007|429)(?![\w.])/.test(text)) {
+  let transient = false
+  if (/(?:^|[^\w.-])(?:-32007|429)(?![\w.])/.test(text) || CONNECTION_RESET_RE.test(text)) {
     try {
       const parsed: unknown = JSON.parse(text)
       const members = Array.isArray(parsed) ? parsed : [parsed]
-      limited =
+      transient =
         members.length > 0 &&
         members.every((member) => {
-          const code = (member as { error?: { code?: unknown } } | null)?.error?.code
-          return code === -32007 || code === 429
+          const error = (member as { error?: { code?: unknown; message?: unknown } } | null)?.error
+          const code = error?.code
+          if (code === -32007 || code === 429) return true
+          // a revert (code 3) carries contract data, whatever its reason text says
+          return (
+            typeof code === 'number' &&
+            code < 0 &&
+            typeof error?.message === 'string' &&
+            CONNECTION_RESET_RE.test(error.message)
+          )
         })
     } catch {
-      // not JSON: not a rate-limit envelope
+      // not JSON: not a JSON-RPC error envelope
     }
   }
-  return { response: rebuildResponse(response, text), limited }
+  return { response: rebuildResponse(response, text), transient }
 }
 
 /**
@@ -864,18 +878,18 @@ export function createRateLimitedFetch(
 
       // Slot released — now handle the response (and back off off-slot if retrying).
       if (response.ok && isJsonRpc && attempt < opts_.maxRetries) {
-        let limited: boolean
+        let transient: boolean
         try {
-          ;({ response, limited } = await readJsonRpcRateLimit(response))
+          ;({ response, transient } = await readJsonRpcTransient(response))
         } catch (error) {
           link?.unlink() // terminal exit: no response body will carry the cleanup
           throw error
         }
-        if (limited) {
-          // same treatment as a 429 without rate-limit headers
+        if (transient) {
+          // same treatment as a 429/503 without rate-limit headers
           target.onLimited({})
           ep.sem.decrease()
-          logger.debug('fetch JSON-RPC rate-limit error, retrying', attempt)
+          logger.debug('fetch JSON-RPC transient error, retrying', attempt)
           if (!target.active) await sleep(backoffMs(attempt), abort)
           continue
         }
