@@ -45,6 +45,11 @@ export type CantonExecuteParams<P extends object> = P & {
   wallet?: unknown
   /** Acting party ID — optional on execute; defaults to the chain's active party. */
   sender?: string
+  /**
+   * Explicit command ID (idempotency key). When set it is used unchanged, so a retry after an
+   * unknown outcome is rejected as a duplicate instead of running twice.
+   */
+  commandId?: string
 }
 
 /**
@@ -119,7 +124,9 @@ export abstract class CantonOperation<
         }
         throw new CCTTxFailedError(this.name, error.message, {
           cause: error,
-          isTransient: error.isTransient,
+          // Unknown outcomes are retryable only with a caller-supplied ID: the same ID makes a
+          // landed first attempt fail as DUPLICATE_COMMAND instead of running twice.
+          isTransient: error.isTransient && !!rest.commandId,
           retryAfterMs: error.retryAfterMs,
         })
       }

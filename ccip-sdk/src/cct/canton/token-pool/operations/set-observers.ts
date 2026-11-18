@@ -71,6 +71,7 @@ export class SetObservers extends PoolChoiceOperation<SetObserversParams> {
       choiceArgument,
       actAs: [p.sender],
       commandIdPrefix: 'cct-set-observers',
+      commandId: p.commandId,
     })
   }
 }
