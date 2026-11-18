@@ -120,6 +120,57 @@ export function decodeTokenPoolState(
   }
 }
 
+/** A token pool program's global config: the defaults and rules for deploying new pools. */
+export type TokenPoolGlobalConfig = {
+  /** Whether a mint authority may deploy its token's pool, besides the upgrade authority. */
+  selfServedAllowed: boolean
+  /** Router a new pool is registered with. */
+  router: PublicKey
+}
+
+/** Decodes a token pool program's global config account (`PoolConfig`). */
+export function decodeTokenPoolGlobalConfig(
+  data: Buffer,
+  context: { globalConfig: string; poolProgram: string },
+): TokenPoolGlobalConfig {
+  try {
+    return tokenPoolCoder.accounts.decode<TokenPoolGlobalConfig>('poolConfig', data)
+  } catch (cause) {
+    throw new CCTDataDecodeError(context.globalConfig, {
+      cause: cause instanceof Error ? cause : CCIPError.from(cause),
+      context: { poolProgram: context.poolProgram },
+    })
+  }
+}
+
+// UpgradeableLoaderState::ProgramData: u32 variant (3), u64 slot, Option<Pubkey> upgrade authority
+const PROGRAM_DATA_VARIANT = 3
+const PROGRAM_DATA_AUTHORITY_OFFSET = 12
+const PROGRAM_DATA_HEADER_SIZE = PROGRAM_DATA_AUTHORITY_OFFSET + 1 + 32
+
+/**
+ * Reads a token pool program's upgrade authority from its program data header, without the program
+ * binary. Returns `undefined` for an immutable or non-upgradeable program.
+ */
+export async function readTokenPoolUpgradeAuthority(
+  chain: SolanaChain,
+  poolProgram: PublicKey,
+): Promise<PublicKey | undefined> {
+  const programData = await chain.connection.getAccountInfo(
+    deriveTokenPoolProgramDataPda(poolProgram),
+    { dataSlice: { offset: 0, length: PROGRAM_DATA_HEADER_SIZE } },
+  )
+  const data = programData?.data
+  if (
+    !data ||
+    data.length < PROGRAM_DATA_HEADER_SIZE ||
+    data.readUInt32LE(0) !== PROGRAM_DATA_VARIANT ||
+    !data[PROGRAM_DATA_AUTHORITY_OFFSET]
+  )
+    return undefined
+  return new PublicKey(data.subarray(PROGRAM_DATA_AUTHORITY_OFFSET + 1, PROGRAM_DATA_HEADER_SIZE))
+}
+
 /** Derives the token pool global config PDA. */
 export function deriveTokenPoolGlobalConfigPda(poolProgram: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from('config')], poolProgram)[0]

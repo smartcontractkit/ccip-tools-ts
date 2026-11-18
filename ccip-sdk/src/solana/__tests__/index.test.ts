@@ -807,6 +807,13 @@ describe('SolanaChain token pool readers', () => {
           fastFinalityBpsFee: 20,
           isEnabled: true,
         },
+        ccvConfig: {
+          thresholdAmount: new BN(0),
+          outboundCcvs: [],
+          thresholdOutboundCcvs: [],
+          inboundCcvs: [],
+          thresholdInboundCcvs: [],
+        },
       }))
     const overrideData =
       override &&
@@ -844,9 +851,10 @@ describe('SolanaChain token pool readers', () => {
     const chain = new SolanaChain(
       {
         getAccountInfo,
-        getProgramAccounts: async () => [
-          { pubkey: chainConfigPda, account: accounts.get(chainConfigPda.toBase58()) },
-        ],
+        // pool programs are shared by every token: reads derive the pool's PDAs instead
+        getProgramAccounts: async () => {
+          throw new Error('unexpected getProgramAccounts scan of a pool program')
+        },
         getMultipleAccountsInfo,
         getSignaturesForAddress: async () => [],
         // `observe_dest_chain_v2`, failing with AccountNotInitialized without a 2.0 lane
@@ -970,6 +978,14 @@ describe('SolanaChain token pool readers', () => {
     ;({ chain } = await poolChain({ poolTypeAndVersion: null, chainConfigV2: v2ChainConfig }))
     config = await chain.getTokenPoolConfig(tokenPool.toBase58(), feeOpts)
     assert.equal(config.finalityDepth, 5)
+  })
+
+  it('reads every remote from derived ChainConfig PDAs, in pages of at most 100', async () => {
+    const { chain, getMultipleAccountsInfo } = await poolChain({ poolTypeAndVersion: v16Pool })
+    const remotes = await chain.getTokenPoolRemotes(tokenPool.toBase58())
+    assert.deepEqual(Object.keys(remotes), ['solana-devnet'])
+    const pages = getMultipleAccountsInfo.mock.calls.map(({ arguments: [keys] }) => keys.length)
+    assert.ok(pages.length > 1 && pages.every((n) => n <= 100), `pages: ${pages.join(', ')}`)
   })
 
   it("returns a 2.0 pool's FTF rate limits from its override", async () => {

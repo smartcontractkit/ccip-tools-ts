@@ -6,7 +6,10 @@ import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPDataFormatUnsupportedError } from '../errors/index.ts'
-import { decodeTokenAdminRegistryConfig } from './token-admin-registry.ts'
+import {
+  decodeTokenAdminRegistryConfig,
+  isLatestTokenAdminRegistryLayout,
+} from './token-admin-registry.ts'
 
 const key = (byte: number) => new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
 const ADMINISTRATOR = key(1)
@@ -98,5 +101,14 @@ describe('decodeTokenAdminRegistryConfig', () => {
     const data = registryData(3, 1, 254, 2)
     BorshAccountsCoder.accountDiscriminator('ChainConfig').copy(data)
     assert.throws(() => decodeTokenAdminRegistryConfig(data), CCIPDataFormatUnsupportedError)
+  })
+})
+
+describe('isLatestTokenAdminRegistryLayout', () => {
+  it('accepts only the v4 layout, which the Router does not need to upgrade', () => {
+    assert.equal(isLatestTokenAdminRegistryLayout(registryData(1)), false)
+    assert.equal(isLatestTokenAdminRegistryLayout(registryData(2, 1)), false)
+    assert.equal(isLatestTokenAdminRegistryLayout(registryData(3, 1, 254, 2)), false)
+    assert.equal(isLatestTokenAdminRegistryLayout(registryData(4, 1, 254, 2, 0)), true)
   })
 })

@@ -16,10 +16,14 @@ export type TokenPoolStateConfig = TokenPoolTypes['BaseConfig']
 /** Remote token, pools and rate limits a token pool stores per remote chain. */
 export type TokenPoolChainConfig = TokenPoolTypes['BaseChain']
 
-/** Allowed finality and token transfer fees a 2.0 token pool configures per remote chain. */
+/** CCVs a 2.0 token pool requires on a remote chain's lane, as stored in its `ChainConfigV2`. */
+export type TokenPoolCCVConfigAccount = TokenPoolTypes['CCVConfig']
+
+/** Allowed finality, token transfer fees and CCVs a 2.0 token pool configures per remote chain. */
 export type TokenPoolChainConfigV2 = {
   allowedFinalityConfig: TokenPoolTypes['FinalityConfig']
   tokenTransferFeeConfig: TokenPoolTypes['TokenTransferFeeConfig']
+  ccvConfig: TokenPoolCCVConfigAccount
 }
 
 /** Rate limits a 2.0 token pool applies to faster-than-finality transfers on a remote chain. */
@@ -85,7 +89,7 @@ export function decodeTokenPoolChainConfig(data: Buffer, poolType?: string): Tok
  * Decodes a 2.0 token pool's `ChainConfigV2` account.
  *
  * @param data - Raw `ChainConfigV2` account data.
- * @returns The pool's allowed finality and token transfer fees for the account's remote chain.
+ * @returns The pool's allowed finality, token transfer fees and CCVs for the account's remote chain.
  */
 export function decodeTokenPoolChainConfigV2(data: Buffer): TokenPoolChainConfigV2 {
   return tokenPoolCoder.accounts.decode<TokenPoolChainConfigV2>('chainConfigV2', data)

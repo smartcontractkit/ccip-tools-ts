@@ -1,4 +1,4 @@
-import { type AxiosAdapter, getAdapter } from 'axios'
+import { type AxiosAdapter, getAdapter, isAxiosError } from 'axios'
 
 import {
   CCIPAbortError,
@@ -913,6 +913,28 @@ export function createRateLimitedFetch(
 }
 
 /**
+ * Strips the endpoint credentials from a rejected axios request's error, in place. axios keeps
+ * the full URL in `config.url` and in the `request` it sent (both also under `response`), and
+ * loggers print the whole error object, so a keyed endpoint (toncenter's `?api_key=`) would reach
+ * logs (e.g. public CI logs, where secret masking misses a URL that differs from the secret).
+ * The URL is rendered with {@link redactEndpointUrl}; the `Request` objects, whose URL can't be
+ * rewritten, are dropped. Anything other than an axios error is returned unchanged.
+ *
+ * @param error - What an axios adapter rejected with.
+ * @returns The same error.
+ */
+export function redactAxiosError(error: unknown): unknown {
+  if (!isAxiosError(error)) return error
+  for (const config of [error.config, error.response?.config]) {
+    if (config?.url) config.url = redactEndpointUrl(config.url)
+    if (config?.baseURL) config.baseURL = redactEndpointUrl(config.baseURL)
+  }
+  error.request = undefined
+  if (error.response) error.response.request = undefined
+  return error
+}
+
+/**
  * Creates an axios adapter that routes requests through a custom `fetch` function,
  * with optional `AbortSignal` propagation.
  *
@@ -920,6 +942,7 @@ export function createRateLimitedFetch(
  * the provided `fetchFn` (e.g. a rate-limited fetch). When `abort` is supplied,
  * it is linked (see `linkAbortSignals`) with any per-request signal already set on
  * the axios config, so callers don't need to thread the abort signal manually.
+ * Errors it rejects with carry no endpoint credentials (see {@link redactAxiosError}).
  *
  * @param fetchFn - The `fetch` implementation to bind (e.g. from `createRateLimitedFetch`).
  * @param abort - Optional `AbortSignal` to merge into every request's signal.
@@ -933,9 +956,13 @@ export function createRateLimitedFetch(
  * ```
  */
 export function createAxiosFetchAdapter(fetchFn: typeof fetch, abort?: AbortSignal): AxiosAdapter {
-  const base = (getAdapter as (name: string, config: object) => AxiosAdapter)('fetch', {
+  const fetchAdapter = (getAdapter as (name: string, config: object) => AxiosAdapter)('fetch', {
     env: { fetch: fetchFn },
   })
+  const base: AxiosAdapter = (config) =>
+    fetchAdapter(config).catch((error: unknown) => {
+      throw redactAxiosError(error)
+    })
   if (!abort) return base
   return (config) => {
     if (!config.signal) return base({ ...config, signal: abort })

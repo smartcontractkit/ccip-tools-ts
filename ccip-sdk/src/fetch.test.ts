@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import { getEventListeners } from 'node:events'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
+import { inspect } from 'node:util'
 import { setFlagsFromString } from 'node:v8'
 import { runInNewContext } from 'node:vm'
+
+import axios from 'axios'
 
 import { CCIPAbortError, CCIPTimeoutError } from './errors/index.ts'
 import {
@@ -1198,6 +1201,28 @@ describe('createAxiosFetchAdapter', () => {
     const adapter2 = createAxiosFetchAdapter(globalThis.fetch)
     assert.equal(typeof adapter1, 'function')
     assert.equal(typeof adapter2, 'function')
+  })
+
+  it('rejects with errors that do not carry the endpoint key', async () => {
+    const key = 'f'.repeat(64)
+    const endpoint = `https://testnet.toncenter.com/api/v2/jsonRPC?api_key=${key}`
+    const fetchFn = (async () =>
+      new Response(JSON.stringify({ ok: false, error: 'LITE_SERVER_UNKNOWN: lt not in db' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch
+    for (const abort of [undefined, new AbortController().signal]) {
+      const client = axios.create({ adapter: createAxiosFetchAdapter(fetchFn, abort) })
+      const error: unknown = await client.post(endpoint, { method: 'getTransactions' }).then(
+        () => assert.fail('a 500 should reject'),
+        (err: unknown) => err,
+      )
+      assert.ok(axios.isAxiosError(error) && error.response, 'an axios error with its response')
+      assert.equal(error.response.status, 500, 'the response stays for error classification')
+      assert.match(String(error.response.data?.error), /LITE_SERVER_UNKNOWN/)
+      assert.equal(error.config?.url, 'https://testnet.toncenter.com/api/v2/jsonRPC')
+      assert.ok(!inspect(error, { depth: 8 }).includes(key), 'no field of the error shows the key')
+    }
   })
 })
 
