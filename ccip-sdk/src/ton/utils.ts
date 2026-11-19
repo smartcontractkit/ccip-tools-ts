@@ -19,7 +19,38 @@ export function tonRateLimitProfile(
   url: string,
   over: Partial<RateLimitOpts> = {},
 ): Partial<RateLimitOpts> {
-  return { ...fetchProfileForUrl(url), keyBy: 'origin', ...over }
+  return {
+    ...fetchProfileForUrl(url),
+    keyBy: 'origin',
+    // A v2 read of data the liteservers no longer keep is a definite answer: the
+    // index fallback (see indexed-tx.ts) serves it; a retry would only throttle the host.
+    isFinalResponse: async (res) =>
+      res.status >= 500 && TON_RETENTION_ERROR_RE.test(await res.text().catch(() => '')),
+    ...over,
+  }
+}
+
+/** The v2 API's answer to a read of a block or transaction its liteserver no longer
+ * keeps (`LITE_SERVER_UNKNOWN ... lt not in db`, `LITE_SERVER_NOTREADY: cannot find
+ * block`). */
+export const TON_RETENTION_ERROR_RE =
+  /LITE_SERVER_(UNKNOWN|NOTREADY)[^"]*(not in db|cannot compute block|cannot locate transaction|cannot find block)/i
+
+/**
+ * Whether `err` says the v2 endpoint cannot serve a read of old data: the liteserver
+ * no longer keeps the block or transaction (`LITE_SERVER_UNKNOWN ... lt not in db`,
+ * `LITE_SERVER_NOTREADY: cannot find block`), or the read of an old block timed out
+ * (seen on `shards`). These are the failures the index fallback answers; anything else
+ * (a bad request, throttling, a network error) is not about the data's age.
+ */
+export function isRetentionError(err: unknown): boolean {
+  const data = (err as { response?: { data?: unknown } } | null)?.response?.data
+  const text = `${(err as Error | null)?.message ?? ''} ${typeof data === 'string' ? data : JSON.stringify(data ?? '')}`
+  return (
+    TON_RETENTION_ERROR_RE.test(text) ||
+    (err as { code?: unknown } | null)?.code === 'ECONNABORTED' ||
+    /\btimeout of \d+ms exceeded\b/.test(text)
+  )
 }
 
 /**

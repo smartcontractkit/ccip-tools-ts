@@ -523,7 +523,11 @@ export async function prettyVerifications(
   const sourceFamily = networkInfo(request.lane.sourceChainSelector).family
 
   if ('report' in verifications) {
-    const timestamp = await dest.getBlockTimestamp(verifications.log.blockNumber)
+    // The log carries its block's timestamp; read the block only when it doesn't (an old
+    // block may be past what the dest RPC keeps, e.g. TON's public v2 endpoint).
+    const timestamp =
+      verifications.log.blockTimestamp ||
+      (await dest.getBlockInfo(verifications.log.blockNumber)).timestamp
     const origin =
       verifications.log.tx?.from ??
       (await dest.getTransaction(verifications.log.transactionHash)).from

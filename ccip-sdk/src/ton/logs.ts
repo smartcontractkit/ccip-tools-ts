@@ -12,6 +12,7 @@ import { CCIPLogsAddressRequiredError } from '../errors/specialized.ts'
 import { NetworkType } from '../networks.ts'
 import type { ChainTransaction, LeanNumbers, Logger } from '../types.ts'
 import { signalToPromise } from '../utils.ts'
+import { isRetentionError } from './utils.ts'
 
 const DEFAULT_POLL_INTERVAL = 5000
 
@@ -272,13 +273,14 @@ const V3_PAGE_LIMIT = 100
 export const V3_MAX_INDEX_LAG = 300
 
 /** Subset of a TonCenter v3 `/messages` entry the fast path relies on. */
-type TonV3Message = {
+export type TonV3Message = {
   hash: string
   source: string | null
   destination: string | null
   created_lt: string
   created_at: string
   out_msg_tx_hash?: string | null
+  message_content?: { body?: string | null } | null
 }
 
 /** Subset of a TonCenter v3 `/transactions` entry: meta for stamping/hydration. */
@@ -301,7 +303,7 @@ export type TonV3Transaction = {
  * is clamped to the tip and ends as a complete prefix (see
  * {@link openV3EventStream}).
  */
-export type TonV3Event = { tx: ChainTransaction } | { truncated: true }
+export type TonV3Event = { tx: ChainTransaction } | { truncated: true; cause?: Error }
 
 /** Dependencies of the v3 fast path, provided by TONChain. */
 export type TonV3Context = {
@@ -352,15 +354,15 @@ export function tonV3BaseUrl(endpoint: string, networkType: NetworkType): string
 }
 
 /** Builds a v3 request URL from the base, preserving the base's query (e.g. toncenter's `?api_key=`). */
-function v3Url(baseUrl: string, path: string): URL {
+export function v3Url(baseUrl: string, path: string): URL {
   const base = new URL(baseUrl)
   const url = new URL(`${base.pathname.replace(/\/+$/, '')}/${path.replace(/^\//, '')}`, base)
   for (const [key, value] of base.searchParams) url.searchParams.append(key, value)
   return url
 }
 
-async function fetchV3Messages(
-  ctx: TonV3Context & { v3BaseUrl: string },
+export async function fetchV3Messages(
+  ctx: Pick<TonV3Context, 'rateLimitedFetch'> & { v3BaseUrl: string },
   q: {
     source: string
     startUtime: number
@@ -717,8 +719,13 @@ async function* generateV3Events(
         meta = await metaLookup(txHash)
         raw = meta ? await hydrate(meta, page) : undefined
       } catch (err) {
-        ctx.logger?.warn(`TON v3 event stream truncated (tx ${txHash}):`, err)
-        yield { truncated: true }
+        // A transaction older than the v2 endpoint keeps is a known limit, not an index
+        // fault: the typed TON lookups answer it from the index (see indexed-tx.ts).
+        if (isRetentionError(err))
+          ctx.logger?.debug(`TON v3 event stream truncated (tx ${txHash}): v2 no longer keeps it`)
+        else ctx.logger?.warn(`TON v3 event stream truncated (tx ${txHash}):`, err)
+        // The cause rides along: a caller's index fallback answers only a v2 retention.
+        yield { truncated: true, ...(err instanceof Error && { cause: err }) }
         return
       }
       if (!meta || !raw) {

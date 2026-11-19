@@ -43,6 +43,7 @@ import {
   type CCIPExecution,
   type CCIPMessage,
   type CCIPRequest,
+  type CCIPVerifications,
   type ChainLog,
   type ChainTransaction,
   type CommitReport,
@@ -69,6 +70,15 @@ import {
 } from './extra-args.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import {
+  type TonRampKind,
+  TOPIC_COMMIT_REPORT_ACCEPTED,
+  TOPIC_EXECUTION_STATE_CHANGED,
+  fetchIndexedTransaction,
+  indexRowsByPrefix,
+  offRampBodyPrefix,
+  topicOfEventBody,
+} from './indexed-tx.ts'
+import {
   type TonV3Event,
   fetchV3IndexedTip,
   openV3EventStream,
@@ -81,7 +91,13 @@ import { fetchDeployerCode, locateExecutionTxs, merkleRootAddress } from './merk
 import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import { boundTonClientCaches } from './ton-cache.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
-import { crc32, lookupTxByRawHash, parseJettonContent, tonRateLimitProfile } from './utils.ts'
+import {
+  crc32,
+  isRetentionError,
+  lookupTxByRawHash,
+  parseJettonContent,
+  tonRateLimitProfile,
+} from './utils.ts'
 export type { TONWallet, UnsignedTONTx } from './types.ts'
 
 /**
@@ -93,13 +109,27 @@ export type { TONWallet, UnsignedTONTx } from './types.ts'
 const TON_V3_OPCODE = Symbol('ccip.ton.v3Opcode')
 
 /**
+ * Whether a v2-first lookup failed because v2 no longer keeps the data: directly, or
+ * as an index scan truncated by such a v2 read. Only this case takes the index
+ * fallback; any other failure (an index self-contradiction, throttling, a bad
+ * request) stays the caller's error.
+ */
+const v2CannotServe = (err: unknown): boolean =>
+  isRetentionError(err) ||
+  (err instanceof CCIPLogsStreamInconsistentError && isRetentionError(err.cause))
+
+/**
  * OffRamp versions whose `ExecutionStateChanged` layout (it starts with the uint64
- * `sourceChainSelector`) and MerkleRoot message flow are verified: 1.6.0-1.6.2 and
- * 1.7.0 in source, 1.6.2 on live ton-testnet. The execution-scan shortcuts depend on
- * both, and a wrong assumption would LOSE receipts silently, so any other version
- * keeps the plain scan until it is checked and added here.
+ * `sourceChainSelector`), log layouts (see indexed-tx.ts) and MerkleRoot message flow
+ * are verified: 1.6.0-1.6.2 and 1.7.0 in source, 1.6.2 on live ton-testnet. The
+ * execution-scan shortcuts and the index fallback depend on them, and a wrong
+ * assumption would LOSE receipts silently, so any other version keeps the plain v2
+ * paths until it is checked and added here.
  */
 const EXEC_SHORTCUT_OFFRAMPS = /^OffRamp 1\.(6\.[0-2]|7\.0)$/
+/** OnRamp versions whose `CCIPMessageSent` layout is verified (1.6.0-1.6.1 in source,
+ * 1.6.0 on live ton-testnet), for the index fallback. */
+const INDEXED_ONRAMPS = /^OnRamp 1\.6\.[01]$/
 
 /**
  * Type guard to check if an error is a TVM error with an exit code.
@@ -771,13 +801,21 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       const [, , lt, txHash] = parts as [string, string, string, string]
 
       // Fetch transactions and find the one we're looking for
-      const tx_ = await this.provider.getTransaction(
-        address,
-        lt,
-        Buffer.from(txHash, 'hex').toString('base64'),
-      )
-      if (!tx_) throw new CCIPTransactionNotFoundError(tx)
-      tx = tx_
+      try {
+        const tx_ = await this.provider.getTransaction(
+          address,
+          lt,
+          Buffer.from(txHash, 'hex').toString('base64'),
+        )
+        if (!tx_) throw new CCIPTransactionNotFoundError(tx)
+        return await this.buildChainTransaction(tx_, address)
+      } catch (err) {
+        // v2 first; a transaction older than its liteservers keep is rebuilt from the index.
+        if (!isRetentionError(err)) throw err
+        const indexed = await this.indexedTransaction(address, txHash)
+        if (indexed) return indexed
+        throw err
+      }
     } else {
       address = new Address(0, Buffer.from(toBeArray(tx.address, 32)))
     }
@@ -929,6 +967,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         if (emitted > 0 || !resumable)
           throw new CCIPLogsStreamInconsistentError(
             'TON getLogs: v3 fast path truncated (incomplete tail); re-poll to catch up',
+            { ...(item.cause && { cause: item.cause }) },
           )
         return
       }
@@ -2185,6 +2224,173 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
+   * A CCIP ramp transaction the v2 endpoint no longer serves, rebuilt from the index
+   * (see indexed-tx.ts): only for ramp versions whose log layouts are verified.
+   * @param txHash - The transaction hash, as hex.
+   * @returns the transaction, or undefined when this fallback cannot answer.
+   */
+  private async indexedTransaction(
+    address: Address,
+    txHash: string,
+  ): Promise<ChainTransaction | undefined> {
+    try {
+      const [, , typeAndVersion] = await this.typeAndVersion(address.toRawString())
+      const kind: TonRampKind | undefined = EXEC_SHORTCUT_OFFRAMPS.test(typeAndVersion)
+        ? 'OffRamp'
+        : INDEXED_ONRAMPS.test(typeAndVersion)
+          ? 'OnRamp'
+          : undefined
+      if (!kind) return
+      return await fetchIndexedTransaction(await this.indexContext(), address, txHash, kind)
+    } catch (err) {
+      this.logger.debug('TON: index fallback unavailable:', err)
+      return undefined
+    }
+  }
+
+  /**
+   * The executions of `sourceChainSelector` messages on `offRamp` from `startUtime`
+   * on, read from the index (see indexed-tx.ts), in chain order: the fallback when v2
+   * no longer serves the window. Rows are selected by body prefix (as the scan's
+   * narrowing does), checked by their exact layout and filters before their
+   * transaction is fetched, and the scan stops at the first Success.
+   */
+  private async *executionsFromIndex(
+    offRamp: string,
+    sourceChainSelector: bigint,
+    startUtime: number,
+    {
+      startBlock,
+      ...filters
+    }: { messageId?: string; sequenceNumber?: bigint; startBlock?: number },
+  ): AsyncIterableIterator<CCIPExecution> {
+    const acct = Address.parse(offRamp)
+    const ctx = await this.indexContext()
+    const txs = new Set<string>()
+    const opcode = offRampBodyPrefix.execution(sourceChainSelector)
+    for await (const row of indexRowsByPrefix(ctx, acct, opcode, startUtime)) {
+      const body = row.message_content?.body
+      if (!body || !row.out_msg_tx_hash || txs.has(row.out_msg_tx_hash)) continue
+      const cell = Cell.fromBase64(body)
+      if (topicOfEventBody('OffRamp', cell) !== TOPIC_EXECUTION_STATE_CHANGED) continue
+      const receipt = TONChain.decodeReceipt({
+        data: cell.toBoc().toString('base64'),
+        topics: [TOPIC_EXECUTION_STATE_CHANGED],
+      })
+      if (
+        !receipt ||
+        receipt.sourceChainSelector !== sourceChainSelector ||
+        (filters.messageId && receipt.messageId !== filters.messageId) ||
+        (filters.sequenceNumber != null && receipt.sequenceNumber !== filters.sequenceNumber)
+      )
+        continue
+      txs.add(row.out_msg_tx_hash)
+      const tx = await this.indexedTxOfRow(ctx, acct, row)
+      if (startBlock != null && tx.blockNumber < startBlock) continue
+      for (const exec of await this.getExecutionReceiptsInTx(tx, {
+        sourceChainSelector,
+        ...filters,
+      })) {
+        yield exec
+        if (exec.receipt.state === ExecutionState.Success) return
+      }
+    }
+  }
+
+  /**
+   * The commit of `request`'s message on `offRamp`, read from the index (see
+   * indexed-tx.ts): the fallback when v2 no longer serves the window. Only rooted
+   * commits of the lane's source are read (body prefix), each checked by its exact
+   * layout and decoded against the lane before its transaction is fetched.
+   */
+  private async commitFromIndex(
+    offRamp: string,
+    { lane, message, log }: Parameters<Chain['getVerifications']>[0]['request'],
+    startBlock?: number,
+  ): Promise<CCIPVerifications | undefined> {
+    const acct = Address.parse(offRamp)
+    const ctx = await this.indexContext()
+    const opcode = offRampBodyPrefix.rootedCommit(lane.sourceChainSelector)
+    for await (const row of indexRowsByPrefix(ctx, acct, opcode, log.blockTimestamp)) {
+      const body = row.message_content?.body
+      if (!body || !row.out_msg_tx_hash) continue
+      const cell = Cell.fromBase64(body)
+      if (topicOfEventBody('OffRamp', cell) !== TOPIC_COMMIT_REPORT_ACCEPTED) continue
+      const report = TONChain.decodeCommits(
+        { data: cell.toBoc().toString('base64'), topics: [TOPIC_COMMIT_REPORT_ACCEPTED] },
+        lane,
+      )?.find((r) => r.minSeqNr <= message.sequenceNumber && message.sequenceNumber <= r.maxSeqNr)
+      if (!report) continue
+      const tx = await this.indexedTxOfRow(ctx, acct, row)
+      if (startBlock != null && tx.blockNumber < startBlock) continue
+      const commitLog = tx.logs.find((l) => l.index === Number(row.created_lt))
+      if (!commitLog)
+        throw new CCIPLogsStreamInconsistentError(
+          `TON index: tx ${tx.hash} lacks its commit log ${row.created_lt}`,
+        )
+      return { report, log: commitLog }
+    }
+    return undefined
+  }
+
+  /**
+   * The transaction of an index row that matched a lookup, rebuilt from the index. Its
+   * absence is an incomplete index read, reported as such: answering "not found"
+   * instead would turn an index gap into a wrong answer.
+   */
+  private async indexedTxOfRow(
+    ctx: Awaited<ReturnType<TONChain['indexContext']>>,
+    acct: Address,
+    row: { out_msg_tx_hash?: string | null },
+  ): Promise<ChainTransaction> {
+    const hash = Buffer.from(row.out_msg_tx_hash!, 'base64').toString('hex')
+    const tx = await fetchIndexedTransaction(ctx, acct, hash, 'OffRamp')
+    if (!tx)
+      throw new CCIPLogsStreamInconsistentError(
+        `TON index: a matching log row's tx ${hash} is missing from the index`,
+      )
+    return tx
+  }
+
+  /** The chain's index base URL and fetch, for the index fallbacks. */
+  private async indexContext() {
+    const v3BaseUrl = await this.v3UrlFor()
+    return { rateLimitedFetch: this.v3FetchFor(v3BaseUrl), v3BaseUrl }
+  }
+
+  /** Whether `offRamp`'s version has verified layouts ({@link EXEC_SHORTCUT_OFFRAMPS}). */
+  private async offRampLayoutVerified(offRamp: string): Promise<boolean> {
+    try {
+      return EXEC_SHORTCUT_OFFRAMPS.test((await this.typeAndVersion(offRamp))[2])
+    } catch (err) {
+      this.logger.debug('TON: OffRamp version unknown, plain v2 paths:', err)
+      return false
+    }
+  }
+
+  /**
+   * {@inheritDoc Chain.getVerifications}
+   *
+   * The commit scan reads each log over v2, first. A window older than its liteservers
+   * keep fails there; for OffRamp versions with verified layouts, the commit is then
+   * read from the index (see indexed-tx.ts) — one-shot calls only.
+   */
+  override async getVerifications(
+    opts: Parameters<Chain['getVerifications']>[0],
+  ): Promise<CCIPVerifications> {
+    try {
+      return await super.getVerifications(opts)
+    } catch (err) {
+      if (opts.watch || !v2CannotServe(err) || !(await this.offRampLayoutVerified(opts.offRamp)))
+        throw err
+      this.logger.debug('TON getVerifications: v2 cannot serve the window, reading the index')
+      const fromIndex = await this.commitFromIndex(opts.offRamp, opts.request, opts.startBlock)
+      if (fromIndex) return fromIndex
+      throw err
+    }
+  }
+
+  /**
    * {@inheritDoc Chain.getExecutionReceipts}
    *
    * On OffRamp versions whose layout is verified ({@link EXEC_SHORTCUT_OFFRAMPS}), TON
@@ -2202,12 +2408,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     opts: Parameters<Chain['getExecutionReceipts']>[0],
   ): AsyncIterableIterator<CCIPExecution> {
     const { verifications, sourceChainSelector, messageId, sequenceNumber } = opts
-    let verified = false
-    try {
-      verified = EXEC_SHORTCUT_OFFRAMPS.test((await this.typeAndVersion(opts.offRamp))[2])
-    } catch (err) {
-      this.logger.debug('TON getExecutionReceipts: OffRamp version unknown, plain scan:', err)
-    }
+    const verified = await this.offRampLayoutVerified(opts.offRamp)
     if (verified && !opts.watch && !opts.since && verifications && 'report' in verifications) {
       const txs = await this.executionTxsViaMerkleRoot(
         opts.offRamp,
@@ -2227,14 +2428,43 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       }
       if (txs) return
     }
-    yield* super.getExecutionReceipts(
-      verified && sourceChainSelector
-        ? ({
-            ...opts,
-            [TON_V3_OPCODE]: `0x${(sourceChainSelector >> 32n).toString(16).padStart(8, '0')}`,
-          } as typeof opts)
-        : opts,
-    )
+    let yielded = false
+    try {
+      for await (const exec of super.getExecutionReceipts(
+        verified && sourceChainSelector
+          ? ({
+              ...opts,
+              [TON_V3_OPCODE]: offRampBodyPrefix.execution(sourceChainSelector),
+            } as typeof opts)
+          : opts,
+      )) {
+        yielded = true
+        yield exec
+      }
+    } catch (err) {
+      // The scan reads each log over v2, first; a window older than its liteservers
+      // keep fails there (directly, or as a truncated index scan) — the index still
+      // has the OffRamp's logs. One-shot, verified layouts, and nothing emitted yet.
+      // A `since` resume stays on v2 (its per-log cursor), like the MerkleRoot route.
+      const commitLog = verifications && 'log' in verifications ? verifications.log : undefined
+      const startUtime = opts.startTime ?? commitLog?.blockTimestamp
+      if (
+        yielded ||
+        opts.watch ||
+        opts.since ||
+        !verified ||
+        !sourceChainSelector ||
+        startUtime == null ||
+        !v2CannotServe(err)
+      )
+        throw err
+      this.logger.debug('TON getExecutionReceipts: v2 cannot serve the window, reading the index')
+      yield* this.executionsFromIndex(opts.offRamp, sourceChainSelector, startUtime, {
+        messageId,
+        sequenceNumber,
+        startBlock: opts.startBlock ?? commitLog?.blockNumber,
+      })
+    }
   }
 
   /**

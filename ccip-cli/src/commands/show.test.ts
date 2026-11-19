@@ -52,7 +52,7 @@ const execution = (state: ExecutionState = ExecutionState.Success) =>
 const commit = {
   report: { merkleRoot: txHash, minSeqNr: 1n, maxSeqNr: 1n },
   log: { address: offRamp, transactionHash: txHash, blockNumber: 1, tx: { from: offRamp } },
-} as CCIPVerifications
+} as Extract<CCIPVerifications, { log: unknown }>
 const attestations: OffchainTokenData[] = [{ _tag: 'usdc', attestation: '0xab' }]
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve))
 /** Mock `setTimeout`, so a test can end the 5 s grace that a found execution gives in `--wait`. */
@@ -140,7 +140,10 @@ function fixture(
       await exec.promise
       yield execution(config.state)
     },
-    getBlockTimestamp: async () => config.block ?? 1_700_000_005,
+    getBlockInfo: async (block: number) => {
+      calls.push('block')
+      return { number: block, timestamp: await (config.block ?? 1_700_000_005) }
+    },
     getTransaction: async () => {
       calls.push('origin')
       return { from: await (config.origin ?? executor) }
@@ -301,6 +304,21 @@ it('pretty: a slow origin lookup does not hold the receipt past the grace', asyn
   const receipt = f.tables.find((table) => table.state === '✅ success')
   assert.ok(receipt)
   assert.equal(receipt.origin, undefined)
+  assert.deepEqual(f.warnings, [])
+})
+
+it('pretty: takes the commit time from its log, without a block read', async () => {
+  const logged = {
+    ...commit,
+    log: { ...commit.log, blockTimestamp: 1_700_000_007 },
+  } as CCIPVerifications
+  const f = fixture({ attestations, commit: logged })
+  f.exec.resolve()
+  await f.run({ format: Format.pretty })
+  const table = f.tables.find((t) => 'merkleRoot' in t)
+  assert.ok(table, 'the commit table is printed')
+  assert.match(String(table.timestamp), /\(7s after request\)/)
+  assert.ok(!f.calls.includes('block'), 'no block read for a log that has its timestamp')
   assert.deepEqual(f.warnings, [])
 })
 

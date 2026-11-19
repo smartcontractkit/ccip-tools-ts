@@ -14,6 +14,7 @@ import { NetworkType } from '../networks.ts'
 import {
   crc32,
   extractMagicTag,
+  isRetentionError,
   lookupTxByRawHash,
   tonRateLimitProfile,
   tryParseCell,
@@ -236,5 +237,72 @@ describe('tonRateLimitProfile', () => {
       originKey('https://testnet.toncenter.com/api/v2/jsonRPC'),
       originKey('https://testnet.toncenter.com/api/v3/masterchainInfo'),
     )
+  })
+})
+
+describe('isRetentionError / tonRateLimitProfile', () => {
+  const retentionBody =
+    '{"ok":false,"error":"LITE_SERVER_UNKNOWN: cannot compute block with specified transaction: cannot find block (0,cfb90d27c9d457c9) lt=110247650000005: lt not in db"}'
+
+  it('is true for retention failures and timeouts', () => {
+    assert.equal(
+      isRetentionError({
+        response: {
+          data: {
+            ok: false,
+            error:
+              'LITE_SERVER_UNKNOWN: cannot compute block with specified transaction: cannot find block (0,cfb90d27c9d457c9) lt=110247650000005: lt not in db',
+            code: 500,
+          },
+        },
+      }),
+      true,
+    )
+    assert.equal(
+      isRetentionError(
+        new Error(
+          'HTTP 500: Failed to getBlockHeader by seqno=98258545: {"ok":false,"error":"LITE_SERVER_NOTREADY: cannot find block (-1,8000000000000000) seqno=98258545: seqno not in db","code":500}',
+        ),
+      ),
+      true,
+    )
+    assert.equal(isRetentionError({ code: 'ECONNABORTED' }), true)
+    assert.equal(isRetentionError(new Error('timeout of 30000ms exceeded')), true)
+    assert.equal(
+      isRetentionError({
+        response: { data: '...LITE_SERVER_UNKNOWN: cannot locate transaction...' },
+      }),
+      true,
+    )
+  })
+
+  it('is false for unrelated failures', () => {
+    assert.equal(isRetentionError(undefined), false)
+    assert.equal(isRetentionError(null), false)
+    assert.equal(isRetentionError(new Error('Request failed with status code 429')), false)
+    assert.equal(
+      isRetentionError({ response: { data: { error: 'LITE_SERVER_NETWORK chain->to=96502795' } } }),
+      false,
+    )
+    assert.equal(isRetentionError(new Error('LITE_SERVER_UNKNOWN: some other failure')), false)
+  })
+
+  it('tonRateLimitProfile.isFinalResponse is true only for a 5xx retention body', async () => {
+    const { isFinalResponse } = tonRateLimitProfile('https://testnet.toncenter.com/api/v2')
+    assert.ok(isFinalResponse)
+    assert.equal(await isFinalResponse(new Response(retentionBody, { status: 500 })), true)
+    assert.equal(await isFinalResponse(new Response(retentionBody, { status: 429 })), false)
+    assert.equal(
+      await isFinalResponse(new Response('{"ok":false,"error":"internal"}', { status: 500 })),
+      false,
+    )
+  })
+
+  it('tonRateLimitProfile keys by origin and accepts overrides', () => {
+    const profile = tonRateLimitProfile('https://testnet.toncenter.com/api/v2')
+    assert.equal(profile.keyBy, 'origin')
+    const over = tonRateLimitProfile('https://testnet.toncenter.com/api/v2', { maxRetries: 7 })
+    assert.equal(over.maxRetries, 7)
+    assert.equal(over.keyBy, 'origin')
   })
 })
