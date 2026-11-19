@@ -120,6 +120,13 @@ Test files are classified by filename suffix:
 
 A bare `integration.test.ts` (e.g. `src/evm/integration.test.ts`) is recognized as integration exactly like `logs.integration.test.ts` — the suffix is what matters, and `fork.test.data.ts` is a data helper, not a test.
 
+### CCIP version fixtures
+
+- Use an operational lane for live fee quotes and forked sends. Check the [CCIP Directory](https://docs.chain.link/ccip/directory) or [CCIP API](https://api.ccip.chain.link/v2/lanes) before you select one.
+- Check the OnRamp version, not the router version. Keep pre-v2 quote tests for routes that still use them.
+- Pin the original message or ramp for historical reads and manual execution. Do not use the current lane version to interpret an old message.
+- Test the TokenPool version separately. A v2 lane can use a legacy TokenPool.
+
 ### Networked tests and the `useResource` lock
 
 `node --test` runs every test file concurrently, so networked suites that share public RPC endpoints would trip their rate limiters. Each networked suite instead declares the networks it talks to with an OS-level lock:

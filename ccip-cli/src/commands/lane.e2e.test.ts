@@ -54,9 +54,8 @@ function buildLaneArgs(
   ]
 }
 
-// Moved off sepolia -> fuji: a lane lookup is call-only, so it does not need a
-// testnet hub at all — this v1.5 lane is live on gnosis -> ethereum and leaves
-// both hub locks to the suites that must scan them.
+// Pin the historical v1.5 OnRamp, not the active Gnosis → Ethereum v2.0 route.
+// A config lookup still needs to pair this OnRamp with its historical OffRamp.
 describe('e2e command lane EVM v1.5', () => {
   useResourceForDescribe(['gnosis-mainnet', 'ethereum-mainnet'])
   const LANE_RPCS = [...GNOSIS_MAINNET_RPCS, ...ETHEREUM_MAINNET_RPCS]
