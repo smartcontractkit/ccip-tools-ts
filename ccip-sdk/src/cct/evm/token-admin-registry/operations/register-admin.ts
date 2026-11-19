@@ -50,10 +50,7 @@ const REGISTRATION: Record<
   RegisterAdminMethod,
   { readonly moduleFn: string; readonly tokenGetter?: string }
 > = {
-  [REGISTRATION_METHODS.OWNER]: {
-    moduleFn: 'registerAdminViaOwner',
-    tokenGetter: 'owner',
-  },
+  [REGISTRATION_METHODS.OWNER]: { moduleFn: 'registerAdminViaOwner', tokenGetter: 'owner' },
   [REGISTRATION_METHODS.CCIP_ADMIN]: {
     moduleFn: 'registerAdminViaGetCCIPAdmin',
     tokenGetter: 'getCCIPAdmin',
