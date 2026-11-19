@@ -209,6 +209,9 @@ export {
   validateAuthorizationCallback,
 } from './authentication/index.ts'
 
+// Node-side Canton Ledger API provider (dApp-RPC `Provider` implementation)
+export { type TransactionSigner, CantonJsonRpcProvider } from './provider.ts'
+
 const PerPartyRouterIdentifier_PkgId = CantonIdentifier.fromString(
   'b8e4dfb8d64853c7f9aee4e93385462587745bdc703fceb750993f2723ebd984:CCIP.ClientV2:PerPartyRouter',
 ) // Used for getting InterfaceViews, they don't contain the packageName only the packageId
@@ -1246,7 +1249,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
     const jsCommands: JsCommands = {
       commands: [exerciseCommand],
-      commandId: `ccip-send-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      commandId:
+        cantonArgs?.commandId ??
+        `ccip-send-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       actAs: [sender],
       disclosedContracts: disclosedContracts,
     }
@@ -1278,7 +1283,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     this.logger.debug(`CantonChain.sendMessage: submitting command`)
 
     // Submit and wait for the full transaction (so we get events back)
-    const response = await this.submitCommands(unsigned.commands, 'Send Message')
+    const response = await this.submitCommands(unsigned.commands, 'Send Message', {
+      commandIdSupplied: !!(opts.message.extraArgs as CantonExtraArgsV1 | undefined)?.commandId,
+    })
     const updateId = response.transaction.updateId
     const timestamp = Math.floor(new Date(response.transaction.recordTime).getTime() / 1000)
     this.logger.debug(`CantonChain.sendMessage: submitted, updateId=${updateId}`)
@@ -1754,26 +1761,54 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   async submitCommands(
     commands: JsCommands,
     reason: string = 'submit command',
+    opts?: { commandIdSupplied?: boolean },
   ): Promise<JsSubmitAndWaitForTransactionResponse> {
-    const { tx } = await this.provider.request({
-      method: 'prepareExecuteAndWait',
-      params: {
-        commandId: commands.commandId,
-        commands: commands.commands,
-        actAs: commands.actAs,
-        readAs: commands.readAs,
-        disclosedContracts: commands.disclosedContracts,
-        synchronizerId: commands.synchronizerId,
-      },
-    })
+    const tx = await this.provider
+      .request({
+        method: 'prepareExecuteAndWait',
+        params: {
+          commandId: commands.commandId,
+          commands: commands.commands,
+          actAs: commands.actAs,
+          readAs: commands.readAs,
+          disclosedContracts: commands.disclosedContracts,
+          synchronizerId: commands.synchronizerId,
+        },
+      })
+      .then((r) => r.tx)
+      .catch((error: unknown) => {
+        // Callers that pass `commandIdSupplied: false` generated their own ID, so a rebuilt retry
+        // gets a new ID and could run twice: an unknown outcome is retryable only with a supplied ID.
+        if (
+          opts?.commandIdSupplied === false &&
+          CCIPError.isCCIPError(error) &&
+          error.isTransient
+        ) {
+          throw new CCIPError(error.code, error.message, {
+            cause: error,
+            context: { ...error.context, commandId: commands.commandId },
+            isTransient: false,
+            recovery: 'Outcome unknown. Check the ledger, or retry with an explicit commandId.',
+          })
+        }
+        throw error
+      })
     this.logger.debug(`Canton: submitted command (${reason}), update ${tx.payload.updateId}`)
 
     // The executed event only reports the update ID — fetch the full
     // committed transaction so callers can parse receipts and events.
-    const { update } = await this.ledgerApiClient.getUpdateById(
-      tx.payload.updateId,
-      this.transactionUpdateFormat(),
-    )
+    // This fetch runs after the commit: a 429/5xx or network error here is not a failed submit,
+    // so it must not be reported as retryable.
+    const { update } = await this.ledgerApiClient
+      .getUpdateById(tx.payload.updateId, this.transactionUpdateFormat())
+      .catch((error: unknown) => {
+        throw new CCIPTxOutcomeUnavailableError(
+          'CantonChain.submitCommands',
+          tx.payload.updateId,
+          'the committed Transaction update',
+          { cause: error instanceof Error ? error : undefined },
+        )
+      })
     if (!update || !('Transaction' in update)) {
       // Committed on-ledger; the response just lacks the expected result
       // events. Non-transient: the command already committed, so retrying
@@ -2007,9 +2042,13 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     return active?.createdEvent.contractId
   }
 
-  async createCCIPSender(): Promise<CantonCreatedContract> {
+  /**
+   * Create a CCIPSender. Pass the same `commandId` when retrying a call whose outcome is
+   * unknown, so the ledger rejects a repeat as DUPLICATE_COMMAND instead of creating a second one.
+   */
+  async createCCIPSender(opts?: { commandId?: string }): Promise<CantonCreatedContract> {
     const createCmd: JsCommands = {
-      commandId: `ccip-create-sender-${Date.now()}`,
+      commandId: opts?.commandId ?? `ccip-create-sender-${Date.now()}`,
       commands: [
         {
           CreateCommand: {
@@ -2023,7 +2062,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       ],
       actAs: [this.activeParty],
     }
-    const { transaction } = await this.submitCommands(createCmd, 'Create CCIPSender')
+    const { transaction } = await this.submitCommands(createCmd, 'Create CCIPSender', {
+      commandIdSupplied: !!opts?.commandId,
+    })
     const createdEvent = getCreatedEventFromTransaction(transaction, CCIPSenderIdentifier)
     if (!createdEvent) {
       throw new CCIPError(
@@ -2118,15 +2159,20 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
     return undefined
   }
 
+  /**
+   * Create a CCIPReceiver. Pass the same `commandId` when retrying a call whose outcome is
+   * unknown, so the ledger rejects a repeat as DUPLICATE_COMMAND instead of creating a second one.
+   */
   async createCCIPReceiver(
     finality: FinalityRequested,
     ccvs: RawInstanceAddress[],
+    opts?: { commandId?: string },
   ): Promise<CantonCreatedContract> {
     this.logger.debug(
       `CantonChain.createCCIPReceiver: creating CCIPReceiver for finality=${finality} and requiredCCVs=${ccvs.map((addr) => addr.toString()).join(',')}`,
     )
     const createCmd: JsCommands = {
-      commandId: `ccip-create-receiver-${Date.now()}`,
+      commandId: opts?.commandId ?? `ccip-create-receiver-${Date.now()}`,
       commands: [
         {
           CreateCommand: {
@@ -2144,7 +2190,9 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       ],
       actAs: [this.activeParty],
     }
-    const { transaction } = await this.submitCommands(createCmd, 'Create CCIPReceiver')
+    const { transaction } = await this.submitCommands(createCmd, 'Create CCIPReceiver', {
+      commandIdSupplied: !!opts?.commandId,
+    })
     const createdEvent = getCreatedEventFromTransaction(transaction, CCIPReceiverIdentifier)
     if (!createdEvent) {
       throw new CCIPError(

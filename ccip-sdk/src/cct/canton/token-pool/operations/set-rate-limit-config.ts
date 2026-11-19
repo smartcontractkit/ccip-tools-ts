@@ -145,6 +145,7 @@ export class SetRateLimitConfig extends CantonOperation<SetRateLimitConfigParams
       choiceArgument,
       actAs: [p.sender],
       commandIdPrefix: 'cct-set-rate-limit-config',
+      commandId: p.commandId,
     })
   }
 

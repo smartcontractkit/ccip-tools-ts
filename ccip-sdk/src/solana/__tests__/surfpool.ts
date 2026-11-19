@@ -63,19 +63,38 @@ export function createSurfpoolInstance({
         args.push('--network', network)
       }
 
-      child = spawn('surfpool', args, { stdio: ['ignore', 'pipe', 'pipe'] })
+      const proc = spawn('surfpool', args, { stdio: ['ignore', 'pipe', 'pipe'] })
+      child = proc
 
-      child.stdout?.on('data', (data: Buffer) => {
+      // The newest output lines, shown if the fork dies: the tests themselves then only see
+      // ECONNREFUSED from every later request.
+      const tail: string[] = []
+      const keep = (data: Buffer) => {
+        tail.push(...String(data).split('\n').filter(Boolean))
+        tail.splice(0, tail.length - 40)
+      }
+      proc.stdout.on('data', (data: Buffer) => {
+        keep(data)
         if (VERBOSE) process.stdout.write(`[surfpool] ${String(data)}`)
       })
-      child.stderr?.on('data', (data: Buffer) => {
+      proc.stderr.on('data', (data: Buffer) => {
+        keep(data)
         if (VERBOSE) process.stderr.write(`[surfpool] ${String(data)}`)
+      })
+      proc.on('exit', (code, signal) => {
+        if (child !== proc) return // stopped by stop()
+        child = undefined
+        console.error(
+          `surfpool on port ${port} exited unexpectedly (code ${code}, signal ${signal}); last output:\n` +
+            tail.map((line) => `  [surfpool] ${line}`).join('\n'),
+        )
       })
 
       // Wait for RPC to become ready
       const url = `http://${host}:${port}`
       const deadline = Date.now() + 60_000
       while (Date.now() < deadline) {
+        if (child !== proc) throw new Error(`Surfpool exited before it served ${url}`)
         try {
           const res = await fetch(url, {
             method: 'POST',

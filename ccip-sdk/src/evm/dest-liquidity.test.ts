@@ -48,6 +48,8 @@ const LOB_V1_FRAG = 'lockOrBurn((bytes,uint64,address,uint256,address))'
 const ROM_V2_SEL = pool.getFunction(ROM_V2_FRAG)!.selector
 const ROM_V1_SEL = pool.getFunction(ROM_V1_FRAG)!.selector
 const LOB_V1_SEL = pool.getFunction(LOB_V1_FRAG)!.selector
+const usdcProxy = interfaces.USDCTokenPoolProxy_v2_0
+const MECHANISM_SEL = usdcProxy.getFunction('getLockOrBurnMechanism')!.selector
 
 const SOURCE_SELECTOR = 16015286601757825753n // ethereum-sepolia
 const DEST_SELECTOR = 14767482510784806043n // avalanche-fuji
@@ -148,6 +150,8 @@ function makeProvider(opts: {
   destinationAmount?: bigint
   /** make the supportsInterface probes fail: a contract revert vs a transport error */
   probeError?: 'call-exception' | 'transport'
+  /** USDCTokenPoolProxy.getLockOrBurnMechanism answer (default 4 = CCV), or a transport error */
+  usdcMechanism?: number | 'transport'
 }) {
   const calls: Call[] = []
   const provider = {
@@ -165,6 +169,10 @@ function makeProvider(opts: {
           (id === IPOOL_V2_INTERFACE_ID && opts.isV2) ||
           (id === CCIP_POOL_V1_INTERFACE_ID && (opts.isV1 ?? true))
         return pool.encodeFunctionResult('supportsInterface', [supported])
+      }
+      if (sel === MECHANISM_SEL) {
+        if (opts.usdcMechanism === 'transport') throw new Error('could not detect network')
+        return usdcProxy.encodeFunctionResult('getLockOrBurnMechanism', [opts.usdcMechanism ?? 4])
       }
       if (sel === ROM_V2_SEL || sel === ROM_V1_SEL) {
         // rpcError: a transport failure with NO revert data (distinct from a contract revert)
@@ -742,6 +750,7 @@ function makeChain(opts: {
   revert?: string
   rpcError?: boolean
   probeError?: 'call-exception' | 'transport'
+  usdcMechanism?: number | 'transport'
   remotePoolsRpcError?: boolean
   remotePoolsRevert?: string
   noPool?: boolean
@@ -763,6 +772,7 @@ function makeChain(opts: {
     revert: opts.revert,
     rpcError: opts.rpcError,
     probeError: opts.probeError,
+    usdcMechanism: opts.usdcMechanism,
   })
   const tokenPool = opts.noPool ? undefined : POOL
   const warn = mock.fn()
@@ -1124,6 +1134,97 @@ describe('EVMChain.checkExecute — dest-liquidity guard', () => {
         tnv,
       )
     }
+  })
+
+  // ==========================================================================
+  // USDCTokenPoolProxy 2.0 without the source's real pool data (non-EVM sources)
+  // ==========================================================================
+
+  const SOLANA_DEVNET_SELECTOR = 16423721717087811551n
+  const CCTP_V2_CCV_TAG = '0x3047587c' // bytes4(keccak256('CCTP_V2_CCV'))
+  const usdcProxy2 = {
+    poolTypeAndVersion: 'USDCTokenPoolProxy 2.0.0',
+    offRampTypeAndVersion: 'OffRamp 2.0.0',
+  } as const
+  const solanaMessage = { ...MESSAGE, sourceChainSelector: SOLANA_DEVNET_SELECTOR }
+  const decodeRomV2 = (calls: Call[]) => {
+    const simCall = calls.find((c) => c.data?.startsWith(ROM_V2_SEL))
+    assert.ok(simCall, 'the releaseOrMint simulation ran')
+    return pool.decodeFunctionData(ROM_V2_FRAG, simCall.data!)[0]
+  }
+
+  it('Solana-source USDC into USDCTokenPoolProxy 2.0.0 => simulates the CCV route with the CCTP v2 CCV tag', async () => {
+    // live-found false block: the decimals default has no routing tag, so the proxy reverted
+    // InvalidMessageVersion(0x00000000) although the real Solana message (sourcePoolData
+    // 0x3047587c) executes. The proxy's CCV mechanism for the source chain picks the tag.
+    const { chain, provider } = makeChain(usdcProxy2)
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }), true)
+    const mechanismCall = provider.calls.find((c) => c.data?.startsWith(MECHANISM_SEL))
+    assert.ok(mechanismCall, 'read the proxy mechanism')
+    const [mechanismSelector] = usdcProxy.decodeFunctionData(
+      'getLockOrBurnMechanism',
+      mechanismCall.data!,
+    )
+    assert.equal(mechanismSelector, SOLANA_DEVNET_SELECTOR)
+    const input = decodeRomV2(provider.calls)
+    assert.equal(input.sourcePoolData, CCTP_V2_CCV_TAG)
+    assert.equal(input.remoteChainSelector, SOLANA_DEVNET_SELECTOR)
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 tagged simulation stays strict: a child-pool revert still blocks', async () => {
+    const { chain } = makeChain({
+      ...usdcProxy2,
+      revert: encodeErr('ChainNotAllowed(uint64)', [SOLANA_DEVNET_SELECTOR]),
+    })
+    await assert.rejects(
+      () => chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }),
+      CCIPDestExecutionRevertError,
+    )
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 with a LOCK_RELEASE mechanism => simulates with the lock-release flag', async () => {
+    const { chain, provider } = makeChain({ ...usdcProxy2, usdcMechanism: 3 })
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }), true)
+    assert.equal(
+      decodeRomV2(provider.calls).sourcePoolData,
+      abi.encode(['bytes4'], [USDC_LOCK_RELEASE_FLAG]),
+    )
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 mechanism with no 2.0 inbound route => simulation skipped, not a false block', async () => {
+    // INVALID / CCTP_V1 / CCTP_V2: the source's tag can't be inferred
+    for (const usdcMechanism of [0, 1, 2]) {
+      const { chain, provider } = makeChain({ ...usdcProxy2, usdcMechanism })
+      assert.equal(
+        await chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }),
+        true,
+        `mechanism ${usdcMechanism}`,
+      )
+      assert.ok(!provider.calls.some((c) => c.data?.startsWith(ROM_V2_SEL)))
+    }
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 mechanism read transport failure => unavailable (transport)', async () => {
+    const { chain } = makeChain({ ...usdcProxy2, usdcMechanism: 'transport' })
+    await assert.rejects(
+      () => chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPDestSimulationUnavailableError)
+        assert.equal(err.reason, 'transport')
+        return true
+      },
+    )
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 with real source pool data => uses it, no mechanism read', async () => {
+    const { chain, provider } = makeChain(usdcProxy2)
+    const message = {
+      ...solanaMessage,
+      tokenAmounts: [{ token: TOKEN, amount: 1000n, extraData: CCTP_V2_CCV_TAG }],
+    }
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message }), true)
+    assert.ok(!provider.calls.some((c) => c.data?.startsWith(MECHANISM_SEL)))
+    assert.equal(decodeRomV2(provider.calls).sourcePoolData, CCTP_V2_CCV_TAG)
   })
 
   it('USDC hybrid lock-release branch (LOCK_RELEASE_FLAG sourcePoolData) => simulates normally', async () => {

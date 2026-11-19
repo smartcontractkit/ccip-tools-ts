@@ -1,5 +1,5 @@
 /**
- * Unit tests for the CLI Canton `JsonRpcProvider` error mapping: non-2xx
+ * Unit tests for the Canton `CantonJsonRpcProvider` error mapping: non-2xx
  * Ledger API responses surface the Canton `JsCantonError` code/cause in the
  * CCIPError context (`cantonCode`), and transient statuses (429/5xx) are
  * marked retryable — the contract the CCT operations' DUPLICATE_COMMAND
@@ -8,9 +8,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { CCIPError } from '@chainlink/ccip-sdk/src/index.ts'
-
-import { JsonRpcProvider } from './provider.ts'
+import { CCIPError } from '../errors/index.ts'
+import { CantonJsonRpcProvider } from './provider.ts'
 
 const URL_BASE = 'https://ledger.example.com'
 const PARTY = `party::1220${'ab'.repeat(32)}`
@@ -20,22 +19,22 @@ function errorResponse(status: number, body: string): Response {
 }
 
 /** A provider whose requests always receive the given canned response. */
-async function providerRespondingWith(response: Response | Error): Promise<JsonRpcProvider> {
+async function providerRespondingWith(response: Response | Error): Promise<CantonJsonRpcProvider> {
   const fetchFn = (async () => {
     if (response instanceof Error) throw response
     return response
   }) as typeof fetch
-  return JsonRpcProvider.fromUrl('canton:TestNet', URL_BASE, 'jwt', fetchFn, undefined, PARTY)
+  return CantonJsonRpcProvider.fromUrl('canton:TestNet', URL_BASE, 'jwt', fetchFn, undefined, PARTY)
 }
 
-async function ledgerApi(provider: JsonRpcProvider): Promise<unknown> {
+async function ledgerApi(provider: CantonJsonRpcProvider): Promise<unknown> {
   return provider.request({
     method: 'ledgerApi',
     params: { requestMethod: 'get', resource: '/v2/state/ledger-end' },
   } as any)
 }
 
-describe('JsonRpcProvider Canton error mapping', () => {
+describe('CantonJsonRpcProvider Canton error mapping', () => {
   it('extracts cantonCode/cantonCause from a gRPC-style `{error: {…}}` body', async () => {
     const provider = await providerRespondingWith(
       errorResponse(

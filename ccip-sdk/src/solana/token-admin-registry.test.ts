@@ -6,7 +6,10 @@ import { BorshAccountsCoder } from '@coral-xyz/anchor'
 import { PublicKey } from '@solana/web3.js'
 
 import { CCIPDataFormatUnsupportedError } from '../errors/index.ts'
-import { decodeTokenAdminRegistryConfig } from './token-admin-registry.ts'
+import {
+  decodeTokenAdminRegistryConfig,
+  isLatestTokenAdminRegistryLayout,
+} from './token-admin-registry.ts'
 
 const key = (byte: number) => new PublicKey(Uint8Array.from({ length: 32 }, () => byte))
 const ADMINISTRATOR = key(1)
@@ -65,6 +68,24 @@ describe('decodeTokenAdminRegistryConfig', () => {
     }
   })
 
+  it('decodes the account resolution flags and pool interface version of v4 accounts', () => {
+    // [account_resolution_enabled, skip_lookup_table_additional_entries, interface version]
+    for (const [enabled, skip, interfaceVersion, accountResolution] of [
+      [0, 0, 1, 'NoResolution'],
+      [0, 1, 2, 'NoResolution'], // the skip flag only applies with resolution enabled
+      [1, 0, 2, 'Standard'],
+      [1, 1, 2, 'WithoutExtendedLookupTable'],
+    ] as const) {
+      const config = decodeTokenAdminRegistryConfig(
+        registryData(4, enabled, 254, interfaceVersion, skip),
+      )
+      assert.ok(config.mint.equals(MINT))
+      assert.equal(config.accountResolution, accountResolution)
+      assert.equal(config.supportsAutoDerivation, enabled === 1)
+      assert.equal(config.interfaceVersion, interfaceVersion)
+    }
+  })
+
   it('rejects unknown account resolutions', () => {
     assert.throws(
       () => decodeTokenAdminRegistryConfig(registryData(3, 3, 254, 2)),
@@ -80,5 +101,14 @@ describe('decodeTokenAdminRegistryConfig', () => {
     const data = registryData(3, 1, 254, 2)
     BorshAccountsCoder.accountDiscriminator('ChainConfig').copy(data)
     assert.throws(() => decodeTokenAdminRegistryConfig(data), CCIPDataFormatUnsupportedError)
+  })
+})
+
+describe('isLatestTokenAdminRegistryLayout', () => {
+  it('accepts only the v4 layout, which the Router does not need to upgrade', () => {
+    assert.equal(isLatestTokenAdminRegistryLayout(registryData(1)), false)
+    assert.equal(isLatestTokenAdminRegistryLayout(registryData(2, 1)), false)
+    assert.equal(isLatestTokenAdminRegistryLayout(registryData(3, 1, 254, 2)), false)
+    assert.equal(isLatestTokenAdminRegistryLayout(registryData(4, 1, 254, 2, 0)), true)
   })
 })

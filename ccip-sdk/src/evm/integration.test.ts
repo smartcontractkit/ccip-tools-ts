@@ -14,6 +14,7 @@ import '../aptos/index.ts'
 import { LaneFeature } from '../chain.ts'
 import { CCIPAbortError, CCIPError, isTransientHttpStatus } from '../errors/index.ts'
 import { discoverOffRamp } from '../execution.ts'
+import { createRateLimitedFetch } from '../fetch.ts'
 import { NetworkType } from '../networks.ts'
 import { CCTP_FINALITY_FAST, getUsdcBurnFees } from '../offchain.ts'
 import '../solana/index.ts'
@@ -1099,6 +1100,11 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
     // the raw fetch below with client.getMessageById() and read fees from the result.
 
     const STAGING_API = 'https://api.ccip.cldev.cloud'
+    // The staging API sits behind an edge that answers 5xx (e.g. 524, its origin timeout) when
+    // the API is slow: retry those with the SDK's jittered, Retry-After-aware backoff, and give
+    // the tests room for it (the edge gives up after about 100s per try).
+    const stagingFetch = createRateLimitedFetch({ maxRetries: 2 }, { logger: testLogger })
+    const slow = { timeout: 360_000 }
 
     const HISTORICAL_MESSAGE_IDS = [
       // Base Sepolia → Sepolia, finalized (finality=0), 10 bps (finalityTransferFeeBps)
@@ -1119,11 +1125,11 @@ describe('EVM Integration Tests', { skip, timeout: 180_000 }, () => {
     }
 
     for (const messageId of HISTORICAL_MESSAGE_IDS) {
-      it(`preflight fee estimation should match API breakdown for ${messageId}`, async () => {
+      it(`preflight fee estimation should match API breakdown for ${messageId}`, slow, async () => {
         // Fetch raw message from staging API (includes bpsFeeDetails not yet
         // exposed by CCIPAPIClient)
         const url = `${STAGING_API}/v2/messages/${messageId}`
-        const res = await fetch(url)
+        const res = await stagingFetch(url)
         assert.ok(res.ok, `API request failed: ${res.status} ${res.statusText}`)
         const raw = (await res.json()) as Record<string, any>
 

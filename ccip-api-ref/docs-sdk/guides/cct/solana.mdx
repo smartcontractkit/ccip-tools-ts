@@ -17,6 +17,8 @@ const chain = await SolanaChain.fromUrl('https://api.devnet.solana.com')
 const cct = SolanaTokenManager.fromChain(chain)
 ```
 
+To run the whole setup on CCIP 2.0 in one call, resuming where it stopped, see [Onboard a Token on Solana](./solana-onboarding). This guide runs each operation separately.
+
 The signed operations below take a `wallet`, an Anchor-compatible `Wallet` whose `publicKey` is the fee payer. See [Multi-Chain](../multi-chain) to construct `chain` and `wallet`.
 
 ## Required configuration
@@ -153,11 +155,11 @@ await cct.setTokenAuthority({
 
 `createTokenMultisig` auto-includes the pool signer PDA and the token's current mint authority, so the 1-of-2 above needs no `additionalSigners`; pass `additionalSigners` only to add more independent signers. Do **not** raise the threshold to 2 with only the pool signer and one other member: the pool signer must satisfy the threshold by itself, so the SDK rejects it before submit ("pool signer must occupy at least threshold signer slots"), matching the pool program's `PoolSignerNotInMultisig` guard. `setTokenAuthority` with `newAuthority: null` permanently **revokes** the authority, which is irreversible; use it only when you intend that.
 
-Order matters. Run this handoff **after** `registerAdmin` and `acceptAdmin`, and **before** any mint or transfer. Proposing the administrator requires the caller to still be the mint authority, so if you move the authority to the multisig first, admin registration can no longer complete and fails with `Unauthorized`.
+Order matters. Run this handoff **after** `registerAdmin` and `acceptAdmin`, and **before** any mint or transfer. On a CCIP 2.0 Router, `registerAdmin` and `ownerOverridePendingAdministrator` still work after the handoff: when the mint authority is a 1-of-N multisig, they sign as one of its signers (pass it as `authority`) through the Router's multisig instructions. Older Routers only accept the mint authority itself, so there, moving the authority first makes admin registration fail with `Unauthorized`.
 
 This whole step applies only to a governed burn/mint mint-authority. A lock/release pool has no mint authority to hand off (its liquidity is managed with `provideLiquidity` and `withdrawLiquidity`), and a single-authority or test token can keep its own authority when irrecoverable single control is acceptable.
 
-If you get this wrong, the failure modes are: sole PDA authority means irrecoverable loss of the mint; a threshold too high or a missing pool signer fails with `PoolSignerNotInMultisig`; and the wrong order fails admin registration with `Unauthorized`.
+If you get this wrong, the failure modes are: sole PDA authority means irrecoverable loss of the mint; a threshold too high or a missing pool signer fails with `PoolSignerNotInMultisig`; and, on a Router without the multisig instructions, the wrong order fails admin registration with `Unauthorized`.
 
 ## Configure remote chains
 
