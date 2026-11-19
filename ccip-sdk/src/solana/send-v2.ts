@@ -62,6 +62,8 @@ const ACCOUNT_OWNED_BY_WRONG_PROGRAM = 3007
 const CCIP_SEND_V2_LOOKUP_TABLES: Readonly<Record<string, string>> = {
   // CCIP 2.0 staging deployment on Solana devnet
   CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm: '61yGrR9h9YU7wq5b3LiYSdePou1iAg5giaVMBig8fK6m',
+  // CCIP 2.0 prod testnet on Solana devnet (CLD `CcipSendLookupTable` 2.0.0)
+  Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C: '43j7AWfB2STvzwKxik64fD12Swdz56rNTA5VQnCWwEXL',
 }
 
 const MAX_UINT32 = 0xffff_ffffn

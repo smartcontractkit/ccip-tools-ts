@@ -66,7 +66,7 @@ export type ExecuteRemovePoolReceiveContextValueResult = ExecutePoolChoiceResult
 async function buildReceiveContextExercise(
   opName: string,
   chain: CantonChain,
-  p: { sender: string; poolInstanceAddress: string },
+  p: { sender: string; poolInstanceAddress: string; commandId?: string },
   choice: string,
   choiceArgument: AddPoolReceiveContextContractValueArg | RemovePoolReceiveContextValueArg,
   commandIdPrefix: string,
@@ -86,6 +86,7 @@ async function buildReceiveContextExercise(
     choiceArgument,
     actAs: [p.sender],
     commandIdPrefix,
+    commandId: p.commandId,
   })
 }
 

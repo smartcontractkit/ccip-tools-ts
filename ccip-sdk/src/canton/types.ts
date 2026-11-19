@@ -127,6 +127,13 @@ export interface CantonExtraArgsV1 {
    * - `none`: `Executor_NoExecutor` — no auto-execute on destination.
    */
   executorMode?: 'default' | 'none'
+  /**
+   * Ledger command ID for the send. Optional - if not set, a new ID is generated on every
+   * build. To retry a send whose outcome is unknown (no response), pass the SAME ID: the
+   * ledger rejects a repeat as DUPLICATE_COMMAND instead of sending a second message.
+   * Use a new ID for each distinct message.
+   */
+  commandId?: string
 }
 
 export type CantonTokenInfo = {

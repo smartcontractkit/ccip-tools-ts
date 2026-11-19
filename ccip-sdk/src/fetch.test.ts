@@ -910,6 +910,73 @@ describe('transient retry', () => {
     }
   })
 
+  // How an anvil fork reports that its forked RPC dropped the connection (CI, anvil 1.9.0).
+  const upstreamReset = (id: number) => ({
+    jsonrpc: '2.0',
+    id,
+    error: {
+      code: -32603,
+      message:
+        'failed to get storage for 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59 at 0: ' +
+        'HTTP request failed: error sending request: connection error: connection reset',
+    },
+  })
+
+  for (const batch of [false, true]) {
+    it(`retries an in-band upstream connection reset like a 503, batch: ${batch}`, async () => {
+      const errors = [
+        upstreamReset(1),
+        { ...upstreamReset(2), error: { code: -32000, message: 'read ECONNRESET' } },
+      ]
+      const successes = [1, 2].map((id) => ({ jsonrpc: '2.0', id, result: `0x${id}` }))
+      const bodies = [errors, successes].map((members) =>
+        JSON.stringify(batch ? members : members[0]),
+      )
+      let calls = 0
+      globalThis.fetch = mock.fn(async () => {
+        const body = bodies[calls++]!
+        return new Response(body, { headers: { 'content-length': String(body.length) } })
+      })
+      const requests = [
+        { jsonrpc: '2.0', id: 1, method: 'eth_call' },
+        { jsonrpc: '2.0', id: 2, method: 'eth_getBalance' },
+      ]
+      const result = await createRateLimitedFetch({ maxRetries: 3 })(
+        `https://jsonrpc-reset-${batch}.example.com/rpc`,
+        { method: 'POST', body: JSON.stringify(batch ? requests : requests[0]) },
+      )
+      assert.equal(calls, 2)
+      assert.equal(await result.text(), bodies[1])
+    })
+  }
+
+  it('does not retry a reset beside an answered member, a revert, or a non-error code', async () => {
+    for (const members of [
+      [{ jsonrpc: '2.0', id: 1, result: '0xabc' }, upstreamReset(2)],
+      [
+        {
+          jsonrpc: '2.0',
+          id: 1,
+          error: { code: 3, message: 'execution reverted: connection reset' },
+        },
+      ],
+      [{ jsonrpc: '2.0', id: 1, error: { message: 'connection reset' } }],
+    ]) {
+      const body = JSON.stringify(members.length > 1 ? members : members[0])
+      let calls = 0
+      globalThis.fetch = mock.fn(async () => {
+        calls++
+        return new Response(body, { headers: { 'content-length': String(body.length) } })
+      })
+      const result = await createRateLimitedFetch({ maxRetries: 3 })(
+        'https://jsonrpc-reset-final.example.com/rpc',
+        { method: 'POST', body: '{"jsonrpc":"2.0","id":1,"method":"eth_sendRawTransaction"}' },
+      )
+      assert.equal(calls, 1, body)
+      assert.equal(await result.text(), body)
+    }
+  })
+
   it('returns a -32007 body untouched for non-JSON-RPC requests', async () => {
     const url = 'https://jsonrpc-32007-plain.example.com/api'
     const body = '{"error":{"code":-32007}}'
