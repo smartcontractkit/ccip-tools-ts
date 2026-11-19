@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict'
-import { it } from 'node:test'
 
 import { Address } from '@ton/core'
 
 import { createRateLimitedFetch } from '../fetch.ts'
-import type { ChainLog, Logger } from '../types.ts'
+import type { Logger } from '../types.ts'
 import { tonRateLimitProfile } from './utils.ts'
-import type { TONChain } from './index.ts'
 
 /**
  * Fixture discovery for the live ton-testnet suites. Not a suite itself: the
@@ -29,36 +27,14 @@ import type { TONChain } from './index.ts'
  * index drops a log's topic), and the public ton-testnet v2 endpoint serves a
  * transaction for about two days: measured 2026-11, every read fine up to 48h, about
  * half failing with `LITE_SERVER_UNKNOWN ... lt not in db` from 60h, all of them
- * after a week (`archival: true` is refused outright). A fixture older than that
- * cannot be read by any scan, whatever the SDK does: {@link newestLog} does not try,
- * and {@link itLive} reports the tests that need it as skipped, with the lane's age.
+ * after a week (`archival: true` is refused outright). A SCAN over such a window
+ * fails on v2 (the SDK's index fallback serves single transactions and execution
+ * lookups, not generic scans): suites that test the v2 scan paths keep their windows
+ * younger than {@link V2_RETENTION_S}.
  */
 
 /** How long the public ton-testnet v2 endpoint reliably serves a transaction (see LIMIT above). */
 export const V2_RETENTION_S = 48 * 3_600
-
-/**
- * A fixture that no public endpoint can read anymore: its lane has been quiet for longer
- * than {@link V2_RETENTION_S}. That says nothing about the SDK, so {@link itLive} skips on it.
- */
-export class StaleFixtureError extends Error {
-  override name = 'StaleFixtureError'
-}
-
-/**
- * `it` for a test on live fixtures: reported as skipped, with the reason, when a fixture it
- * awaits is stale (see {@link StaleFixtureError}). Every other error fails the test.
- */
-export function itLive(name: string, fn: () => unknown): void {
-  it(name, async (t) => {
-    try {
-      await fn()
-    } catch (err) {
-      if (!(err instanceof StaleFixtureError)) throw err
-      t.skip(err.message)
-    }
-  })
-}
 
 /** One log (external-out) message row of the TonCenter v3 index. */
 export type TonLogRow = {
@@ -164,63 +140,4 @@ export async function txBlock(index: TonIndex, address: string, txHash: string):
   const seqno = transactions?.[0]?.mc_block_seqno
   assert.ok(seqno, `the index lists log tx ${txHash} of ${address} but not its block`)
   return seqno
-}
-
-/**
- * The newest log of `topic` on `address` that `accept` takes, read through the SDK's
- * own scan over the one-block window that holds it.
- *
- * @returns the log, what `accept` made of it, and the pinned window
- *   (`startTime`..`endBlock`) that contains it.
- * @throws {@link StaleFixtureError} when no row younger than {@link V2_RETENTION_S} is
- *   accepted but older rows remain: those can't be read (see LIMIT above).
- */
-export async function newestLog<T>(
-  chain: TONChain,
-  index: TonIndex,
-  q: {
-    address: string
-    topic: string
-    opcode?: string
-    /** Only logs created at or before this unix time. */
-    notAfter?: number
-    /** Newest rows inspected before giving up. */
-    rows?: number
-    accept: (log: ChainLog) => T | undefined
-  },
-): Promise<{ log: ChainLog; value: T; startTime: number; endBlock: number }> {
-  const rows = await newestLogRows(index, q.address, {
-    opcode: q.opcode,
-    notAfter: q.notAfter,
-    limit: q.rows ?? 20,
-  })
-  // Rows past the retention are not read: each read would only cost the public endpoint a
-  // `LITE_SERVER_UNKNOWN ... lt not in db` (after its retries), and a scan that sometimes
-  // reaches a liteserver which still has the block makes the suite flaky, not covered.
-  const nowS = Math.floor(Date.now() / 1e3)
-  const readable = rows.filter((row) => row.createdAt >= nowS - V2_RETENTION_S)
-  const tried = new Set<string>()
-  for (const row of readable) {
-    if (tried.has(row.txHash)) continue
-    tried.add(row.txHash)
-    const window = {
-      startTime: row.createdAt,
-      endBlock: await txBlock(index, q.address, row.txHash),
-    }
-    for await (const log of chain.getLogs({ address: q.address, topics: [q.topic], ...window })) {
-      const value = q.accept(log)
-      if (value !== undefined) return { log, value, ...window }
-    }
-  }
-  const stale = rows[readable.length]
-  if (stale)
-    throw new StaleFixtureError(
-      `no ${q.topic} log of ${q.address} younger than ${V2_RETENTION_S / 3_600}h is accepted, and ` +
-        `the next one (${new Date(stale.createdAt * 1e3).toISOString()}, ` +
-        `${Math.round((nowS - stale.createdAt) / 3_600)}h ago) is past what the public TON v2 endpoint serves`,
-    )
-  assert.fail(
-    `no ${q.topic} log accepted among the ${rows.length} newest log rows of ${q.address}` +
-      (q.opcode ? ` with body prefix ${q.opcode}` : ''),
-  )
 }
