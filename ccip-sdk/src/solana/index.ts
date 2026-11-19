@@ -37,6 +37,7 @@ import {
   type TokenPoolRemote,
   type TokenPoolRemotesOpts,
   type TokenPrice,
+  type TotalFeesEstimate,
   Chain,
 } from '../chain.ts'
 import {
@@ -74,6 +75,7 @@ import {
   EVMExtraArgsV2Tag,
   GenericExtraArgsV3Tag,
   SuiExtraArgsV1Tag,
+  encodeFinality,
 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
@@ -154,11 +156,13 @@ import {
   getTokenAdminRegistryConfig,
 } from './token-admin-registry.ts'
 import {
+  decodeCctpVerifierFastFinalityBps,
   decodeTokenPoolChainConfig,
   decodeTokenPoolChainConfigOverride,
   decodeTokenPoolChainConfigV2,
   decodeTokenPoolFinality,
   decodeTokenPoolStateConfig,
+  deriveCctpVerifierConfigPda,
   deriveTokenPoolChainConfigOverridePda,
   deriveTokenPoolChainConfigV2Pda,
 } from './token-pool.ts'
@@ -1507,6 +1511,68 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       })
     }
     return getFee(this, router, destChainSelector, lane.message)
+  }
+
+  /**
+   * {@inheritDoc Chain.getTotalFeesEstimate}
+   */
+  override async getTotalFeesEstimate(
+    opts: Parameters<Chain['getTotalFeesEstimate']>[0] & SolanaSendMessageOpts,
+  ): Promise<TotalFeesEstimate> {
+    const ccipFee = await this.getFee(opts)
+    const tokenAmounts = opts.message.tokenAmounts
+    if (!tokenAmounts?.length) return { ccipFee }
+    const { token, amount } = tokenAmounts[0]!
+
+    const { router, destChainSelector } = opts
+    // the lane `getFee` quoted: the observation it read is reused, so both see the lane alike
+    const lane = await selectSendLane(this, {
+      router: new PublicKey(router),
+      destChainSelector,
+      message: buildMessageForDest(opts.message, networkInfo(destChainSelector).family),
+      sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
+      observe: () => this._observeDestChainV2(router, destChainSelector),
+    })
+    if (lane.version !== CCIPVersion.V2_0) return { ccipFee }
+
+    const { tokenPool, interfaceVersion } = await this.getRegistryTokenConfig(router, token)
+    if (!tokenPool || interfaceVersion < 2) return { ccipFee }
+
+    const { finality, tokenArgs } = lane.message.extraArgs
+    const { tokenPoolProgram, typeAndVersion, tokenTransferFeeConfig } =
+      await this.getTokenPoolConfig(tokenPool, {
+        token,
+        destChainSelector,
+        finality,
+        tokenArgs: hexlify(tokenArgs),
+      })
+    // 'finalized' encodes to 0 like a 0 depth: only a depth or 'safe' takes the fast-finality fee
+    const fast = encodeFinality(finality) !== 0
+
+    let bps
+    if (typeAndVersion && /cctp/i.test(typeAndVersion)) {
+      // Solana's CCTP pool and verifier only allow full finality, since Solana finalizes fast
+      // already, so `getFee` rejects a fast request before we get here. The branch below only
+      // keeps the quote right if a deployment ever enables it: it reads the verifier's onchain
+      // cap rather than Circle's live rate, and, like EVM when it can't find a CCTP verifier,
+      // falls back to no token fee if the verifier config is missing or unreadable.
+      if (!fast) return { ccipFee }
+      const config = await this.connection.getAccountInfo(
+        deriveCctpVerifierConfigPda(new PublicKey(tokenPoolProgram)),
+      )
+      bps = config && decodeCctpVerifierFastFinalityBps(config.data)
+      if (!bps) return { ccipFee }
+    } else {
+      if (!tokenTransferFeeConfig?.isEnabled) return { ccipFee }
+      bps = fast
+        ? tokenTransferFeeConfig.fastFinalityTransferFeeBps
+        : tokenTransferFeeConfig.finalityTransferFeeBps
+    }
+
+    return {
+      ccipFee,
+      tokenTransferFee: { feeDeducted: (BigInt(amount) * BigInt(bps)) / 10_000n, bps },
+    }
   }
 
   /**
