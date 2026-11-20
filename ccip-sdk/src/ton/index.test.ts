@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 
-import { Address, Cell, Dictionary, beginCell, toNano } from '@ton/core'
+import {
+  Address,
+  Cell,
+  Dictionary,
+  ExternalAddress,
+  beginCell,
+  storeMessage,
+  toNano,
+} from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
 import { CCIPLogsStreamInconsistentError } from '../errors/index.ts'
@@ -1222,6 +1230,28 @@ describe('TON index unit tests', () => {
       // lt-ascending (created_at = 100 + lt, matching every tx builder); explicit
       // `rows` are served verbatim, in the given order.
       const bodyOf = (msg: { body: Cell }) => ({ body: msg.body.toBoc().toString('base64') })
+      // The index's message hash: the hash of the full log message cell, whose 256-bit
+      // external destination holds the topic (as chainlink-ton emits it).
+      const msgHashOf = (
+        msg: { info: { src: Address; dest: { value: bigint }; createdLt: bigint }; body: Cell },
+        createdAt: number | string,
+      ) =>
+        beginCell()
+          .store(
+            storeMessage({
+              info: {
+                type: 'external-out',
+                src: msg.info.src,
+                dest: new ExternalAddress(msg.info.dest.value, 256),
+                createdLt: msg.info.createdLt,
+                createdAt: Number(createdAt),
+              },
+              body: msg.body,
+            }),
+          )
+          .endCell()
+          .hash()
+          .toString('base64')
       const v3Rows: {
         hash: string
         source: string | null
@@ -1232,7 +1262,16 @@ describe('TON index unit tests', () => {
         message_content?: { body: string }
       }[] =
         v3?.rows?.map((r) => ({
-          hash: `${hashB64(r.txLt)}#${r.createdLt}`,
+          hash: msgHashOf(
+            {
+              ...[...byLt.get(BigInt(r.txLt))!.outMessages.values()][0]!,
+              info: {
+                ...[...byLt.get(BigInt(r.txLt))!.outMessages.values()][0]!.info,
+                createdLt: BigInt(r.createdLt),
+              },
+            },
+            r.createdAt,
+          ),
           source: OFFRAMP,
           destination: null,
           created_lt: r.createdLt,
@@ -1243,7 +1282,7 @@ describe('TON index unit tests', () => {
         asc.flatMap((lt) => {
           const t = byLt.get(BigInt(lt))!
           return [...t.outMessages.values()].map((msg) => ({
-            hash: `${hashB64(lt)}#${String(msg.info.createdLt)}`,
+            hash: msgHashOf(msg, t.now),
             source: OFFRAMP,
             destination: null,
             created_lt: String(msg.info.createdLt),
@@ -1318,9 +1357,11 @@ describe('TON index unit tests', () => {
                 mc_block_seqno: blockOf(BigInt(lt)),
                 prev_trans_lt: String(prevLt.get(BigInt(lt))),
                 out_msgs: [...byLt.get(BigInt(lt))!.outMessages.values()].map((msg) => ({
+                  hash: msgHashOf(msg, 100 + lt),
                   source: OFFRAMP.toUpperCase(),
                   destination: null,
                   created_lt: String(msg.info.createdLt),
+                  created_at: String(100 + lt),
                   message_content: bodyOf(msg),
                 })),
               }))
@@ -2153,10 +2194,21 @@ describe('TON index unit tests', () => {
           ]),
         })
 
-        it('getTransaction rebuilds an old ramp transaction from the index', async () => {
+        /** The harness's error for a v2 read its liteserver no longer keeps. */
+        const retentionError = () =>
+          Object.assign(new Error('Request failed with status code 500'), {
+            response: { status: 500, data: { error: 'LITE_SERVER_UNKNOWN: lt not in db' } },
+          })
+        const timeoutError = () =>
+          Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' })
+        const indexTxReads = (chain: Harness) =>
+          chain.calls.v3Urls.filter((u) => u.includes('/transactions'))
+
+        it('getTransaction rebuilds a transaction v2 no longer keeps from the index', async () => {
+          // No version gate: the index proves each log's topic from its message hash.
           const chain = withVersion(
             makeChain(20, [10_001, 11_001], [], { v3: { retention: 10_500 } }),
-            '1.6.2',
+            '9.9.9',
           )
           const old = await chain.getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`)
           assert.equal(old.hash, `${OFFRAMP}:10001:${hexOf(10_001)}`)
@@ -2165,31 +2217,81 @@ describe('TON index unit tests', () => {
           assert.deepEqual(
             old.logs.map((l) => [l.topics[0], l.index, l.transactionHash]),
             [[topicCrc, 10_001, old.hash]],
-            'its log, named by layout',
+            'its log, with the topic its message hash proves',
           )
           assert.equal(TONChain.decodeReceipt(old.logs[0]!)?.messageId, MESSAGE_ID)
           assert.deepEqual(chain.calls.v2Single, [10_001], 'v2 was asked first')
 
           const recent = await chain.getTransaction(`${OFFRAMP}:11001:${hexOf(11_001)}`)
           assert.equal(recent.blockNumber, 11)
-          const indexReads = chain.calls.v3Urls.filter((u) => u.includes('/transactions'))
           assert.equal(
-            indexReads.length,
+            indexTxReads(chain).length,
             1,
             'a transaction v2 still keeps is not read from the index',
           )
         })
 
-        it('getTransaction keeps the v2 error for an unverified contract version', async () => {
-          const chain = withVersion(
-            makeChain(20, [10_001], [], { v3: { retention: 10_500 } }),
-            '1.8.0',
-          )
+        it('getTransaction by raw hash reuses the lookup row for the fallback', async () => {
+          const chain = makeChain(20, [10_001], [], { v3: { retention: 10_500 } })
+          const old = await chain.getTransaction(hexOf(10_001))
+          assert.equal(old.hash, `${OFFRAMP}:10001:${hexOf(10_001)}`)
+          assert.deepEqual(old.logs[0]?.topics, [topicCrc])
+          assert.equal(indexTxReads(chain).length, 1, 'only the raw-hash lookup read the index')
+        })
+
+        it('getTransaction keeps the v2 error when the index lacks the transaction', async () => {
+          const chain = makeChain(20, [10_001], [], {
+            v3: { retention: 10_500, unindexed: [10_001] },
+          })
           await assert.rejects(
             chain.getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`),
             /status code 500/,
           )
-          assert.equal(chain.calls.v3Urls.length, 0, 'no index read')
+        })
+
+        it('getTransaction takes a v2 timeout to the index only for an old transaction', async (t) => {
+          const timingOut = () => {
+            const chain = makeChain(20, [10_001], [], { v3: {} })
+            ;(chain as unknown as { provider: TonClient }).provider.getTransaction = async () => {
+              throw timeoutError()
+            }
+            return chain
+          }
+          // The harness's tx is from unix time 10_101: old by default.
+          const old = await timingOut().getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`)
+          assert.deepEqual(old.logs[0]?.topics, [topicCrc], 'an old tx: the index answers')
+
+          t.mock.method(Date, 'now', () => (100 + 10_001 + 60) * 1e3) // the tx is 1 min old
+          await assert.rejects(
+            timingOut().getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`),
+            /timeout of 30000ms exceeded/,
+            'a recent tx: a slow v2 answer, not a retention limit',
+          )
+        })
+
+        it('getTransaction keeps the v2 transaction and takes only the block from the index', async () => {
+          const chain = makeChain(20, [10_001], [], { v3: {} })
+          ;(chain as unknown as { committingSeqno: () => Promise<number> }).committingSeqno =
+            async () => {
+              throw retentionError()
+            }
+          const res = await chain.getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`)
+          assert.equal(res.blockNumber, 10, 'the block the index stamps')
+          assert.deepEqual(chain.calls.v2Single, [10_001], 'the transaction came from v2')
+          assert.deepEqual(res.logs[0]?.topics, [topicCrc], 'v2 logs keep their topic')
+          assert.equal(indexTxReads(chain).length, 1)
+        })
+
+        it('getTransaction keeps other v2 errors, with no index read', async () => {
+          const chain = makeChain(20, [10_001], [], { v3: {} })
+          ;(chain as unknown as { provider: TonClient }).provider.getTransaction = async () => {
+            throw new Error('Request failed with status code 429')
+          }
+          await assert.rejects(
+            chain.getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`),
+            /status code 429/,
+          )
+          assert.equal(chain.calls.v3Urls.length, 0)
         })
 
         it('getExecutionReceipts reads the executions from the index after the v2 scan fails', async () => {

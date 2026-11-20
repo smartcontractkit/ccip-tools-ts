@@ -1,4 +1,4 @@
-import { Address, Cell } from '@ton/core'
+import { type Message, Address, Cell, ExternalAddress, beginCell, storeMessage } from '@ton/core'
 
 import { CCIPError, CCIPHttpError } from '../errors/index.ts'
 import type { ChainLog, ChainTransaction } from '../types.ts'
@@ -14,19 +14,16 @@ import { crc32 } from './utils.ts'
  * ton-testnet endpoint: about two days), and an older read fails with
  * `LITE_SERVER_UNKNOWN ... lt not in db`. The TonCenter v3 index keeps every
  * transaction with its messages, but it drops an external-out message's destination
- * — which is where a TON log keeps its topic. This module rebuilds such a transaction
- * from the index and names its logs by their exact body layout instead.
+ * — which is where a TON log keeps its topic (chainlink-ton `emit()`: an
+ * `ExtOutLogBucket`, the topic as a 256-bit external address).
  *
- * That is only sound where the layouts are known: the CCIP ramps whose versions are
- * listed by the caller (see TONChain). Every body is parsed in full (all bits and
- * refs consumed), and the layouts below never match one another, so a body maps to
- * one event or to none. Logs that match no layout are left out of the rebuilt
- * transaction: it holds the ramp's CCIP events, not every external-out message.
- * Callers only fall back here after v2 failed with {@link isRetentionError}.
+ * The index keeps each message's hash, though: the hash of the whole message cell,
+ * destination included. This module rebuilds the cell for each known topic and keeps
+ * the one whose hash matches ({@link verifiedLogTopic}). A topic found so is proven,
+ * not inferred from the body. A log whose topic is not in {@link KNOWN_LOG_TOPICS} is
+ * kept with no topic. Callers fall back here only when v2 cannot serve the read (see
+ * `v2CannotServe` in utils.ts).
  */
-
-/** The CCIP ramp kinds whose event layouts {@link topicOfEventBody} knows. */
-export type TonRampKind = 'OnRamp' | 'OffRamp'
 
 /** Waits between index reads the index throttled: the fallback has no other source. */
 const INDEX_RETRY_DELAYS_MS = [1_500, 3_000, 6_000]
@@ -48,53 +45,113 @@ export async function withIndexRetries<T>(read: () => Promise<T>): Promise<T> {
   }
 }
 
-const TOPIC_CCIP_MESSAGE_SENT = crc32('CCIPMessageSent')
 export const TOPIC_EXECUTION_STATE_CHANGED = crc32('ExecutionStateChanged')
 export const TOPIC_COMMIT_REPORT_ACCEPTED = crc32('CommitReportAccepted')
-const TOPIC_OCR3_TRANSMITTED = crc32('OCR3Base_Transmitted')
 
 /**
- * The topic of a ramp's log body, by its exact layout (chainlink-ton
- * `onramp/events.tolk`, `offramp/events.tolk`, `lib/ocr/multi_ocr3_base.tolk`):
- * - OnRamp `CCIPMessageSent { RampMessageHeader (512 bits), sender: address,
- *   body: ^Cell, feeValueJuels: uint96 }` — 875 bits and 1 ref;
- * - OffRamp `ExecutionStateChanged { uint64, uint64, uint256, state: uint8 }` —
- *   392 bits, a state of 1 to 3;
- * - OffRamp `OCR3Base_Transmitted { ocrPluginType: uint16, uint256, uint64 }` —
- *   336 bits, plugin type 0 (commit) or 1 (execute);
- * - OffRamp `CommitReportAccepted { MerkleRoot?, ^PriceUpdates? }` — variable;
- *   parsed in full.
- * @returns the topic, or undefined when the body matches no layout.
+ * The topics of the events chainlink-ton contracts emit (`"Name".crc32()`), the
+ * frequent CCIP ones first: {@link verifiedLogTopic} tries them in this order.
  */
-export function topicOfEventBody(kind: TonRampKind, body: Cell): string | undefined {
-  try {
-    const slice = body.beginParse()
-    if (kind === 'OnRamp') {
-      if (body.bits.length !== 875 || body.refs.length !== 1) return
-      slice.skip(512)
-      slice.loadAddress() // the sender: throws unless an internal address
-      return TOPIC_CCIP_MESSAGE_SENT
+export const KNOWN_LOG_TOPICS: readonly string[] = [
+  'OCR3Base_Transmitted',
+  'CommitReportAccepted',
+  'ExecutionStateChanged',
+  'CCIPMessageSent',
+  'UsdPerTokenUpdated',
+  'UsdPerUnitGasUpdated',
+  'TokenPool_LockedOrBurned',
+  'TokenPool_ReleasedOrMinted',
+  'TokenPool_InboundRateLimitConsumed',
+  'TokenPool_OutboundRateLimitConsumed',
+  'TokenPool_FastFinalityInboundRateLimitConsumed',
+  'TokenPool_FastFinalityOutboundRateLimitConsumed',
+  'TokenPool_InboundRateLimitRefunded',
+  'TokenPool_OutboundRateLimitRefunded',
+  'TokenPool_FastFinalityInboundRateLimitRefunded',
+  'TokenPool_FastFinalityOutboundRateLimitRefunded',
+  'JettonLockBox_Deposit',
+  'JettonLockBox_Withdrawal',
+  'MessageToOffRampBounced',
+  'ReceiveExecutorInitExecuteBounced',
+  'RouteMessageBounced',
+  'DeployableInitializeBounced',
+  'OCR3Base_ConfigSet',
+  'ConfigSet',
+  'DynamicConfigSet',
+  'SourceChainConfigUpdated',
+  'SourceChainSelectorAdded',
+  'DestChainConfigUpdated',
+  'DestChainSelectorAdded',
+  'OffRampAdded',
+  'OffRampRemoved',
+  'OnRampSet',
+  'Cursed',
+  'Uncursed',
+  'TokenPool_ChainAdded',
+  'TokenPool_ChainRemoved',
+  'TokenPool_DynamicConfigSet',
+  'TokenPool_FinalityConfigSet',
+  'TokenPool_RampAccessUpdated',
+  'TokenPool_RateLimitConfigured',
+  'TokenPool_RemotePoolAdded',
+  'TokenPool_RemotePoolRemoved',
+  'TokenPool_TokenTransferFeeConfigDeleted',
+  'TokenPool_TokenTransferFeeConfigUpdated',
+  'MCMS_BounceHandled',
+  'Timelock_BounceHandled',
+  'Timelock_BypasserCallExecuted',
+  'Timelock_CallExecuted',
+  'Timelock_CallScheduled',
+].map(crc32)
+
+/** The fields of an index message row (`/messages`, or a `/transactions` row's
+ * `out_msgs`) that {@link verifiedLogTopic} reads. */
+export type TonV3LogMessage = {
+  hash: string
+  source: string | null
+  created_lt: string
+  created_at: string | number
+  message_content?: { body?: string | null } | null
+}
+
+/**
+ * The topic of a log message from the index, proven by its hash: the external-out
+ * message cell rebuilt with that topic (a 256-bit external destination, as
+ * chainlink-ton emits it) hashes to the row's `hash`. The body may be stored inline or
+ * as a ref, so both forms are tried.
+ *
+ * @param candidates - The topics to try, in order (default: {@link KNOWN_LOG_TOPICS});
+ *   a caller that expects one topic passes only that one.
+ * @returns the topic, or undefined when no candidate matches (or the row has no body).
+ */
+export function verifiedLogTopic(
+  msg: TonV3LogMessage,
+  candidates: readonly string[] = KNOWN_LOG_TOPICS,
+): string | undefined {
+  if (!msg.source || !msg.message_content?.body) return
+  const body = Cell.fromBase64(msg.message_content.body)
+  const src = Address.parse(msg.source)
+  const createdLt = BigInt(msg.created_lt)
+  const createdAt = Number(msg.created_at)
+  const want = Buffer.from(msg.hash, 'base64')
+  for (const topic of candidates) {
+    const message: Message = {
+      info: {
+        type: 'external-out',
+        src,
+        dest: new ExternalAddress(BigInt(topic), 256),
+        createdLt,
+        createdAt,
+      },
+      body,
     }
-    if (body.refs.length === 0 && body.bits.length === 392) {
-      slice.skip(384)
-      const state = slice.loadUint(8)
-      return state >= 1 && state <= 3 ? TOPIC_EXECUTION_STATE_CHANGED : undefined
-    }
-    if (body.refs.length === 0 && body.bits.length === 336)
-      return slice.loadUint(16) <= 1 ? TOPIC_OCR3_TRANSMITTED : undefined
-    // CommitReportAccepted: `MerkleRoot?` inline, then `Cell<PriceUpdates>?`.
-    if (slice.loadBit()) {
-      slice.skip(64) // sourceChainSelector
-      const onRampLength = slice.loadUint(8)
-      if (onRampLength === 0 || onRampLength > 32) return
-      slice.skip(8 * onRampLength + 64 + 64 + 256) // onRamp, minSeqNr, maxSeqNr, merkleRoot
-    }
-    if (slice.loadBit()) slice.loadRef()
-    return slice.remainingBits === 0 && slice.remainingRefs === 0
-      ? TOPIC_COMMIT_REPORT_ACCEPTED
-      : undefined
-  } catch {
-    return // shorter than the layout
+    const inline = beginCell().store(storeMessage(message)).endCell()
+    if (inline.hash().equals(want)) return topic
+    // storeMessage puts a body that fits inline; the contract may still use a ref.
+    const asRef = beginCell()
+      .store(storeMessage(message, { forceRef: true }))
+      .endCell()
+    if (!asRef.equals(inline) && asRef.hash().equals(want)) return topic
   }
 }
 
@@ -166,36 +223,27 @@ export async function* indexRowsByPrefix(
 }
 
 /** Subset of a TonCenter v3 `/transactions` entry this module reads. */
-type TonV3TransactionWithMessages = {
+export type TonV3TransactionWithMessages = {
   account: string
   hash: string
   lt: string
   now: number
   mc_block_seqno: number
   prev_trans_lt: string
-  out_msgs?: {
-    source: string | null
-    destination: string | null
-    created_lt: string
-    message_content?: { body?: string | null } | null
-  }[]
+  out_msgs?: (TonV3LogMessage & { destination: string | null })[]
 }
 
 /**
- * A ramp transaction rebuilt from the index (see the module comment): the same
- * {@link ChainTransaction} shape TONChain builds from a v2 read — composite hash,
- * the index's masterchain block, the logs as base64 BOCs indexed by their message lt
- * — holding only the logs whose topic {@link topicOfEventBody} names.
+ * The index's row of the account's transaction `txHash`, with its out-messages.
  *
  * @param txHash - The transaction hash, as hex.
- * @returns the transaction, or undefined when the index does not have it.
+ * @returns the row, or undefined when the index does not have it.
  */
-export async function fetchIndexedTransaction(
+export async function fetchIndexedTransactionRow(
   ctx: Pick<TonV3Context, 'rateLimitedFetch'> & { v3BaseUrl: string },
   account: Address,
   txHash: string,
-  kind: TonRampKind,
-): Promise<ChainTransaction | undefined> {
+): Promise<TonV3TransactionWithMessages | undefined> {
   const url = v3Url(ctx.v3BaseUrl, '/transactions')
   url.searchParams.set('account', account.toRawString())
   url.searchParams.set('hash', txHash)
@@ -206,11 +254,20 @@ export async function fetchIndexedTransaction(
       throw new CCIPHttpError(res.status, `TON v3 transactions query failed: ${await res.text()}`)
     return (await res.json()) as { transactions?: TonV3TransactionWithMessages[] }
   })
-  const tx = transactions?.[0]
-  if (!tx) return
+  return transactions?.[0]
+}
+
+/**
+ * A transaction rebuilt from its index row (see the module comment): the same
+ * {@link ChainTransaction} shape TONChain builds from a v2 read — composite hash, the
+ * index's masterchain block, every log of the account as a base64 BOC indexed by its
+ * message lt. A log's topic is set when {@link verifiedLogTopic} proves it; a log with
+ * an unknown topic has none.
+ */
+export function indexedTransactionFromRow(tx: TonV3TransactionWithMessages): ChainTransaction {
   const from = Address.parse(tx.account).toRawString()
   const hash = `${from}:${tx.lt}:${Buffer.from(tx.hash, 'base64').toString('hex')}`
-  const res_: ChainTransaction & { lt: string; prevTransactionLt: string } = {
+  const res: ChainTransaction & { lt: string; prevTransactionLt: string } = {
     hash,
     logs: [],
     blockNumber: tx.mc_block_seqno,
@@ -222,22 +279,37 @@ export async function fetchIndexedTransaction(
   const logs: ChainLog[] = []
   for (const msg of tx.out_msgs ?? []) {
     // External-out ("log") messages of this account: the index keeps no destination.
-    if (msg.destination != null || !msg.source || !msg.message_content?.body) continue
+    if (msg.destination != null || !msg.source) continue
     if (Address.parse(msg.source).toRawString() !== from) continue
-    const body = Cell.fromBase64(msg.message_content.body)
-    const topic = topicOfEventBody(kind, body)
-    if (!topic) continue
+    const body = msg.message_content?.body
+    const topic = verifiedLogTopic(msg)
     logs.push({
       address: from,
-      topics: [topic],
-      data: body.toBoc().toString('base64'),
-      blockNumber: res_.blockNumber,
+      topics: topic ? [topic] : [],
+      data: body ? Cell.fromBase64(body).toBoc().toString('base64') : '',
+      blockNumber: res.blockNumber,
       blockTimestamp: tx.now,
       transactionHash: hash,
       index: Number(msg.created_lt),
-      tx: res_,
+      tx: res,
     })
   }
-  res_.logs = logs.sort((a, b) => a.index - b.index)
-  return res_
+  res.logs = logs.sort((a, b) => a.index - b.index)
+  return res
+}
+
+/**
+ * The account's transaction `txHash`, rebuilt from the index
+ * ({@link indexedTransactionFromRow}).
+ *
+ * @param txHash - The transaction hash, as hex.
+ * @returns the transaction, or undefined when the index does not have it.
+ */
+export async function fetchIndexedTransaction(
+  ctx: Pick<TonV3Context, 'rateLimitedFetch'> & { v3BaseUrl: string },
+  account: Address,
+  txHash: string,
+): Promise<ChainTransaction | undefined> {
+  const row = await fetchIndexedTransactionRow(ctx, account, txHash)
+  return row && indexedTransactionFromRow(row)
 }

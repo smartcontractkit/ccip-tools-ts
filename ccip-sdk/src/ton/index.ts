@@ -70,13 +70,15 @@ import {
 } from './extra-args.ts'
 import { getTONLeafHasher } from './hasher.ts'
 import {
-  type TonRampKind,
+  type TonV3TransactionWithMessages,
   TOPIC_COMMIT_REPORT_ACCEPTED,
   TOPIC_EXECUTION_STATE_CHANGED,
   fetchIndexedTransaction,
+  fetchIndexedTransactionRow,
   indexRowsByPrefix,
+  indexedTransactionFromRow,
   offRampBodyPrefix,
-  topicOfEventBody,
+  verifiedLogTopic,
 } from './indexed-tx.ts'
 import {
   type TonV3Event,
@@ -92,11 +94,14 @@ import { generateUnsignedCcipSend, getFee as getFeeImpl } from './send.ts'
 import { boundTonClientCaches } from './ton-cache.ts'
 import { type UnsignedTONTx, isTONWallet } from './types.ts'
 import {
+  type RawHashLookup,
   crc32,
   isRetentionError,
+  isTimeoutError,
   lookupTxByRawHash,
   parseJettonContent,
   tonRateLimitProfile,
+  v2CannotServe,
 } from './utils.ts'
 export type { TONWallet, UnsignedTONTx } from './types.ts'
 
@@ -109,27 +114,23 @@ export type { TONWallet, UnsignedTONTx } from './types.ts'
 const TON_V3_OPCODE = Symbol('ccip.ton.v3Opcode')
 
 /**
- * Whether a v2-first lookup failed because v2 no longer keeps the data: directly, or
- * as an index scan truncated by such a v2 read. Only this case takes the index
- * fallback; any other failure (an index self-contradiction, throttling, a bad
- * request) stays the caller's error.
- */
-const v2CannotServe = (err: unknown): boolean =>
-  isRetentionError(err) ||
-  (err instanceof CCIPLogsStreamInconsistentError && isRetentionError(err.cause))
-
-/**
- * OffRamp versions whose `ExecutionStateChanged` layout (it starts with the uint64
- * `sourceChainSelector`), log layouts (see indexed-tx.ts) and MerkleRoot message flow
- * are verified: 1.6.0-1.6.2 and 1.7.0 in source, 1.6.2 on live ton-testnet. The
- * execution-scan shortcuts and the index fallback depend on them, and a wrong
- * assumption would LOSE receipts silently, so any other version keeps the plain v2
- * paths until it is checked and added here.
+ * OffRamp versions whose `ExecutionStateChanged` and `CommitReportAccepted` layouts
+ * (an execution starts with the uint64 `sourceChainSelector`, a rooted commit with a
+ * presence bit and then it) and MerkleRoot message flow are verified: 1.6.0-1.6.2 and
+ * 1.7.0 in source, 1.6.2 on live ton-testnet. The execution-scan shortcuts and the
+ * index routes for receipts and commits depend on them, and a wrong assumption would
+ * LOSE receipts silently, so any other version keeps the plain v2 paths until it is
+ * checked and added here.
  */
 const EXEC_SHORTCUT_OFFRAMPS = /^OffRamp 1\.(6\.[0-2]|7\.0)$/
-/** OnRamp versions whose `CCIPMessageSent` layout is verified (1.6.0-1.6.1 in source,
- * 1.6.0 on live ton-testnet), for the index fallback. */
-const INDEXED_ONRAMPS = /^OnRamp 1\.6\.[01]$/
+
+/** Whether a raw-hash lookup returned the index's whole row, so the index fallback can
+ * use it without a second read. */
+const isFullIndexRow = (row: RawHashLookup | undefined): row is TonV3TransactionWithMessages =>
+  row?.out_msgs != null &&
+  row.now != null &&
+  row.mc_block_seqno != null &&
+  row.prev_trans_lt != null
 
 /**
  * Type guard to check if an error is a TVM error with an exit code.
@@ -759,6 +760,16 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * Note: TonClient requires (address, lt, hash) for lookups. Raw hash lookups
    * use TonCenter's V3 index API to resolve the hash to a full identifier first.
    *
+   * The transaction is read over the v2 endpoint. The TonCenter v3 index serves only
+   * the part that v2 cannot serve because the data is too old (the public testnet
+   * endpoint keeps about two days; see `v2CannotServe` in utils.ts):
+   * - v2 has the transaction, but no longer its masterchain block data: the
+   *   transaction comes from v2 in full, and only `blockNumber` from the index;
+   * - v2 no longer has the transaction: it is rebuilt from the index. It has the same
+   *   hash, block, timestamp and logs (all external-out messages, with their bodies).
+   *   A log's topic is proven from the index's message hash; a log whose topic is not
+   *   one that chainlink-ton contracts emit has no topic.
+   *
    * @param tx - Transaction identifier in either format
    * @returns ChainTransaction with transaction details
    *          `blockNumber` is the masterchain seqno; `logIndex` is the message's lt
@@ -766,61 +777,81 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
    * @throws {@link CCIPTransactionNotFoundError} if transaction not found
    */
   async getTransaction(tx: string | Transaction): Promise<ChainTransaction> {
-    let address
-    if (typeof tx === 'string') {
-      let parts = tx.split(':')
+    if (typeof tx !== 'string')
+      return this.buildChainTransaction(tx, new Address(0, Buffer.from(toBeArray(tx.address, 32))))
 
-      // If not composite format (4 parts), check if it's a raw 64-char hex hash
-      if (parts.length !== 4) {
-        const cleanHash = tx.startsWith('0x') || tx.startsWith('0X') ? tx.slice(2) : tx
+    let parts = tx.split(':')
+    /** The index row a raw-hash lookup read already: the fallback reuses it. */
+    let lookedUp: RawHashLookup | undefined
+    // If not composite format (4 parts), check if it's a raw 64-char hex hash
+    if (parts.length !== 4) {
+      const cleanHash = tx.startsWith('0x') || tx.startsWith('0X') ? tx.slice(2) : tx
 
-        if (!/^[a-fA-F0-9]{64}$/.test(cleanHash))
-          throw new CCIPArgumentInvalidError(
-            'hash',
-            `Invalid TON transaction hash format: "${tx}". Expected "workchain:address:lt:hash" or 64-char hex hash`,
-          )
-        // Same provenance as the getLogs index paths: the chain's resolved v3 index
-        // base (ctx.v3Url, else probed endpoint-inference with a public-index
-        // fallback) and the dedicated paced, fail-fast v3 fetch — not the v2
-        // endpoint's fetch profile.
-        const v3BaseUrl = await this.v3UrlFor()
-        const txInfo = await lookupTxByRawHash(
-          cleanHash,
-          this.network.networkType,
-          this.v3FetchFor(v3BaseUrl),
-          { logger: this.logger, baseUrl: v3BaseUrl },
+      if (!/^[a-fA-F0-9]{64}$/.test(cleanHash))
+        throw new CCIPArgumentInvalidError(
+          'hash',
+          `Invalid TON transaction hash format: "${tx}". Expected "workchain:address:lt:hash" or 64-char hex hash`,
         )
+      // Same provenance as the getLogs index paths: the chain's resolved v3 index
+      // base (ctx.v3Url, else probed endpoint-inference with a public-index
+      // fallback) and the dedicated paced, fail-fast v3 fetch — not the v2
+      // endpoint's fetch profile.
+      const v3BaseUrl = await this.v3UrlFor()
+      lookedUp = await lookupTxByRawHash(
+        `0x${cleanHash}`, // the prefix keeps an all-digit hash hex, not base64
+        this.network.networkType,
+        this.v3FetchFor(v3BaseUrl),
+        { logger: this.logger, baseUrl: v3BaseUrl },
+      )
 
-        tx = `${txInfo.account}:${txInfo.lt}:${cleanHash}`
-        this.logger.debug(`Resolved raw hash to composite: ${tx}`)
-        parts = tx.split(':')
-      }
-
-      // Parse composite format: workchain:address:lt:hash
-      address = Address.parseRaw(`${parts[0]}:${parts[1]}`)
-      const [, , lt, txHash] = parts as [string, string, string, string]
-
-      // Fetch transactions and find the one we're looking for
-      try {
-        const tx_ = await this.provider.getTransaction(
-          address,
-          lt,
-          Buffer.from(txHash, 'hex').toString('base64'),
-        )
-        if (!tx_) throw new CCIPTransactionNotFoundError(tx)
-        return await this.buildChainTransaction(tx_, address)
-      } catch (err) {
-        // v2 first; a transaction older than its liteservers keep is rebuilt from the index.
-        if (!isRetentionError(err)) throw err
-        const indexed = await this.indexedTransaction(address, txHash)
-        if (indexed) return indexed
-        throw err
-      }
-    } else {
-      address = new Address(0, Buffer.from(toBeArray(tx.address, 32)))
+      tx = `${lookedUp.account}:${lookedUp.lt}:${cleanHash}`
+      this.logger.debug(`Resolved raw hash to composite: ${tx}`)
+      parts = tx.split(':')
     }
 
-    return this.buildChainTransaction(tx, address)
+    // Parse composite format: workchain:address:lt:hash
+    const address = Address.parseRaw(`${parts[0]}:${parts[1]}`)
+    const [, , lt, txHash] = parts as [string, string, string, string]
+
+    /** The transaction's index row, read only after v2 failed (at most once). An index
+     * failure here keeps the v2 error: it is the caller's answer. */
+    const indexRow = async (): Promise<TonV3TransactionWithMessages | undefined> => {
+      if (isFullIndexRow(lookedUp)) return lookedUp
+      try {
+        return await fetchIndexedTransactionRow(await this.indexContext(), address, txHash)
+      } catch (err) {
+        this.logger.debug('TON: index fallback unavailable:', err)
+      }
+    }
+
+    let raw: Transaction | null
+    try {
+      raw = await this.provider.getTransaction(
+        address,
+        lt,
+        Buffer.from(txHash, 'hex').toString('base64'),
+      )
+    } catch (err) {
+      // The transaction's age is known only from the index: read its row first for a
+      // timeout, then let v2CannotServe decide.
+      if (!isRetentionError(err) && !isTimeoutError(err)) throw err
+      const row = await indexRow()
+      if (!row || !v2CannotServe(err, row.now)) throw err
+      this.logger.debug('TON getTransaction: v2 cannot serve the transaction, reading the index')
+      return indexedTransactionFromRow(row)
+    }
+    if (!raw) throw new CCIPTransactionNotFoundError(tx)
+    try {
+      return await this.buildChainTransaction(raw, address)
+    } catch (err) {
+      // v2 has the transaction, but not its old masterchain block data (the committing
+      // seqno lookup): keep v2's transaction and take only the block from the index.
+      if (!v2CannotServe(err, raw.now)) throw err
+      const row = await indexRow()
+      if (!row) throw err
+      this.logger.debug('TON getTransaction: v2 cannot serve the block, reading it from the index')
+      return this.buildChainTransaction(raw, address, row.mc_block_seqno)
+    }
   }
 
   /**
@@ -2224,35 +2255,10 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   }
 
   /**
-   * A CCIP ramp transaction the v2 endpoint no longer serves, rebuilt from the index
-   * (see indexed-tx.ts): only for ramp versions whose log layouts are verified.
-   * @param txHash - The transaction hash, as hex.
-   * @returns the transaction, or undefined when this fallback cannot answer.
-   */
-  private async indexedTransaction(
-    address: Address,
-    txHash: string,
-  ): Promise<ChainTransaction | undefined> {
-    try {
-      const [, , typeAndVersion] = await this.typeAndVersion(address.toRawString())
-      const kind: TonRampKind | undefined = EXEC_SHORTCUT_OFFRAMPS.test(typeAndVersion)
-        ? 'OffRamp'
-        : INDEXED_ONRAMPS.test(typeAndVersion)
-          ? 'OnRamp'
-          : undefined
-      if (!kind) return
-      return await fetchIndexedTransaction(await this.indexContext(), address, txHash, kind)
-    } catch (err) {
-      this.logger.debug('TON: index fallback unavailable:', err)
-      return undefined
-    }
-  }
-
-  /**
    * The executions of `sourceChainSelector` messages on `offRamp` from `startUtime`
    * on, read from the index (see indexed-tx.ts), in chain order: the fallback when v2
    * no longer serves the window. Rows are selected by body prefix (as the scan's
-   * narrowing does), checked by their exact layout and filters before their
+   * narrowing does), checked by their proven topic and filters before their
    * transaction is fetched, and the scan stops at the first Success.
    */
   private async *executionsFromIndex(
@@ -2271,8 +2277,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     for await (const row of indexRowsByPrefix(ctx, acct, opcode, startUtime)) {
       const body = row.message_content?.body
       if (!body || !row.out_msg_tx_hash || txs.has(row.out_msg_tx_hash)) continue
+      if (!verifiedLogTopic(row, [TOPIC_EXECUTION_STATE_CHANGED])) continue
       const cell = Cell.fromBase64(body)
-      if (topicOfEventBody('OffRamp', cell) !== TOPIC_EXECUTION_STATE_CHANGED) continue
       const receipt = TONChain.decodeReceipt({
         data: cell.toBoc().toString('base64'),
         topics: [TOPIC_EXECUTION_STATE_CHANGED],
@@ -2300,8 +2306,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
   /**
    * The commit of `request`'s message on `offRamp`, read from the index (see
    * indexed-tx.ts): the fallback when v2 no longer serves the window. Only rooted
-   * commits of the lane's source are read (body prefix), each checked by its exact
-   * layout and decoded against the lane before its transaction is fetched.
+   * commits of the lane's source are read (body prefix), each checked by its proven
+   * topic and decoded against the lane before its transaction is fetched.
    */
   private async commitFromIndex(
     offRamp: string,
@@ -2314,8 +2320,8 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     for await (const row of indexRowsByPrefix(ctx, acct, opcode, log.blockTimestamp)) {
       const body = row.message_content?.body
       if (!body || !row.out_msg_tx_hash) continue
+      if (!verifiedLogTopic(row, [TOPIC_COMMIT_REPORT_ACCEPTED])) continue
       const cell = Cell.fromBase64(body)
-      if (topicOfEventBody('OffRamp', cell) !== TOPIC_COMMIT_REPORT_ACCEPTED) continue
       const report = TONChain.decodeCommits(
         { data: cell.toBoc().toString('base64'), topics: [TOPIC_COMMIT_REPORT_ACCEPTED] },
         lane,
@@ -2344,7 +2350,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     row: { out_msg_tx_hash?: string | null },
   ): Promise<ChainTransaction> {
     const hash = Buffer.from(row.out_msg_tx_hash!, 'base64').toString('hex')
-    const tx = await fetchIndexedTransaction(ctx, acct, hash, 'OffRamp')
+    const tx = await fetchIndexedTransaction(ctx, acct, hash)
     if (!tx)
       throw new CCIPLogsStreamInconsistentError(
         `TON index: a matching log row's tx ${hash} is missing from the index`,
@@ -2381,7 +2387,11 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
     try {
       return await super.getVerifications(opts)
     } catch (err) {
-      if (opts.watch || !v2CannotServe(err) || !(await this.offRampLayoutVerified(opts.offRamp)))
+      if (
+        opts.watch ||
+        !v2CannotServe(err, opts.request.log.blockTimestamp) ||
+        !(await this.offRampLayoutVerified(opts.offRamp))
+      )
         throw err
       this.logger.debug('TON getVerifications: v2 cannot serve the window, reading the index')
       const fromIndex = await this.commitFromIndex(opts.offRamp, opts.request, opts.startBlock)
@@ -2455,7 +2465,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
         !verified ||
         !sourceChainSelector ||
         startUtime == null ||
-        !v2CannotServe(err)
+        !v2CannotServe(err, startUtime)
       )
         throw err
       this.logger.debug('TON getExecutionReceipts: v2 cannot serve the window, reading the index')

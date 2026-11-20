@@ -1,16 +1,25 @@
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, it, mock } from 'node:test'
 
-import { Address, Cell, beginCell } from '@ton/core'
+import {
+  type Cell,
+  type Message,
+  Address,
+  ExternalAddress,
+  beginCell,
+  storeMessage,
+} from '@ton/core'
 
 import { CCIPHttpError } from '../errors/index.ts'
 import {
+  type TonV3LogMessage,
   TOPIC_COMMIT_REPORT_ACCEPTED,
   TOPIC_EXECUTION_STATE_CHANGED,
   fetchIndexedTransaction,
   indexRowsByPrefix,
+  indexedTransactionFromRow,
   offRampBodyPrefix,
-  topicOfEventBody,
+  verifiedLogTopic,
   withIndexRetries,
 } from './indexed-tx.ts'
 import { crc32 } from './utils.ts'
@@ -29,127 +38,105 @@ const executionBody = (state: number) =>
 const ocr3Body = (type: number) =>
   beginCell().storeUint(type, 16).storeUint(9, 256).storeUint(3, 64).endCell()
 
-const rootedCommit = (
-  opts: { onRampLength?: number; extraBit?: boolean; price?: boolean } = {},
+/** An index row of a log message `topic` (a 256-bit external destination, as
+ * chainlink-ton emits it), with the hash of the full message cell. */
+const logRow = (
+  topic: string,
+  body: Cell,
+  {
+    source = SENDER.toRawString().toUpperCase(),
+    createdLt = '110048859000029',
+    createdAt = '1794803510',
+    forceRef = false,
+  } = {},
 ) => {
-  const len = opts.onRampLength ?? 20
-  const b = beginCell()
-    .storeBit(1)
-    .storeUint(SELECTOR, 64)
-    .storeUint(len, 8)
-    .storeBuffer(Buffer.alloc(len, 0xab))
-    .storeUint(1, 64)
-    .storeUint(2, 64)
-    .storeUint(3, 256)
-    .storeBit(opts.price ? 1 : 0)
-  if (opts.extraBit) b.storeBit(1)
-  return b.endCell()
+  const message: Message = {
+    info: {
+      type: 'external-out',
+      src: Address.parse(source),
+      dest: new ExternalAddress(BigInt(topic), 256),
+      createdLt: BigInt(createdLt),
+      createdAt: Number(createdAt),
+    },
+    body,
+  }
+  return {
+    hash: beginCell()
+      .store(storeMessage(message, { forceRef }))
+      .endCell()
+      .hash()
+      .toString('base64'),
+    source,
+    destination: null,
+    created_lt: createdLt,
+    created_at: createdAt,
+    message_content: { body: body.toBoc().toString('base64') },
+  }
 }
 
-const onRampBody = (withRef = true, extraBit = false) => {
-  const b = beginCell()
-    .storeUint(1, 256)
-    .storeUint(2, 64)
-    .storeUint(3, 64)
-    .storeUint(4, 64)
-    .storeUint(5, 64)
-    .storeAddress(SENDER)
-  if (withRef) b.storeRef(beginCell().endCell())
-  b.storeUint(6, 96)
-  if (extraBit) b.storeBit(1)
-  return b.endCell()
+/** Index rows read from ton-testnet (2026-11-20), as the index serves them. */
+const LIVE_ROWS = {
+  onRampSent: {
+    source: '0:E2A22F4F237D96A35A01C24529D298F5021C2F00788A89909F82BAF4883AAEDE',
+    created_lt: '110910028000024',
+    created_at: '1795147448',
+    hash: 'ruCT6m0vtLmK/zpcyo6J1bDi7Y42V9nYIxc6QYsNbHI=',
+    body: 'te6cckECBgEAAUUAAdt5Xm1I1YyvGlTdvGPXdAS4Ir7y1nwfHhHxzioIO7r1LRNrUM2DxpLo3kG6T8nZGtkAAAAAAAApUwAAAAAAAAAAgANDmgInwbFXN9ygmJ3jyfiXyZMxTtYCJxGZC5wyAb2uAAAAAAAAAAAAvJXTMAEEg4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGbwNhcAIDBAUAQiAAAAAAAAAAAAAAAACM6Nm2Jpx2hw7ra1nOn7IPTYjFCgB8AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAACB0ndJKv2JDiMWfa/uG4SnVD95yUASRgdzxCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAehIGAAAKTGB90=',
+  },
+  /** A price-only commit: a 2-bit body with a ref, which the contract stores as a ref. */
+  priceOnlyCommit: {
+    source: '0:CFB90D27C9D457C903D616BFDDE30FADCDF40C5F0A2F91ED136883CB94205D80',
+    created_lt: '110979873000008',
+    created_at: '1795175345',
+    hash: 'omrszyLXt/TMxVNshEyaPmgL3ITZQs5n6EjjoQqISqw=',
+    body: 'te6cckEBBAEAeAABAWABAgACAwAAANgwRhG2r/unagAAAAAAAAAAAA+PW0FMAAAAAAAAAAAAAAAFsJLeQbpPydka2QAAAAAAAAAAABRWtLaEAAAAAAAAAAAAAAAAAADj7MfilOM33wAAAAAAAAAAAAAAARtfAAAAAAAAAAAAAAAAAACxlaWq',
+  },
+  ocr3: {
+    source: '0:CFB90D27C9D457C903D616BFDDE30FADCDF40C5F0A2F91ED136883CB94205D80',
+    created_lt: '110979873000007',
+    created_at: '1795175345',
+    hash: 'WNugkCDPohFZkNNPLI5R8FoBBvP9TfupsWx3f8mpSC0=',
+    body: 'te6cckEBAQEALAAAVAAAAArxG294OWyOwb6d6skjO2NWhvobi42T2OeM9jpFcJQAAAAAABSTJwFMZRk=',
+  },
 }
+const live = (row: (typeof LIVE_ROWS)[keyof typeof LIVE_ROWS]): TonV3LogMessage => ({
+  hash: row.hash,
+  source: row.source,
+  created_lt: row.created_lt,
+  created_at: row.created_at,
+  message_content: { body: row.body },
+})
 
-describe('topicOfEventBody', () => {
-  describe('OffRamp', () => {
-    for (const state of [1, 2, 3]) {
-      it(`names ExecutionStateChanged for state ${state}`, () => {
-        assert.equal(
-          topicOfEventBody('OffRamp', executionBody(state)),
-          TOPIC_EXECUTION_STATE_CHANGED,
-        )
-      })
-    }
-    for (const state of [0, 4]) {
-      it(`ignores an ExecutionStateChanged-sized body with state ${state}`, () => {
-        assert.equal(topicOfEventBody('OffRamp', executionBody(state)), undefined)
-      })
-    }
-
-    for (const type of [0, 1]) {
-      it(`names OCR3Base_Transmitted for plugin type ${type}`, () => {
-        const body = ocr3Body(type)
-        assert.equal(body.bits.length, 336)
-        assert.equal(topicOfEventBody('OffRamp', body), crc32('OCR3Base_Transmitted'))
-      })
-    }
-    it('ignores OCR3 plugin type 2', () => {
-      assert.equal(topicOfEventBody('OffRamp', ocr3Body(2)), undefined)
-    })
-
-    it('names a rooted CommitReportAccepted (20-byte and 32-byte onRamp)', () => {
-      const short = rootedCommit()
-      assert.equal(short.bits.length, 618)
-      assert.equal(topicOfEventBody('OffRamp', short), TOPIC_COMMIT_REPORT_ACCEPTED)
-      const long = rootedCommit({ onRampLength: 32 })
-      assert.equal(long.bits.length, 714)
-      assert.equal(topicOfEventBody('OffRamp', long), TOPIC_COMMIT_REPORT_ACCEPTED)
-    })
-
-    it('names a rooted CommitReportAccepted with a price update ref', () => {
-      const b = beginCell()
-      b.storeBit(1)
-        .storeUint(SELECTOR, 64)
-        .storeUint(20, 8)
-        .storeBuffer(Buffer.alloc(20, 0xab))
-        .storeUint(1, 64)
-        .storeUint(2, 64)
-        .storeUint(3, 256)
-        .storeBit(1)
-        .storeRef(beginCell().storeUint(1, 8).endCell())
-      assert.equal(topicOfEventBody('OffRamp', b.endCell()), TOPIC_COMMIT_REPORT_ACCEPTED)
-    })
-
-    it('names price-only and empty CommitReportAccepted', () => {
-      const priceOnly = beginCell()
-        .storeBit(0)
-        .storeBit(1)
-        .storeRef(beginCell().storeUint(1, 8).endCell())
-        .endCell()
-      assert.equal(topicOfEventBody('OffRamp', priceOnly), TOPIC_COMMIT_REPORT_ACCEPTED)
-      const none = beginCell().storeBit(0).storeBit(0).endCell()
-      assert.equal(topicOfEventBody('OffRamp', none), TOPIC_COMMIT_REPORT_ACCEPTED)
-    })
-
-    it('rejects malformed CommitReportAccepted bodies', () => {
-      assert.equal(topicOfEventBody('OffRamp', rootedCommit({ extraBit: true })), undefined)
-      assert.equal(topicOfEventBody('OffRamp', rootedCommit({ onRampLength: 0 })), undefined)
-      // length 33: build by hand, since the buffer is 33 bytes
-      assert.equal(topicOfEventBody('OffRamp', rootedCommit({ onRampLength: 33 })), undefined)
-      const noRef = beginCell().storeBit(0).storeBit(1).endCell()
-      assert.equal(topicOfEventBody('OffRamp', noRef), undefined)
-    })
-
-    it('rejects an empty cell and an OnRamp body', () => {
-      assert.equal(topicOfEventBody('OffRamp', beginCell().endCell()), undefined)
-      assert.equal(topicOfEventBody('OffRamp', onRampBody()), undefined)
-    })
+describe('verifiedLogTopic', () => {
+  it('proves the topics of live log rows from their message hash', () => {
+    assert.equal(verifiedLogTopic(live(LIVE_ROWS.onRampSent)), crc32('CCIPMessageSent'))
+    assert.equal(verifiedLogTopic(live(LIVE_ROWS.priceOnlyCommit)), TOPIC_COMMIT_REPORT_ACCEPTED)
+    assert.equal(verifiedLogTopic(live(LIVE_ROWS.ocr3)), crc32('OCR3Base_Transmitted'))
   })
 
-  describe('OnRamp', () => {
-    it('names CCIPMessageSent', () => {
-      const body = onRampBody()
-      assert.equal(body.bits.length, 875)
-      assert.equal(body.refs.length, 1)
-      assert.equal(topicOfEventBody('OnRamp', body), crc32('CCIPMessageSent'))
-    })
-    it('rejects a body without the ref or with an extra bit', () => {
-      assert.equal(topicOfEventBody('OnRamp', onRampBody(false)), undefined)
-      assert.equal(topicOfEventBody('OnRamp', onRampBody(true, true)), undefined)
-    })
-    it('rejects an ExecutionStateChanged body', () => {
-      assert.equal(topicOfEventBody('OnRamp', executionBody(1)), undefined)
-    })
+  it('tries only the given candidates', () => {
+    const row = live(LIVE_ROWS.onRampSent)
+    assert.equal(verifiedLogTopic(row, [TOPIC_EXECUTION_STATE_CHANGED]), undefined)
+    assert.equal(verifiedLogTopic(row, [crc32('CCIPMessageSent')]), crc32('CCIPMessageSent'))
+  })
+
+  it('matches a body stored inline or as a ref', () => {
+    const body = executionBody(2)
+    for (const forceRef of [false, true])
+      assert.equal(
+        verifiedLogTopic(logRow(TOPIC_EXECUTION_STATE_CHANGED, body, { forceRef })),
+        TOPIC_EXECUTION_STATE_CHANGED,
+      )
+  })
+
+  it('finds no topic for an unknown event or a row that does not hash to its fields', () => {
+    assert.equal(verifiedLogTopic(logRow(crc32('NotAnEvent'), executionBody(2))), undefined)
+    const row = live(LIVE_ROWS.ocr3)
+    assert.equal(verifiedLogTopic({ ...row, created_lt: '110979873000006' }), undefined)
+    assert.equal(verifiedLogTopic({ ...row, created_at: '1795175346' }), undefined)
+    assert.equal(verifiedLogTopic({ ...row, source: SENDER.toRawString() }), undefined)
+    assert.equal(verifiedLogTopic({ ...row, message_content: { body: null } }), undefined)
+    assert.equal(verifiedLogTopic({ ...row, source: null }), undefined)
   })
 })
 
@@ -346,7 +333,6 @@ describe('fetchIndexedTransaction', () => {
   const other = Address.parse('0:' + '11'.repeat(32)).toRawString()
   const txHashHex = 'ab'.repeat(32)
   const txHashB64 = Buffer.from(txHashHex, 'hex').toString('base64')
-  const b64 = (cell: Cell) => cell.toBoc().toString('base64')
 
   const execution = executionBody(2)
   const ocr3 = ocr3Body(1)
@@ -361,36 +347,19 @@ describe('fetchIndexedTransaction', () => {
     prev_trans_lt: '110048859000020',
     out_msgs: [
       // out of order on purpose: logs must come back sorted by index
+      logRow(crc32('OCR3Base_Transmitted'), ocr3, { createdLt: '110048859000031' }),
+      logRow(TOPIC_EXECUTION_STATE_CHANGED, execution, { createdLt: '110048859000029' }),
+      // an event whose topic is not a known one
+      logRow(crc32('NotAnEvent'), unknown, { source: rawLower, createdLt: '110048859000032' }),
+      // an internal message, and another account's log: not this account's logs
       {
-        source: rawUpper,
-        destination: null,
-        created_lt: '110048859000031',
-        message_content: { body: b64(ocr3) },
-      },
-      {
-        source: rawUpper,
-        destination: null,
-        created_lt: '110048859000029',
-        message_content: { body: b64(execution) },
-      },
-      {
-        source: rawLower,
-        destination: null,
-        created_lt: '110048859000032',
-        message_content: { body: b64(unknown) },
-      },
-      {
-        source: rawLower,
+        ...logRow(TOPIC_EXECUTION_STATE_CHANGED, execution, { createdLt: '110048859000033' }),
         destination: rawUpper,
-        created_lt: '110048859000033',
-        message_content: { body: b64(execution) },
       },
-      {
+      logRow(TOPIC_EXECUTION_STATE_CHANGED, execution, {
         source: other,
-        destination: null,
-        created_lt: '110048859000034',
-        message_content: { body: b64(execution) },
-      },
+        createdLt: '110048859000034',
+      }),
     ],
   }
 
@@ -403,9 +372,9 @@ describe('fetchIndexedTransaction', () => {
     return { ctx: { rateLimitedFetch, v3BaseUrl: 'http://mock/api/v3' }, urls }
   }
 
-  it('rebuilds the transaction with only the identified logs', async () => {
+  it('rebuilds the transaction with every log of the account', async () => {
     const { ctx, urls } = makeCtx(new Response(JSON.stringify({ transactions: [tx] })))
-    const res = await fetchIndexedTransaction(ctx, SENDER, txHashHex, 'OffRamp')
+    const res = await fetchIndexedTransaction(ctx, SENDER, txHashHex)
     assert.ok(res)
     assert.equal(urls.length, 1)
     assert.equal(urls[0]!.pathname, '/api/v3/transactions')
@@ -422,14 +391,15 @@ describe('fetchIndexedTransaction', () => {
     assert.equal(ext.lt, tx.lt)
     assert.equal(ext.prevTransactionLt, tx.prev_trans_lt)
 
-    assert.equal(res.logs.length, 2)
-    const [exec, transmitted] = res.logs
-    assert.deepEqual(exec!.topics, [TOPIC_EXECUTION_STATE_CHANGED])
-    assert.deepEqual(transmitted!.topics, [crc32('OCR3Base_Transmitted')])
-    assert.equal(exec!.index, 110048859000029)
-    assert.equal(transmitted!.index, 110048859000031)
-    assert.equal(exec!.data, Cell.fromBase64(b64(execution)).toBoc().toString('base64'))
-    assert.equal(transmitted!.data, Cell.fromBase64(b64(ocr3)).toBoc().toString('base64'))
+    assert.deepEqual(
+      res.logs.map((log) => [log.index, log.topics, log.data]),
+      [
+        [110048859000029, [TOPIC_EXECUTION_STATE_CHANGED], execution.toBoc().toString('base64')],
+        [110048859000031, [crc32('OCR3Base_Transmitted')], ocr3.toBoc().toString('base64')],
+        [110048859000032, [], unknown.toBoc().toString('base64')],
+      ],
+      'sorted by index; the unknown event kept without a topic',
+    )
     for (const log of res.logs) {
       assert.equal(log.transactionHash, hash)
       assert.equal(log.blockNumber, tx.mc_block_seqno)
@@ -437,16 +407,17 @@ describe('fetchIndexedTransaction', () => {
       assert.equal(log.address, rawLower)
       assert.equal(log.tx, res)
     }
+    assert.deepEqual(indexedTransactionFromRow(tx).logs.length, 3, 'the same rebuild from a row')
   })
 
   it('returns undefined when the index has no such transaction', async () => {
     const { ctx } = makeCtx(new Response(JSON.stringify({ transactions: [] })))
-    assert.equal(await fetchIndexedTransaction(ctx, SENDER, txHashHex, 'OffRamp'), undefined)
+    assert.equal(await fetchIndexedTransaction(ctx, SENDER, txHashHex), undefined)
   })
 
   it('rejects with CCIPHttpError on a non-transient failure', async () => {
     const { ctx, urls } = makeCtx(new Response('boom', { status: 400 }))
-    await assert.rejects(fetchIndexedTransaction(ctx, SENDER, txHashHex, 'OffRamp'), (err) => {
+    await assert.rejects(fetchIndexedTransaction(ctx, SENDER, txHashHex), (err) => {
       assert.ok(err instanceof CCIPHttpError)
       assert.match(err.message, /boom/)
       return true
