@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 
-import { Contract, Interface, ZeroAddress, getAddress } from 'ethers'
+import { Contract, Interface, ZeroAddress, getAddress, isError } from 'ethers'
 
 import type { EVMChain } from '../../../../evm/index.ts'
 import type { UnsignedEVMTx } from '../../../../evm/types.ts'
@@ -156,6 +156,18 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
     // Pre-flight the module's own authorization check (see REGISTRATION), so a mismatch fails
     // here rather than as a `CanOnlySelfRegister`/`RequiredRoleNotFound` revert. Needs `sender`.
     if (p.sender !== undefined) {
+      const onPermissionReadError = (error: unknown): never => {
+        if (isError(error, 'CALL_EXCEPTION')) {
+          throw new CCTParamsInvalidError(
+            this.name,
+            'tokenAddress',
+            `Could not read token permissions for registration method "${method}". Make sure the token supports the selected registration method.`,
+            { cause: error },
+          )
+        }
+        throw error
+      }
+
       if (method === REGISTRATION_METHODS.ACCESS_CONTROL_DEFAULT_ADMIN) {
         // Not `defaultAdmin()`: that lives on `AccessControlDefaultAdminRules`, not the plain
         // `AccessControl` the module casts to. Mirror the module: read the role, then `hasRole`.
@@ -164,8 +176,12 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
           'function hasRole(bytes32, address) view returns (bool)',
         ])
         const token = new Contract(p.tokenAddress, accessControlInterface, chain.provider)
-        const role = (await token.getFunction('DEFAULT_ADMIN_ROLE')()) as string
-        const hasRole = (await token.getFunction('hasRole')(role, p.sender)) as boolean
+        const role = (await token
+          .getFunction('DEFAULT_ADMIN_ROLE')()
+          .catch(onPermissionReadError)) as string
+        const hasRole = (await token
+          .getFunction('hasRole')(role, p.sender)
+          .catch(onPermissionReadError)) as boolean
         if (!hasRole) {
           throw new CCTParamsInvalidError(
             this.name,
@@ -178,11 +194,9 @@ export class RegisterAdmin extends EVMOperation<RegisterAdminParams> {
         const tokenGetterInterface = new Interface([
           `function ${tokenGetter}() view returns (address)`,
         ])
-        const admin = (await new Contract(
-          p.tokenAddress,
-          tokenGetterInterface,
-          chain.provider,
-        ).getFunction(tokenGetter)()) as string
+        const admin = (await new Contract(p.tokenAddress, tokenGetterInterface, chain.provider)
+          .getFunction(tokenGetter)()
+          .catch(onPermissionReadError)) as string
         if (getAddress(admin) !== getAddress(p.sender)) {
           throw new CCTParamsInvalidError(
             this.name,
