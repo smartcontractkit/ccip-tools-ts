@@ -3,7 +3,7 @@
  * Messages span Sepolia, Fuji, and Aptos testnets with diverse statuses,
  * protocol versions, token transfers, and sender patterns.
  *
- * All messages are from before Feb 24, 2026 to ensure stable state.
+ * Execution pins are finalized. Recent pins bound live destination-log scans.
  */
 
 import { MessageStatus } from '../types.ts'
@@ -12,6 +12,7 @@ import { MessageStatus } from '../types.ts'
 export type ForkTestMessage = {
   messageId: string
   txHash: string
+  offRamp?: string
   status: MessageStatus
   version: '1.5' | '1.6' | '2.0'
   description: string
@@ -417,30 +418,29 @@ export const TON_TO_SEPOLIA: ForkTestMessage[] = [
 
 // ── Solana Devnet → Sepolia (SVM → EVM) ──
 
-// FAILED — execute-test pins, empirically validated on a sepolia fork (2026-10-22):
-// both re-execute to SUCCESS via the manual merkle-proof path with gasLimit 500k.
-// Same receiver/token pool/shape; the lane (solana-devnet → sepolia, v1.6) is the
-// only pre-2.0 EVM-dest lane with active failed traffic (the EVM→EVM ones migrated
-// to v2.0). The runtime resolver ranks fresher failed messages
-// on the lane ahead of these pins. Exported so fork.test.ts reuses these ids.
+// FAILED — execute-test pins on the solana-devnet → sepolia v1.6 lane. The recent
+// manual-proof pin bounds its destination commit scan. The getExecutionInput pin retains
+// its proven historical case. The resolver adds same-receiver failures as fallbacks.
 export const SOLANA_DEVNET_EXEC_TEST_MSG: ForkTestMessage = {
-  messageId: '0x2c46fbe94f194101f03f76e4c8750705bf42c99f07f2930fecbbd617371d01ec',
+  messageId: '0x1e80c8f6720ea472daa9521cb592c91bb96bf3dc46a0e18399f07b79022bab78',
   txHash:
-    '5ErwfE5Mr8ihF22Pkevcbj84sJ8M16jnE9JJfAoAj5BLVePptTe5XuBqZYCWT24dsjdWdNhXQy5Q6FiwyRFSMGa6',
+    '45muix3SvZqEPWmVab9Dp9RsNHpG3Ea4CAitYFcQJ51gVcH4Xm6eKGtpQ7PNQdrRJDBvURfbypDezpCPAWxwy8ya',
+  offRamp: '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0',
   status: MessageStatus.Failed,
   version: '1.6',
   description:
-    'failed token transfer (pool GsXw…→dest 0x65e3…, 1e6), ready for manual exec — manual proof test pin (fork-validated)',
+    'failed token transfer (sequence 4000, 2026-11-15), ready for manual exec — manual proof test pin',
 }
 
 export const SOLANA_DEVNET_EXEC_INPUT_TEST_MSG: ForkTestMessage = {
   messageId: '0x15fec1bcf1daca6909dd39abc2ce3bee491628eb8bbe27bb41510ff8a902dcdb',
   txHash:
     '22GKnFsxj5hM4MXPye8DePpEMLP2ZhGRuHYv8TpEfPWRJYzUwc4MnS2imaf9b9YgnS1XqwEhktS6GET9jNAG57DG',
+  offRamp: '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0',
   status: MessageStatus.Failed,
   version: '1.6',
   description:
-    'failed token transfer (pool GsXw…→dest 0x65e3…, 1e6), ready for manual exec — getExecutionInput test pin (fork-validated)',
+    'failed token transfer (pool GsXw…→dest 0x65e3…, 1e5), ready for manual exec — getExecutionInput test pin (fork-validated)',
 }
 
 export const SOLANA_DEVNET_TO_SEPOLIA: ForkTestMessage[] = [
