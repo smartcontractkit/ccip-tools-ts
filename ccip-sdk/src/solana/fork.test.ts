@@ -873,6 +873,34 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       )
     })
 
+    it("estimates a token transfer's total fees at what the send charges and deducts", async () => {
+      const amount = 10_000n
+      const message = {
+        receiver,
+        tokenAmounts: [{ token: STAGING.sepoliaToken, amount }],
+        extraArgs: { finality: 'finalized' as const },
+      }
+      const estimate = await solanaChain!.getTotalFeesEstimate({
+        router: STAGING.router,
+        destChainSelector: STAGING.sepoliaSelector,
+        message,
+      })
+      if (estimate.tokenTransferFee) {
+        const { feeDeducted, bps } = estimate.tokenTransferFee
+        assert.equal(feeDeducted, (amount * BigInt(bps)) / 10_000n)
+      }
+
+      const request = await solanaChain!.sendMessage(sendOpts(message))
+      assert.equal(request.lane.version, CCIPVersion.V2_0)
+      const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+      assert.equal(sent.feeTokenAmount, estimate.ccipFee, 'the send should charge the ccipFee')
+      // the pool locks or burns, and sends, only what's left after its fee
+      assert.equal(
+        sent.tokenAmounts[0]?.amount,
+        amount - (estimate.tokenTransferFee?.feeDeducted ?? 0n),
+      )
+    })
+
     it('rejects GenericExtraArgsV3 to a lane not configured for 2.0', async () => {
       await assert.rejects(
         solanaChain!.getFee({

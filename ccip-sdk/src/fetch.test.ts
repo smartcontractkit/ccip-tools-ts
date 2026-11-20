@@ -785,6 +785,109 @@ describe('createRateLimitedFetch', () => {
     const result = await rateLimitedFetch('https://rl-test-network.example.com')
     assert.equal(result.ok, true)
   })
+
+  it('isFinalResponse true: returns a 500 at once, without a retry, body readable', async () => {
+    globalThis.fetch = mockedFetch = mock.fn(() =>
+      Promise.resolve(new Response('{"ok":false,"error":"final"}', { status: 500 })),
+    )
+    const isFinalResponse = mock.fn(() => true)
+    const result = await createRateLimitedFetch({ maxRetries: 2, isFinalResponse })(
+      'https://rl-test-final-true.example.com',
+    )
+    assert.equal(result.status, 500)
+    assert.equal(await result.text(), '{"ok":false,"error":"final"}')
+    assert.equal(mockedFetch.mock.calls.length, 1)
+    assert.equal(isFinalResponse.mock.calls.length, 1)
+  })
+
+  it('isFinalResponse false or absent: a 500 is still retried', async () => {
+    for (const [name, opts] of [
+      ['false', { isFinalResponse: () => false }],
+      ['absent', {}],
+    ] as const) {
+      globalThis.fetch = mockedFetch = mock.fn(() =>
+        Promise.resolve(new Response('boom', { status: 500 })),
+      )
+      const result = await createRateLimitedFetch({ maxRetries: 2, ...opts })(
+        `https://rl-test-final-${name}.example.com`,
+      )
+      assert.equal(result.status, 500)
+      assert.equal(mockedFetch.mock.calls.length, 3, name) // initial + 2 retries
+    }
+  })
+
+  it(
+    'isFinalResponse reads the error body after the concurrency slot is released',
+    { timeout: 2_000 },
+    async () => {
+      // One slot: while the first answer's (slow) body is still being classified, the next
+      // request to the endpoint must already run.
+      const url = 'https://rl-test-final-slot.example.com'
+      globalThis.fetch = mockedFetch = mock.fn((input: Parameters<typeof fetch>[0]) =>
+        Promise.resolve(
+          String(input instanceof Request ? input.url : input).endsWith('/slow')
+            ? new Response('{"ok":false,"error":"final"}', { status: 503 })
+            : new Response('ok', { status: 200 }),
+        ),
+      )
+      const body = Promise.withResolvers<boolean>()
+      const fetchFn = createRateLimitedFetch({
+        maxRetries: 0,
+        maxInFlight: 1,
+        isFinalResponse: () => body.promise,
+      })
+      const slow = fetchFn(`${url}/slow`)
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      const next = await fetchFn(`${url}/next`)
+      assert.equal(next.status, 200, 'the next request ran while the first body was pending')
+      body.resolve(true)
+      assert.equal((await slow).status, 503)
+    },
+  )
+
+  it('isFinalResponse is not consulted for an ok response', async () => {
+    globalThis.fetch = mockedFetch = mock.fn(() => Promise.resolve(new Response('fine')))
+    const isFinalResponse = mock.fn(() => true)
+    const result = await createRateLimitedFetch({ maxRetries: 2, isFinalResponse })(
+      'https://rl-test-final-ok.example.com',
+    )
+    assert.equal(result.ok, true)
+    assert.equal(isFinalResponse.mock.calls.length, 0)
+  })
+
+  it('a final 500 is not a rate-limit signal: the next request runs at once', async () => {
+    const url = 'https://rl-test-final-nopace.example.com/rpc'
+    let calls = 0
+    globalThis.fetch = mockedFetch = mock.fn(() =>
+      Promise.resolve(
+        ++calls === 1 ? new Response('final', { status: 500 }) : new Response('fine'),
+      ),
+    )
+    const f = createRateLimitedFetch({
+      maxRetries: 2,
+      isFinalResponse: (res) => res.status === 500,
+    })
+    const first = await f(url)
+    assert.equal(first.status, 500)
+    const t0 = Date.now()
+    const second = await f(url)
+    assert.equal(second.ok, true)
+    assert.ok(Date.now() - t0 < 300, `expected no pacing, took ${Date.now() - t0}ms`)
+    assert.equal(mockedFetch.mock.calls.length, 2) // one attempt each
+  })
+
+  it('does not retry a timeout-like error when the Request input signal is aborted', async () => {
+    const controller = new AbortController()
+    const request = new Request('https://rl-test-req-abort.example.com', {
+      signal: controller.signal,
+    })
+    controller.abort()
+    globalThis.fetch = mockedFetch = mock.fn(() =>
+      Promise.reject(new Error('request timeout exceeded')),
+    )
+    await assert.rejects(createRateLimitedFetch({ maxRetries: 3 })(request), /timeout/)
+    assert.equal(mockedFetch.mock.calls.length, 1)
+  })
 })
 
 // ---------------------------------------------------------------------------

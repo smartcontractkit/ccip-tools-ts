@@ -39,6 +39,13 @@ export type RateLimitOpts = {
    * failure.
    */
   maxPacingBacklogMs?: number
+  /**
+   * Marks a non-ok answer as final: it is returned at once, without a retry, and does
+   * not count as a rate-limit signal. For endpoints that report a definite answer with
+   * a 5xx status (e.g. TON's v2 API for data its liteservers no longer keep), where a
+   * retry costs time and throttles every other request to the host for nothing.
+   */
+  isFinalResponse?: (response: Response) => boolean | Promise<boolean>
 }
 
 /** Default (ceiling) max concurrent in-flight requests per endpoint. */
@@ -750,7 +757,14 @@ export function createRateLimitedFetch(
             /\b(abort|timeout|timed out|ETIMEDOUT|ECONNRESET|fetch failed|network error)/i,
           )
         ) {
-          if (abort?.aborted || init?.signal?.aborted) return false
+          // The signal may also ride on a Request input (axios's fetch adapter puts
+          // its timeout there).
+          if (
+            abort?.aborted ||
+            init?.signal?.aborted ||
+            (input instanceof Request && input.signal.aborted)
+          )
+            return false
           return true
         }
       }
@@ -805,6 +819,8 @@ export function createRateLimitedFetch(
       let target = lim
       let response: Response
       let retryDelay = 0
+      let final = false
+      let limited: ReturnType<typeof extractRateHint> | undefined
       try {
         // Pace BEFORE taking a concurrency permit: a request merely waiting for
         // its evenly-paced slot must not hold a permit, otherwise pacing latency
@@ -835,20 +851,27 @@ export function createRateLimitedFetch(
           if (response.ok) {
             target.onSuccess()
             ep.sem.increase() // AIMD: a success widens the concurrency cap by one
-          } else if (isTransientHttpStatus(response.status)) {
-            target.onLimited({ limit: hint.limit, windowMs: hint.windowMs })
+          } else if (isTransientHttpStatus(response.status)) limited = hint
+        } finally {
+          ep.sem.release()
+        }
+        if (limited) {
+          // Classified after the slot is released: reading an error body (which may
+          // stream slowly) must not hold up other requests to the endpoint.
+          final =
+            !!opts_.isFinalResponse &&
+            (await Promise.resolve(opts_.isFinalResponse(response.clone())).catch(() => false))
+          if (!final) {
+            target.onLimited({ limit: limited.limit, windowMs: limited.windowMs })
             ep.sem.decrease() // AIMD: a 429/5xx halves the cap (toward 1)
             if (attempt < opts_.maxRetries) {
-              // Decide the retry wait now (executed after the slot is released):
-              // explicit reset → honor it; active pacing → acquire() handles it;
-              // else jittered backoff.
-              if (hint.windowMs != null && hint.remaining === 0)
-                retryDelay = hint.windowMs + RESET_BUFFER_MS
+              // Decide the retry wait now: explicit reset → honor it; active pacing →
+              // acquire() handles it; else jittered backoff.
+              if (limited.windowMs != null && limited.remaining === 0)
+                retryDelay = limited.windowMs + RESET_BUFFER_MS
               else if (!target.active) retryDelay = backoffMs(attempt)
             }
           }
-        } finally {
-          ep.sem.release()
         }
       } catch (error) {
         logger.debug('fetch errored', attempt, error, redactEndpointUrl(input), bodyStr(init?.body))
@@ -902,7 +925,7 @@ export function createRateLimitedFetch(
         )
         return finish(response)
       }
-      if (isTransientHttpStatus(response.status)) {
+      if (!final && isTransientHttpStatus(response.status)) {
         if (attempt < opts_.maxRetries) {
           logger.debug('fetch transient error, retrying', response.status, attempt, retryDelay)
           if (retryDelay > 0) await sleep(retryDelay, abort)
