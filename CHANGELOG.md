@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-11-20
+
 - SDK: export `encodeAddressToAny` and `isCantonPartyId` from the package root. `encodeAddressToAny` encodes an address of any chain family the way CCIP messages carry it, e.g. a Canton party as `keccak256(partyId)`; `isCantonPartyId` checks the `hint::1220<64 hex>` party form it hashes
 - CCT SDK (EVM): `registerAdmin` and `generateUnsignedRegisterAdmin` wrap token permission getter `CALL_EXCEPTION`s in `CCTParamsInvalidError` for `tokenAddress`, preserving the cause.
 - Solana: add `getTotalFeesEstimate`, which threw `CCIPNotImplementedError` from Solana. It returns `getFee`'s `ccipFee`, plus as `tokenTransferFee` the basis-point fee the source pool takes from the transferred amount: the `finalityTransferFeeBps` of the pool's `ChainConfigV2` for the lane with `finality: 'finalized'` (or 0), its `fastFinalityTransferFeeBps` with a block depth or `'safe'`, when its fee config is enabled. It only applies when the message goes over the Router's 2.0 entrypoint, chosen as `getFee` and `sendMessage` choose it (so not on a 2.0 lane with its sender allowlist enabled, which falls back to 1.6), and to a token whose TokenAdminRegistry entry has pool interface version 2: data-only messages, 1.6 sends and interface-1 pools get `ccipFee` alone. CCTP pools take no pool fee; a fast CCTP transfer, where the pool and its verifier allow one, quotes Circle's fast transfer fee at the `fast_finality_bps` of the pool's CCTP verifier

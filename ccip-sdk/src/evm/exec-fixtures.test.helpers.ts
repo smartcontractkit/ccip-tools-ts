@@ -11,8 +11,8 @@ import { CCIPError, CCIPErrorCode, CCIPMessageIdNotFoundError } from '../errors/
 import { type CCIPVersion, MessageStatus } from '../types.ts'
 import { isTransientForkError, withForkRetry } from './fork-retry.test.helpers.ts'
 
-/** An executable failed-message fixture: message id plus its source tx hash. */
-export type ExecFixture = { messageId: string; txHash?: string }
+/** An executable failed-message fixture, with optional source transaction and API OffRamp hints. */
+export type ExecFixture = { messageId: string; txHash?: string; offRamp?: string }
 
 /** Cap on candidates per test: bounds API calls and execution attempts. */
 const MAX_FIXTURES = 3
@@ -53,7 +53,10 @@ export async function rankExecFixtures(opts: {
     return [pinned] // the API is unreachable: try the pin as it is
   }
   const receiver = (pinMsg?.message as { receiver?: string } | undefined)?.receiver?.toLowerCase()
-  const fixtures: ExecFixture[] = executable(pinMsg) ? [pinned] : []
+  const fixtures: ExecFixture[] =
+    pinMsg && executable(pinMsg)
+      ? [{ ...pinned, offRamp: pinMsg.metadata.offRamp ?? pinned.offRamp }]
+      : []
 
   let page
   try {
@@ -85,8 +88,12 @@ export async function rankExecFixtures(opts: {
       if (!isTransientForkError(err)) throw err
       return undefined // an unreachable candidate is skipped
     })
-    if (executable(msg))
-      fixtures.push({ messageId: hit.messageId, txHash: hit.sendTransactionHash })
+    if (msg && executable(msg))
+      fixtures.push({
+        messageId: hit.messageId,
+        txHash: hit.sendTransactionHash,
+        offRamp: msg.metadata.offRamp,
+      })
   }
   return fixtures
 }

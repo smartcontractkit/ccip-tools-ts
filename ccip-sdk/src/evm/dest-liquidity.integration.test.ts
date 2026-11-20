@@ -24,7 +24,7 @@ import '../aptos/index.ts' // register chain families for cross-family message d
 import '../solana/index.ts'
 import '../ton/index.ts'
 import { raceRpcEndpoint, reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
-import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
+import { useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import type { Chain } from '../chain.ts'
 import { CCIPDestSimulationUnavailableError } from '../errors/index.ts'
@@ -39,17 +39,24 @@ import { EVMChain } from './index.ts'
 // not issue a single network call at module load
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 
-await useResource(['ethereum-mainnet', 'monad-mainnet', 'arbitrum-mainnet'])
-
 const ETHEREUM_SELECTOR = 5009297550715157269n
-
-// this suite issues no eth_getLogs at all (only eth_call/eth_chainId), so the
-// width never bites here.
-const MONAD_RPC = skip ? '' : await reachableRpcEndpoint('RPC_MONAD_MAINNET')
 const MONAD_SELECTOR = 8481857512324358265n
-
-const ARBITRUM_RPC = skip ? '' : await reachableRpcEndpoint('RPC_ARBITRUM_MAINNET')
 const ARBITRUM_SELECTOR = 4949039107694359620n
+
+// Probe once per network, from a block that already holds its lock. Blocks selected
+// on their own do not probe networks they do not use.
+let ethereumRpc: Promise<string> | undefined
+let monadRpc: Promise<string> | undefined
+let arbitrumRpc: Promise<string> | undefined
+
+function getMonadRpc(): Promise<string> {
+  // No eth_getLogs here, so the public endpoints' range limits do not apply.
+  return (monadRpc ??= reachableRpcEndpoint('RPC_MONAD_MAINNET'))
+}
+
+function getArbitrumRpc(): Promise<string> {
+  return (arbitrumRpc ??= reachableRpcEndpoint('RPC_ARBITRUM_MAINNET'))
+}
 
 // ── CCIP 2.0 lane (Arbitrum One -> Ethereum) with a v2.0 mint/burn test token and pools ──
 // (the dest pool holds mint authority on the dest token, so the lane is healthy)
@@ -64,41 +71,53 @@ const V2_LANE = {
 }
 
 // A chain-id response alone does not prove a public gateway can serve contract reads.
-const ETHEREUM_RPC = skip
-  ? ''
-  : await raceRpcEndpoint('RPC_ETHEREUM_MAINNET', async (url) => {
-      const chain = await EVMChain.fromUrl(url, {
-        apiClient: null,
-        abort: AbortSignal.timeout(10_000),
-      })
-      try {
-        const pool = new Contract(V2_LANE.destPool, interfaces.TokenPool_v2_0, chain.provider)
-        await Promise.all([
-          chain.typeAndVersion(V2_LANE.destOffRamp),
-          pool.getFunction('supportsInterface')(IPOOL_V2_INTERFACE_ID),
-          pool.getFunction('getToken')(),
-        ])
-        return true
-      } finally {
-        chain.destroy()
-      }
+function getEthereumRpc(): Promise<string> {
+  return (ethereumRpc ??= raceRpcEndpoint('RPC_ETHEREUM_MAINNET', async (url) => {
+    const chain = await EVMChain.fromUrl(url, {
+      apiClient: null,
+      abort: AbortSignal.timeout(10_000),
     })
+    try {
+      const pool = new Contract(V2_LANE.destPool, interfaces.TokenPool_v2_0, chain.provider)
+      await Promise.all([
+        chain.typeAndVersion(V2_LANE.destOffRamp),
+        pool.getFunction('supportsInterface')(IPOOL_V2_INTERFACE_ID),
+        pool.getFunction('getToken')(),
+      ])
+      return true
+    } finally {
+      chain.destroy()
+    }
+  }))
+}
 
 const testLogger = new Console(process.stdout, process.stderr)
 if (!process.env.VERBOSE) testLogger.debug = () => {}
+
+const receiver = '0x1111111111111111111111111111111111111111'
 
 describe(
   'Dest-liquidity preflight integration (live RPC, read-only)',
   { skip, timeout: 300_000 },
   () => {
+    // This block reads all three mainnets, so it takes exactly that set in one call.
+    // Later blocks take their own (narrower) sets instead of inheriting this one.
+    useResourceForDescribe(['ethereum-mainnet', 'monad-mainnet', 'arbitrum-mainnet'])
+
     let ethereumChain: EVMChain | undefined
     let monadChain: EVMChain | undefined
     let arbitrumChain: EVMChain | undefined
 
     before(async () => {
-      ethereumChain = await EVMChain.fromUrl(ETHEREUM_RPC, { apiClient: null, logger: testLogger })
-      monadChain = await EVMChain.fromUrl(MONAD_RPC, { apiClient: null, logger: testLogger })
-      arbitrumChain = await EVMChain.fromUrl(ARBITRUM_RPC, { apiClient: null, logger: testLogger })
+      const [eth, monad, arb] = await Promise.all([
+        getEthereumRpc(),
+        getMonadRpc(),
+        getArbitrumRpc(),
+      ])
+      const options = { apiClient: null, logger: testLogger }
+      ethereumChain = await EVMChain.fromUrl(eth, options)
+      monadChain = await EVMChain.fromUrl(monad, options)
+      arbitrumChain = await EVMChain.fromUrl(arb, options)
     })
 
     after(() => {
@@ -106,8 +125,6 @@ describe(
       monadChain?.provider.destroy()
       arbitrumChain?.provider.destroy()
     })
-
-    const receiver = '0x1111111111111111111111111111111111111111'
 
     it('healthy mint pool => sim passes via the IPoolV2 2-arg branch', async () => {
       assert.ok(ethereumChain)
@@ -263,91 +280,98 @@ describe(
   },
 )
 
+/**
+ * Collect `request`'s verifications on `dest` with the managed sources disabled (besides any
+ * `ccvData` given for the non-token CCVs), so this exercises the fallback itself rather than an
+ * indexer that caught up since the message executed; then simulate the real `execute` at the block before its receipt, where the
+ * message (and the issuer's nonce or payload) is still unused.
+ */
+async function collectAndSimulate(
+  dest: Chain & { provider: EVMChain['provider'] },
+  request: CCIPRequest,
+  offRamp: string,
+  receiptTxHash: string,
+  ccvData?: Record<string, string>,
+) {
+  const collected = (await dest.getVerifications({
+    offRamp,
+    request,
+    indexer: [],
+    ccvData,
+  })) as Extract<CCIPVerifications, { verifications: unknown }>
+  const { encodedMessage } = request.message as { encodedMessage: string }
+  const tx = await new Contract(offRamp, interfaces.OffRamp_v2_0, dest.provider)
+    .getFunction('execute')
+    .populateTransaction(
+      encodedMessage,
+      collected.verifications.map((v) => v.destAddress),
+      collected.verifications.map((v) => hexlify(v.ccvData)),
+      0n,
+    )
+  const { blockNumber } = await dest.getTransaction(receiptTxHash)
+  await dest.provider.call({ ...tx, from: offRamp, blockTag: blockNumber - 1 })
+  return collected.verifications
+}
+
+describe('Token verifier fallback — CCTP (live RPC, read-only)', { skip, timeout: 300_000 }, () => {
+  // The CCTP replay needs Arbitrum One and the prod CCIP API, nothing else.
+  useResourceForDescribe(['arbitrum-mainnet', 'api'])
+
+  // HyperEVM -> Arbitrum One USDC/CCTP message whose only required CCV is the CCTP verifier;
+  // the CCIP API still reported that verifier as PENDING after the message executed
+  it('composes CCTP ccvData accepted by the real CCTP verifier', async () => {
+    const MESSAGE_ID = '0xe00b56173b7363e7cf700aae1e42f3689d89e84d3dfb720ca4f3b58c2fc5e9d2'
+    const SOURCE_TX = '0xed1cd756106d4fc00fc3b5f4b2a2f64f6bce3216b86416ef77b759b9150b7a1c'
+    const CCTP_VERIFIER = '0xBfD2109d3ff5b6f09281BDb52ca6b56D7Bb1ff12'
+    const request = await CCIPAPIClient.fromUrl().getMessageById(MESSAGE_ID)
+    const arbitrumChain = await EVMChain.fromUrl(await getArbitrumRpc(), { apiClient: null })
+    try {
+      const verifications = await collectAndSimulate(
+        arbitrumChain,
+        request,
+        request.metadata.offRamp!,
+        request.metadata.receiptTransactionHash!,
+      )
+      const cctp = verifications.find((v) => v.destAddress === CCTP_VERIFIER)
+      assert.ok(cctp, 'the fallback must compose a result for the CCTP verifier')
+
+      // independently compare with Circle's public response
+      const circle = (await (
+        await fetch(`https://iris-api.circle.com/v2/messages/19?transactionHash=${SOURCE_TX}`)
+      ).json()) as { messages: { status: string; message: string; attestation: string }[] }
+      const attested = circle.messages.find((m) => m.status === 'complete')
+      assert.ok(attested, 'Circle must have the attestation')
+      assert.equal(
+        hexlify(cctp.ccvData),
+        hexlify(`0x91b3338e${attested.message.slice(2)}${attested.attestation.slice(2)}`),
+      )
+    } finally {
+      arbitrumChain.provider.destroy()
+    }
+  })
+})
+
+// Ethereum -> Monad LBTC message through LombardTokenPool 2.1: the payload hash is only in the
+// source CCIPMessageSent's verifierBlobs, so the request is read from the source chain.
+//
+// The message is resolved at runtime, newest first: the keyless Monad endpoint behind
+// RPC_MONAD_MAINNET retains only a few days of receipts and archive state, so a pinned
+// message/tx stops being replayable within about a week (observed 2026-11: a 10-day-old
+// receipt is pruned, a 2-day-old one still answers).
 describe(
-  'Token verifier fallback integration (live RPC, read-only)',
+  'Token verifier fallback — Lombard (live RPC, read-only)',
   { skip, timeout: 300_000 },
   () => {
-    useResourceForDescribe(['api'])
+    // The LBTC replay reads Ethereum and Monad, and uses the prod CCIP API for candidates.
+    useResourceForDescribe(['ethereum-mainnet', 'monad-mainnet', 'api'])
 
-    /**
-     * Collect `request`'s verifications on `dest` with the managed sources disabled (besides any
-     * `ccvData` given for the non-token CCVs), so this exercises the fallback itself rather than an
-     * indexer that caught up since the message executed; then simulate the real `execute` at the block before its receipt, where the
-     * message (and the issuer's nonce or payload) is still unused.
-     */
-    async function collectAndSimulate(
-      dest: Chain & { provider: EVMChain['provider'] },
-      request: CCIPRequest,
-      offRamp: string,
-      receiptTxHash: string,
-      ccvData?: Record<string, string>,
-    ) {
-      const collected = (await dest.getVerifications({
-        offRamp,
-        request,
-        indexer: [],
-        ccvData,
-      })) as Extract<CCIPVerifications, { verifications: unknown }>
-      const { encodedMessage } = request.message as { encodedMessage: string }
-      const tx = await new Contract(offRamp, interfaces.OffRamp_v2_0, dest.provider)
-        .getFunction('execute')
-        .populateTransaction(
-          encodedMessage,
-          collected.verifications.map((v) => v.destAddress),
-          collected.verifications.map((v) => hexlify(v.ccvData)),
-          0n,
-        )
-      const { blockNumber } = await dest.getTransaction(receiptTxHash)
-      await dest.provider.call({ ...tx, from: offRamp, blockTag: blockNumber - 1 })
-      return collected.verifications
-    }
-
-    // HyperEVM -> Arbitrum One USDC/CCTP message whose only required CCV is the CCTP verifier;
-    // the CCIP API still reported that verifier as PENDING after the message executed
-    it('composes CCTP ccvData accepted by the real CCTP verifier', async () => {
-      const MESSAGE_ID = '0xe00b56173b7363e7cf700aae1e42f3689d89e84d3dfb720ca4f3b58c2fc5e9d2'
-      const SOURCE_TX = '0xed1cd756106d4fc00fc3b5f4b2a2f64f6bce3216b86416ef77b759b9150b7a1c'
-      const CCTP_VERIFIER = '0xBfD2109d3ff5b6f09281BDb52ca6b56D7Bb1ff12'
-      const request = await CCIPAPIClient.fromUrl().getMessageById(MESSAGE_ID)
-      const arbitrumChain = await EVMChain.fromUrl(ARBITRUM_RPC, { apiClient: null })
-      try {
-        const verifications = await collectAndSimulate(
-          arbitrumChain,
-          request,
-          request.metadata.offRamp!,
-          request.metadata.receiptTransactionHash!,
-        )
-        const cctp = verifications.find((v) => v.destAddress === CCTP_VERIFIER)
-        assert.ok(cctp, 'the fallback must compose a result for the CCTP verifier')
-
-        // independently compare with Circle's public response
-        const circle = (await (
-          await fetch(`https://iris-api.circle.com/v2/messages/19?transactionHash=${SOURCE_TX}`)
-        ).json()) as { messages: { status: string; message: string; attestation: string }[] }
-        const attested = circle.messages.find((m) => m.status === 'complete')
-        assert.ok(attested, 'Circle must have the attestation')
-        assert.equal(
-          hexlify(cctp.ccvData),
-          hexlify(`0x91b3338e${attested.message.slice(2)}${attested.attestation.slice(2)}`),
-        )
-      } finally {
-        arbitrumChain.provider.destroy()
-      }
-    })
-
-    // Ethereum -> Monad LBTC message through LombardTokenPool 2.1: the payload hash is only in the
-    // source CCIPMessageSent's verifierBlobs, so the request is read from the source chain.
-    //
-    // The message is resolved at runtime, newest first: the keyless Monad endpoint behind
-    // RPC_MONAD_MAINNET retains only a few days of receipts and archive state, so a pinned
-    // message/tx stops being replayable within about a week (observed 2026-11: a 10-day-old
-    // receipt is pruned, a 2-day-old one still answers).
     const LBTC_ETHEREUM = '0x8236a87084f8B84306f72007F36F2618A5634494'
     const LOMBARD_RESOLVER = '0xd314336866369adf98EDC14F95Ed05eD87CC74A8'
 
     it('composes Lombard ccvData accepted by the real Lombard verifier', async () => {
-      const ethereumChain = await EVMChain.fromUrl(ETHEREUM_RPC, { apiClient: null })
-      const monadChain = await EVMChain.fromUrl(MONAD_RPC, { apiClient: null })
+      const [eth, monad] = await Promise.all([getEthereumRpc(), getMonadRpc()])
+      const ethereumChain = await EVMChain.fromUrl(eth, { apiClient: null })
+      const monadChain = await EVMChain.fromUrl(monad, { apiClient: null })
       try {
         await replayNewestLombardMessage(ethereumChain, monadChain)
       } finally {

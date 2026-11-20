@@ -1,8 +1,10 @@
 import {
   type BytesLike,
-  type ErrorFragment,
   type EventFragment,
   type FunctionFragment,
+  type Interface,
+  ErrorFragment,
+  Fragment,
   Result,
   dataLength,
   dataSlice,
@@ -15,6 +17,61 @@ import { decodeExtraArgs } from '../extra-args.ts'
 import { decodeMessageV1 } from '../messages.ts'
 import { ChainFamily } from '../networks.ts'
 import { defaultAbiCoder, getPoolErrorInterfaces, interfaces } from './const.ts'
+
+type FragmentMatch = readonly [
+  fragment: ErrorFragment | FunctionFragment | EventFragment,
+  contractName: string,
+]
+type Interfaces = Readonly<Record<string, Interface>>
+type HexIndex = ReadonlyMap<string, FragmentMatch>
+
+// ethers resolves these errors in each Interface, before the errors of its ABI
+const builtinErrors = ['Error(string)', 'Panic(uint256)'].map((sig) => ErrorFragment.from(sig))
+
+let coreHexIndex: HexIndex | undefined
+let poolHexIndex: HexIndex | undefined
+
+/**
+ * Index the fragments by 4-byte selector (errors, functions) and by 32-byte topicHash (events).
+ * `Interface.getError/getFunction/getEvent` hash each fragment again on each hex lookup.
+ * The first fragment of a key wins, in the order of their scan: interface by interface, and
+ * errors before functions in each interface.
+ */
+function buildHexIndex(ifaces: Interfaces): HexIndex {
+  const index = new Map<string, FragmentMatch>()
+  for (const [name, iface] of Object.entries(ifaces)) {
+    const fragments = [
+      ...builtinErrors,
+      ...iface.fragments.filter((f) => Fragment.isError(f)),
+      ...iface.fragments.filter((f) => Fragment.isFunction(f)),
+      ...iface.fragments.filter((f) => Fragment.isEvent(f)),
+    ]
+    for (const fragment of fragments) {
+      const key = Fragment.isEvent(fragment) ? fragment.topicHash : fragment.selector
+      if (!index.has(key)) index.set(key, [fragment, name])
+    }
+  }
+  return index
+}
+
+function findHexFragment(selector: string, index: HexIndex): FragmentMatch | undefined {
+  const topic = selector.slice(0, 66).toLowerCase()
+  // a full topicHash match is exact, thus it wins over a 4-byte selector match
+  return index.get(topic) ?? index.get(topic.slice(0, 10))
+}
+
+function findNamedFragment(key: string, ifaces: Interfaces): FragmentMatch | undefined {
+  for (const [name, iface] of Object.entries(ifaces)) {
+    for (const getFragment of ['getError', 'getFunction', 'getEvent'] as const) {
+      try {
+        const fragment = iface[getFragment](key)
+        if (fragment) return [fragment, name]
+      } catch (_) {
+        // test all abis
+      }
+    }
+  }
+}
 
 /**
  * Get error data from an error object, if possible
@@ -47,8 +104,9 @@ export function getErrorData(err: unknown): string | undefined {
  * - Error, Function or Event name or signature
  * - 4-byte for Error or Function selector (first 4B of its keccak256(signature))
  * - 32-byte for Event topicHash (keccak256(signature))
+ * A 32-byte topicHash match wins over a 4-byte selector match.
  * If data is provided, it will be parsed with the fragment's inputs. For events, only the
- * non-indexed arguments are parsed.
+ * non-indexed arguments are parsed. Without data, the bytes after a hex selector are the data.
  *
  * @param selector - error, function or event selector
  * @param data - data to parse as fragment's inputs
@@ -57,70 +115,23 @@ export function getErrorData(err: unknown): string | undefined {
 export function parseWithFragment(
   selector: string,
   data?: BytesLike,
-):
-  | readonly [
-      fragment: ErrorFragment | FunctionFragment | EventFragment,
-      contractName: string,
-      parsed?: Result,
-    ]
-  | undefined {
-  let res: readonly [ErrorFragment | FunctionFragment | EventFragment, string] | undefined
-  for (const [name, iface] of Object.entries(interfaces)) {
-    try {
-      const error = iface.getError(isHexString(selector) ? dataSlice(selector, 0, 4) : selector)
-      if (error) {
-        if (!data && isHexString(selector) && dataLength(selector) > 4) {
-          ;[selector, data] = [dataSlice(selector, 0, 4), dataSlice(selector, 4)]
-        }
-
-        res = [error, name] as const
-        break
-      }
-    } catch (_) {
-      // test all abis
-    }
-    try {
-      const func = iface.getFunction(isHexString(selector) ? dataSlice(selector, 0, 4) : selector)
-      if (func) {
-        if (!data && isHexString(selector) && dataLength(selector) > 4) {
-          ;[selector, data] = [dataSlice(selector, 0, 4), dataSlice(selector, 4)]
-        }
-        res = [func, name] as const
-        break
-      }
-    } catch (_) {
-      // test all abis
-    }
-    try {
-      const event = iface.getEvent(isHexString(selector) ? dataSlice(selector, 0, 32) : selector)
-      if (event) {
-        if (!data && isHexString(selector) && dataLength(selector) > 32) {
-          ;[selector, data] = [dataSlice(selector, 0, 32), dataSlice(selector, 32)]
-        }
-        res = [event, name] as const
-        break
-      }
-    } catch (_) {
-      // test all abis
-    }
+): readonly [...FragmentMatch, parsed?: Result] | undefined {
+  let res: FragmentMatch | undefined
+  const isHex = isHexString(selector)
+  // the pool interfaces have only errors: they add revert-decoding coverage after a miss in the
+  // main interfaces, and are lazily built
+  if (!isHex) {
+    res =
+      findNamedFragment(selector, interfaces) ??
+      findNamedFragment(selector, getPoolErrorInterfaces())
+  } else if (selector.length >= 10 && selector.length % 2 === 0) {
+    res =
+      findHexFragment(selector, (coreHexIndex ??= buildHexIndex(interfaces))) ??
+      findHexFragment(selector, (poolHexIndex ??= buildHexIndex(getPoolErrorInterfaces())))
   }
-  if (!res) {
-    // fall through to the error-only interfaces of the specialized pool contracts (lazily built;
-    // they carry no functions/events, only revert-decoding coverage)
-    for (const [name, iface] of Object.entries(getPoolErrorInterfaces())) {
-      try {
-        const error = iface.getError(isHexString(selector) ? dataSlice(selector, 0, 4) : selector)
-        if (error) {
-          if (!data && isHexString(selector) && dataLength(selector) > 4) {
-            ;[selector, data] = [dataSlice(selector, 0, 4), dataSlice(selector, 4)]
-          }
-          res = [error, name] as const
-          break
-        }
-      } catch (_) {
-        // test all error-only abis
-      }
-    }
+  if (res && isHex && !data) {
+    const keyLength = Fragment.isEvent(res[0]) ? 66 : 10
+    if (selector.length > keyLength) data = '0x' + selector.slice(keyLength)
   }
   if (res && data) {
     let parsed
