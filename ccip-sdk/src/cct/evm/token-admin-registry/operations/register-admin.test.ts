@@ -98,6 +98,7 @@ function stubChain(
     hasRole?: boolean
     moduleTypeAndVersion?: [string, string]
     calls?: RecordedCall[]
+    callError?: { selector: string; error: Error }
     overrides?: Partial<EVMChain>
   } = {},
 ): EVMChain {
@@ -116,6 +117,7 @@ function stubChain(
       const data = tx.data ?? '0x'
       const sel = data.slice(0, 10)
       opts.calls?.push({ to: tx.to, data })
+      if (sel === opts.callError?.selector) throw opts.callError.error
       // Recording alone leaves the TAR-side probes unpinned unless a test bothers to inspect
       // `calls`. Asserting here instead pins them for EVERY test: without this, swapping an
       // argument (e.g. `getTokenConfig(registryModule)`, which silently disables the
@@ -318,6 +320,87 @@ describe('RegisterAdmin (cct/evm token-admin-registry operation)', () => {
       assert.equal(role, ROLE)
       assert.equal(account, ADMIN)
     })
+  })
+
+  describe('token permission read errors', () => {
+    for (const [method, getter, selector] of [
+      [undefined, 'owner', OWNER_GETTER_SELECTOR],
+      ['owner', 'owner', OWNER_GETTER_SELECTOR],
+      ['ccip-admin', 'getCCIPAdmin', CCIP_ADMIN_GETTER_SELECTOR],
+      ['access-control-default-admin', 'owner', DEFAULT_ADMIN_ROLE_SELECTOR],
+      ['access-control-default-admin', 'owner', HAS_ROLE_SELECTOR],
+    ] as const) {
+      const label = `${method ?? 'default'} (${selector})`
+
+      it(`wraps an unsupported getter for ${label} and preserves its cause`, async () => {
+        const error = makeError('execution reverted', 'CALL_EXCEPTION')
+        await assert.rejects(
+          () =>
+            new RegisterAdmin().generate(stubChain({ getter, callError: { selector, error } }), {
+              tokenAddress: TOKEN,
+              registryModule: REGISTRY_MODULE,
+              address: ROUTER,
+              registrationMethod: method,
+              sender: ADMIN,
+            }),
+          (err: unknown) => {
+            assert.ok(err instanceof CCTParamsInvalidError)
+            assert.equal(err.context.operation, 'registerAdmin')
+            assert.equal(err.context.param, 'tokenAddress')
+            assert.equal(
+              err.context.reason,
+              `Could not read token permissions for registration method "${
+                method ?? 'owner'
+              }". Make sure the token supports the selected registration method.`,
+            )
+            assert.equal(err.cause, error)
+            return true
+          },
+        )
+      })
+    }
+
+    for (const error of [
+      new Error('unrelated failure'),
+      makeError('network unavailable', 'NETWORK_ERROR'),
+      makeError('RPC server unavailable', 'SERVER_ERROR'),
+      makeError('RPC timed out', 'TIMEOUT'),
+      makeError('invalid response', 'BAD_DATA'),
+    ]) {
+      it(`passes through ${error.message} unchanged`, async () => {
+        await assert.rejects(
+          () =>
+            new RegisterAdmin().generate(
+              stubChain({
+                callError: { selector: OWNER_GETTER_SELECTOR, error },
+              }),
+              {
+                tokenAddress: TOKEN,
+                registryModule: REGISTRY_MODULE,
+                address: ROUTER,
+                sender: ADMIN,
+              },
+            ),
+          (err: unknown) => err === error,
+        )
+      })
+    }
+
+    for (const selector of [IS_REGISTRY_MODULE_SELECTOR, GET_TOKEN_CONFIG_SELECTOR]) {
+      it(`does not wrap CALL_EXCEPTION from registry reads (${selector})`, async () => {
+        const error = makeError('execution reverted', 'CALL_EXCEPTION')
+        await assert.rejects(
+          () =>
+            new RegisterAdmin().generate(stubChain({ callError: { selector, error } }), {
+              tokenAddress: TOKEN,
+              registryModule: REGISTRY_MODULE,
+              address: ROUTER,
+              sender: ADMIN,
+            }),
+          (err: unknown) => err === error,
+        )
+      })
+    }
   })
 
   describe('validation', () => {
