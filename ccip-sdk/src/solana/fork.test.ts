@@ -21,7 +21,7 @@ import {
 import { hexlify } from 'ethers'
 
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
-import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
+import { useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import {
   CCIPSolanaExecutionBufferIncompleteError,
@@ -62,8 +62,8 @@ import {
 import { getExecutionInputsBufferPda, simulateAndSendTxs, simulateTransaction } from './utils.ts'
 import { SolanaChain } from './index.ts'
 
-// Surfpool forks live Solana mainnet state; the API-driven execution path uses the staging API.
-await useResource(['solana-mainnet', 'api'])
+// Surfpool forks live Solana mainnet state; the API-driven execution block also uses the
+// staging API. Each block below acquires its whole set atomically (see `useResource`).
 
 // ── Constants ──
 
@@ -82,44 +82,54 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   let surfpoolInstance: SurfpoolInstance | undefined
   let connection: Connection | undefined
   let wallet: AnchorWallet | undefined
+  let mainnetFork: Promise<void> | undefined
 
-  before(async () => {
-    surfpoolInstance = createSurfpoolInstance({
-      network: 'mainnet',
-      port: 8647,
-    })
-    await surfpoolInstance.start()
+  // One Surfpool fork serves both blocks, so the first block to run starts it and the
+  // suite-level `after` stops it. Each block holds the mainnet lock only while it uses
+  // the fork; the API-driven block adds the staging API lock to the same atomic set.
+  function ensureMainnetFork(): Promise<void> {
+    mainnetFork ??= (async () => {
+      surfpoolInstance = createSurfpoolInstance({
+        network: 'mainnet',
+        port: 8647,
+      })
+      await surfpoolInstance.start()
 
-    connection = new Connection(`http://${surfpoolInstance.host}:${surfpoolInstance.port}`, {
-      commitment: 'confirmed',
-      wsEndpoint: `ws://${surfpoolInstance.host}:${surfpoolInstance.port + 1}`,
-    })
+      connection = new Connection(`http://${surfpoolInstance.host}:${surfpoolInstance.port}`, {
+        commitment: 'confirmed',
+        wsEndpoint: `ws://${surfpoolInstance.host}:${surfpoolInstance.port + 1}`,
+      })
 
-    solanaChain = new SolanaChain(connection, networkInfo('solana-mainnet'), {
-      apiClient: null,
-      logger: testLogger,
-    })
+      solanaChain = new SolanaChain(connection, networkInfo('solana-mainnet'), {
+        apiClient: null,
+        logger: testLogger,
+      })
 
-    // Create and fund a wallet for send tests
-    const keypair = Keypair.generate()
-    wallet = new AnchorWallet(keypair)
-    const airdropSig = await connection.requestAirdrop(keypair.publicKey, 10 * LAMPORTS_PER_SOL)
-    await connection.confirmTransaction(airdropSig)
-  })
+      // Create and fund a wallet for send tests
+      const keypair = Keypair.generate()
+      wallet = new AnchorWallet(keypair)
+      const airdropSig = await connection.requestAirdrop(keypair.publicKey, 10 * LAMPORTS_PER_SOL)
+      await connection.confirmTransaction(airdropSig)
+    })()
+    return mainnetFork
+  }
 
   after(async () => {
     closeWebSocket(connection)
     await surfpoolInstance?.stop()
   })
 
-  it('should connect to the surfpool instance', async () => {
-    assert.ok(solanaChain, 'solana chain should be initialized')
-    assert.ok(wallet, 'wallet should be initialized')
-    const balance = await solanaChain.getBalance({ holder: wallet.publicKey.toBase58() })
-    assert.ok(balance > 0n, 'wallet should have SOL balance from airdrop')
-  })
-
   describe('sendMessage', () => {
+    useResourceForDescribe(['solana-mainnet'])
+    before(ensureMainnetFork)
+
+    it('should connect to the surfpool instance', async () => {
+      assert.ok(solanaChain, 'solana chain should be initialized')
+      assert.ok(wallet, 'wallet should be initialized')
+      const balance = await solanaChain.getBalance({ holder: wallet.publicKey.toBase58() })
+      assert.ok(balance > 0n, 'wallet should have SOL balance from airdrop')
+    })
+
     it('should send a data-only message (Solana -> Ethereum)', async () => {
       assert.ok(solanaChain, 'chain should be initialized')
       assert.ok(wallet, 'wallet should be initialized')
@@ -238,6 +248,9 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('execute', () => {
+    useResourceForDescribe(['solana-mainnet', 'api-staging'])
+    before(ensureMainnetFork)
+
     const EXEC_MSG = ETHEREUM_TO_SOLANA.find((m) => m.status === MessageStatus.Failed)!
 
     it('should execute a failed message via API-driven path (* -> Solana)', async () => {
