@@ -21,13 +21,14 @@ import {
 import { hexlify } from 'ethers'
 
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
-import { useResource, useResourceForDescribe } from '../../../scripts/useResource.ts'
+import { useResourceForDescribe } from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import {
   CCIPSolanaExecutionBufferIncompleteError,
   CCIPSolanaV2LaneUnavailableError,
 } from '../errors/index.ts'
 import type { GenericExtraArgsV3 } from '../extra-args.ts'
+import { createRateLimitedFetch } from '../fetch.ts'
 import { LaneFeature, networkInfo } from '../index.ts'
 import {
   type CCIPMessage,
@@ -42,12 +43,14 @@ import {
   closeWebSocket,
   createSurfpoolInstance,
   isSurfpoolAvailable,
+  surfnetRequest,
   syncRentSysvar,
 } from './__tests__/surfpool.ts'
 import { executeV2 } from './exec-v2.ts'
 import {
   ETHEREUM_TO_SOLANA,
   SEPOLIA_TO_SOLANA_DEVNET_V2_NOEXEC as NOEXEC,
+  SOLANA_DEVNET_V2_FORK_ACCOUNTS,
   SOLANA_DEVNET_V2_STAGING as STAGING,
 } from './fork.test.data.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
@@ -62,8 +65,8 @@ import {
 import { getExecutionInputsBufferPda, simulateAndSendTxs, simulateTransaction } from './utils.ts'
 import { SolanaChain } from './index.ts'
 
-// Surfpool forks live Solana mainnet state; the API-driven execution path uses the staging API.
-await useResource(['solana-mainnet', 'api'])
+// Surfpool forks live Solana mainnet state; the API-driven execution block also uses the
+// staging API. Each block below acquires its whole set atomically (see `useResource`).
 
 // ── Constants ──
 
@@ -82,44 +85,54 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   let surfpoolInstance: SurfpoolInstance | undefined
   let connection: Connection | undefined
   let wallet: AnchorWallet | undefined
+  let mainnetFork: Promise<void> | undefined
 
-  before(async () => {
-    surfpoolInstance = createSurfpoolInstance({
-      network: 'mainnet',
-      port: 8647,
-    })
-    await surfpoolInstance.start()
+  // One Surfpool fork serves both blocks, so the first block to run starts it and the
+  // suite-level `after` stops it. Each block holds the mainnet lock only while it uses
+  // the fork; the API-driven block adds the staging API lock to the same atomic set.
+  function ensureMainnetFork(): Promise<void> {
+    mainnetFork ??= (async () => {
+      surfpoolInstance = createSurfpoolInstance({
+        network: 'mainnet',
+        port: 8647,
+      })
+      await surfpoolInstance.start()
 
-    connection = new Connection(`http://${surfpoolInstance.host}:${surfpoolInstance.port}`, {
-      commitment: 'confirmed',
-      wsEndpoint: `ws://${surfpoolInstance.host}:${surfpoolInstance.port + 1}`,
-    })
+      connection = new Connection(`http://${surfpoolInstance.host}:${surfpoolInstance.port}`, {
+        commitment: 'confirmed',
+        wsEndpoint: `ws://${surfpoolInstance.host}:${surfpoolInstance.port + 1}`,
+      })
 
-    solanaChain = new SolanaChain(connection, networkInfo('solana-mainnet'), {
-      apiClient: null,
-      logger: testLogger,
-    })
+      solanaChain = new SolanaChain(connection, networkInfo('solana-mainnet'), {
+        apiClient: null,
+        logger: testLogger,
+      })
 
-    // Create and fund a wallet for send tests
-    const keypair = Keypair.generate()
-    wallet = new AnchorWallet(keypair)
-    const airdropSig = await connection.requestAirdrop(keypair.publicKey, 10 * LAMPORTS_PER_SOL)
-    await connection.confirmTransaction(airdropSig)
-  })
+      // Create and fund a wallet for send tests
+      const keypair = Keypair.generate()
+      wallet = new AnchorWallet(keypair)
+      const airdropSig = await connection.requestAirdrop(keypair.publicKey, 10 * LAMPORTS_PER_SOL)
+      await connection.confirmTransaction(airdropSig)
+    })()
+    return mainnetFork
+  }
 
   after(async () => {
     closeWebSocket(connection)
     await surfpoolInstance?.stop()
   })
 
-  it('should connect to the surfpool instance', async () => {
-    assert.ok(solanaChain, 'solana chain should be initialized')
-    assert.ok(wallet, 'wallet should be initialized')
-    const balance = await solanaChain.getBalance({ holder: wallet.publicKey.toBase58() })
-    assert.ok(balance > 0n, 'wallet should have SOL balance from airdrop')
-  })
-
   describe('sendMessage', () => {
+    useResourceForDescribe(['solana-mainnet'])
+    before(ensureMainnetFork)
+
+    it('should connect to the surfpool instance', async () => {
+      assert.ok(solanaChain, 'solana chain should be initialized')
+      assert.ok(wallet, 'wallet should be initialized')
+      const balance = await solanaChain.getBalance({ holder: wallet.publicKey.toBase58() })
+      assert.ok(balance > 0n, 'wallet should have SOL balance from airdrop')
+    })
+
     it('should send a data-only message (Solana -> Ethereum)', async () => {
       assert.ok(solanaChain, 'chain should be initialized')
       assert.ok(wallet, 'wallet should be initialized')
@@ -238,6 +251,9 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   })
 
   describe('execute', () => {
+    useResourceForDescribe(['solana-mainnet', 'api-staging'])
+    before(ensureMainnetFork)
+
     const EXEC_MSG = ETHEREUM_TO_SOLANA.find((m) => m.status === MessageStatus.Failed)!
 
     it('should execute a failed message via API-driven path (* -> Solana)', async () => {
@@ -281,6 +297,58 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
 
 // Surfpool forks the private CCIP 2.0 staging deployment on Solana devnet
 // (RPC_SOLANA_DEVNET, or the public default endpoint).
+
+/**
+ * Pre-hydrates the fork with the accounts the v2 flows read, from a single upstream
+ * batch. Surfpool only caches accounts that exist upstream: an optional account the
+ * cluster does not have is fetched again on every resolution round, and the public
+ * devnet RPC rate-limits those repeats, stalling each retry ~10s. Present accounts
+ * are set on the fork; absent ones are marked offline, which only stops remote
+ * downloads (a transaction can still create them locally).
+ */
+async function hydrateForkAccounts(
+  connection: Connection,
+  upstreamUrl: string,
+  accounts: readonly string[],
+): Promise<void> {
+  const upstream = new Connection(upstreamUrl, {
+    commitment: 'confirmed',
+    fetch: createRateLimitedFetch({}, { logger: testLogger }),
+  })
+  const pubkeys = accounts.map((account) => new PublicKey(account))
+  const infos = await upstream.getMultipleAccountsInfo(pubkeys)
+  // Serialize the local writes: Surfpool's RPC workers share one SVM writer, and a
+  // concurrent burst trips a closed connection.
+  for (let index = 0; index < pubkeys.length; index++) {
+    const pubkey = pubkeys[index]!
+    const info = infos[index]
+    if (!info) {
+      // stop the fork from asking the upstream for an account it does not have
+      await surfnetRequest(connection, 'surfnet_offlineAccount', [
+        pubkey.toBase58(),
+        { includeOwnedAccounts: false },
+      ])
+    } else if (!info.executable && info.lamports <= Number.MAX_SAFE_INTEGER) {
+      const rentEpoch = info.rentEpoch ?? 0
+      // programs are left to Surfpool, which also clones their program-data account.
+      // All five fields are required: a partial update makes Surfpool re-fetch the
+      // account from the upstream instead of applying it locally. A u64::MAX
+      // rentEpoch does not survive web3.js' number parse, and rent does not matter
+      // here because the fork syncs the rent sysvar separately.
+      await surfnetRequest(connection, 'surfnet_setAccount', [
+        pubkey.toBase58(),
+        {
+          data: info.data.toString('hex'),
+          lamports: info.lamports,
+          owner: info.owner.toBase58(),
+          executable: false,
+          rentEpoch: rentEpoch <= Number.MAX_SAFE_INTEGER ? rentEpoch : 0,
+        },
+      ])
+    }
+  }
+}
+
 describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_000 }, () => {
   useResourceForDescribe(['solana-devnet'])
 
@@ -317,7 +385,24 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
       commitment: 'confirmed',
       wsEndpoint: `ws://${surfpoolInstance.host}:${surfpoolInstance.port + 1}`,
     })
+    await hydrateForkAccounts(
+      connection,
+      rpcEndpoint('RPC_SOLANA_DEVNET'),
+      SOLANA_DEVNET_V2_FORK_ACCOUNTS,
+    )
     await syncRentSysvar(connection, rpcEndpoint('RPC_SOLANA_DEVNET'))
+
+    // Cache the landed-execution fixture before the tests' RPC bursts: a public endpoint
+    // can make the first historical fetch wait out a rate-limit retry. Retry a miss, in
+    // case the upstream answered that request while rate-limited.
+    for (let attempt = 0; ; attempt++) {
+      const tx = await connection.getTransaction(STAGING.executeTx, {
+        maxSupportedTransactionVersion: 0,
+      })
+      if (tx) break
+      if (attempt >= 2) assert.fail('execute fixture tx should be available from the devnet RPC')
+      await new Promise((resolve) => setTimeout(resolve, 2_000 * (attempt + 1)))
+    }
 
     solanaChain = new SolanaChain(connection, networkInfo('solana-devnet'), {
       apiClient: null,
@@ -327,6 +412,17 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
     wallet = new AnchorWallet(Keypair.generate())
     const airdropSig = await connection.requestAirdrop(wallet.publicKey, 10 * LAMPORTS_PER_SOL)
     await connection.confirmTransaction(airdropSig)
+
+    // The execution-inputs buffer is fork-born: keep the fork from fetching its absent
+    // PDA upstream when a transaction first references it.
+    await surfnetRequest(connection, 'surfnet_offlineAccount', [
+      getExecutionInputsBufferPda(
+        offRamp,
+        Buffer.from(STAGING.executeMessageId.slice(2), 'hex'),
+        wallet.publicKey,
+      ).toBase58(),
+      { includeOwnedAccounts: false },
+    ])
 
     // token transfers need the sender's token account to exist to send (quotes don't)
     await (

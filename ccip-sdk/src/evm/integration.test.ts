@@ -18,7 +18,8 @@ import { CCIPVersion, ExecutionState } from '../types.ts'
 import { interfaces } from './const.ts'
 import { EVMChain } from './index.ts'
 
-// Live RPCs: Base Sepolia + OP Sepolia (+ Hedera testnet) — plus the CCIP API.
+// Live RPCs: Base Sepolia + OP Sepolia (+ Hedera testnet) — plus the CCIP APIs: the
+// historical-fee tests read the staging API, everything else the prod default.
 //
 // This suite deliberately avoids Sepolia and Fuji. Those two are the CCIP "hub"
 // testnets every other live suite in the repo already locks (fork, dest-liquidity,
@@ -30,7 +31,7 @@ import { EVMChain } from './index.ts'
 // not issue a single network call at module load
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 
-await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api'])
+await useResource(['base-sepolia', 'optimism-sepolia', 'hedera-testnet', 'api', 'api-staging'])
 
 // ── Chain constants ──
 //
