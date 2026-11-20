@@ -35,7 +35,7 @@ import {
   toUIAmount,
   withRetry,
 } from './utils.ts'
-import { type Logger, ChainFamily } from './index.ts'
+import { type Logger, ChainFamily, encodeAddressToAny, isCantonPartyId } from './index.ts'
 
 describe('getBlockNumberAtOrAfter', () => {
   /** Regular chain: ts(n) = base + n*blockTime. */
@@ -980,6 +980,26 @@ describe('getAddressBytes', () => {
     const result = getAddressBytes(address)
     assert.deepEqual(result, address)
     assert.equal(result.length, 20)
+  })
+})
+
+describe('encodeAddressToAny', () => {
+  it('should left-pad a 20-byte EVM address to 32 bytes', () => {
+    const result = encodeAddressToAny('0x1234567890123456789012345678901234567890')
+    assert.equal(
+      result.toString('hex'),
+      '0000000000000000000000001234567890123456789012345678901234567890',
+    )
+  })
+
+  it('should encode a Canton party as keccak256 of its ID', () => {
+    const party = 'ccipOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551'
+    assert.equal(isCantonPartyId(party), true)
+    const result = encodeAddressToAny(party)
+    assert.equal(
+      result.toString('hex'),
+      '952fd8afa071fc6bc441ebb7165af56f9c527d143754dbd086a971933fff74a5',
+    )
   })
 })
 
