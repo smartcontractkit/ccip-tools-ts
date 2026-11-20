@@ -62,6 +62,12 @@ carries an audit fix. Record the reason for each exception.
 - **Line swap** — `tinypool` forces the 2.x line over `@docusaurus/core`'s `^1`. The
   advisory covers all of 1.x, and the fix landed in `2.1.2`. The docs build exercises the
   swap.
+- **OpenZeppelin line** — a nested override under `@arbitrum/nitro-contracts` moves its
+  plain `@openzeppelin/contracts` and `@openzeppelin/contracts-upgradeable` to `4.9.6`.
+  This also covers the nested upgrade executor. The version-named OZ packages stay fixed;
+  do not bump those.
+- **TON validation** — `@ton/ton` uses `zod@4.6.7`. Zod 4.6.6 fixes the unbounded-collection
+  advisory, and TON 16.3.0 accepts the updated schema behavior. Unit tests cover the TON paths.
 - **Fork swap** — `bigint-buffer` maps to `@trufflesuite/bigint-buffer@1.1.10`. The
   original `<=1.1.5` has a buffer overflow, and its native build no longer compiles.
 - **The faker stub** — `postman-collection` pins `@faker-js/faker@5.5.3` and reads the
@@ -76,36 +82,33 @@ carries an audit fix. Record the reason for each exception.
 - `braces`: GHSA-vfj7-8cjw-p6xm was withdrawn on 2026-10-23. Upstream `3.0.3` replaces
   the vendored guard. The root `fill-range` devDependency is no longer necessary.
 - `image-size`: Docusaurus accepts patched upstream releases without an override.
-  The lockfile selects `2.0.4`, which provides the CJS `./fromFile` entry.
+  The lockfile selects `2.1.0`, which provides the CJS `./fromFile` entry.
   Release `2.0.3` and later fix the parser DoS. The fork is no longer necessary.
 
 The old `stream-json` acceptance is also gone; that advisory is not in the current audit.
 
 **Accepted advisories**
 
-A clean install on 2026-11-10 reports 37 audit findings: 23 low, 10 moderate, and 4 high.
-The baseline reports 41 findings, including four additional Zod peer-dependency findings.
-The regenerated dependency graph no longer reports those four findings. Zod itself remains vulnerable.
+After the 2026-11-20 dependency bump, `npm audit` reports 27 findings:
+18 low, 8 moderate, and 1 high. The earlier audit reported 32 findings.
 
 - `elliptic` (low, GHSA-848j-6mx2-7j84) — `6.6.1` is the newest release, so no patched
   version exists. It reaches the CLI through `ethers` v5
   (`@ethers-ext/signer-ledger` → `@ledgerhq/hw-app-eth` → `@ethersproject/*`).
-- `@openzeppelin/contracts` and `@openzeppelin/contracts-upgradeable`
-  (GHSA-93hq-5wgc-jc82 and related) — no fix exists inside the version-named OZ packages
-  that `@chainlink/contracts-ccip` → `@chainlink/contracts` use. Do not bump those
-  packages. This repo consumes only vendored ABIs and never compiles or deploys the
-  affected Solidity.
-- `zod@3.25.76` under `@ton/ton@16.3.0` — the fix is `>=4.6.6`. Zod 4 requires two
-  arguments for `z.record`, and `@ton/ton@16.3.0` uses the one-argument form. A forced
-  Zod 4 breaks TON support.
+  The remaining low findings follow this chain.
+- The version-named `@openzeppelin/contracts-4.7.3`, `-4.8.3`, and `-5.3.0` packages remain
+  vulnerable. Policy keeps these names and versions unchanged. They are the only high finding.
+  `@chainlink/contracts` and `@chainlink/contracts-ccip` stay moderate through those aliases.
+  This repo consumes only vendored ABIs and never compiles or deploys the affected Solidity.
 - `typedoc@0.28.20` → `minimatch@10.2.6` (GHSA-g3hv-75wg-m249) — the fix is `11.0.1`, but
-  it removes the public `Minimatch#matchOne` API. Wait for a compatible upstream release.
-- `deepmerge@4.3.1` — no fix is available.
+  it removes the public `Minimatch#matchOne` API and breaks the docs build. Keep the
+  compatible 10.x line until TypeDoc supports minimatch 11.
 
 `npm ls --all` still reports the intentional faker stub as `invalid`.
 It also reports two optional-peer mismatches: Solana codecs expect TypeScript 5, and `ws@7` expects `utf-8-validate@5`.
 The root provides TypeScript 6 and `utf-8-validate@6`. No required dependency is missing.
 Typechecks, unit tests, and the documentation build pass with this tree.
+The TON override and the documentation build are the checks for the two compatibility overrides.
 
 ## Test Suite Layout
 
@@ -443,7 +446,7 @@ export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily];
 ```typescript
 // Return type includes _tag for type narrowing at runtime
 function decodeExtraArgs(
-  data: BytesLike,
+  data: BytesLike
 ):
   | (EVMExtraArgsV1 & { _tag: "EVMExtraArgsV1" })
   | (EVMExtraArgsV2 & { _tag: "EVMExtraArgsV2" })
@@ -505,7 +508,7 @@ export type LogFilter = {
 // Continuous polling until cancelled
 const controller = new AbortController();
 const cancel$ = new Promise((resolve) =>
-  controller.signal.addEventListener("abort", resolve),
+  controller.signal.addEventListener("abort", resolve)
 );
 
 for await (const log of chain.getLogs({ watch: cancel$ })) {
@@ -523,7 +526,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   constructor(
     provider: JsonRpcApiProvider,
     network: NetworkInfo,
-    ctx?: ChainContext,
+    ctx?: ChainContext
   ) {
     super(network, ctx);
     this.provider = provider;
@@ -537,12 +540,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   // Secondary factory: from existing provider
   static async fromProvider(
     provider: JsonRpcApiProvider,
-    ctx?: ChainContext,
+    ctx?: ChainContext
   ): Promise<EVMChain> {
     return new EVMChain(
       provider,
       networkInfo(Number((await provider.getNetwork()).chainId)),
-      ctx,
+      ctx
     );
   }
 }
