@@ -74,7 +74,11 @@ export {
   listTransferPreapprovalCids,
   resolveTransferPreapprovalCid,
 } from './token-pool/preapproval.ts'
-export { CCIP_PUBLIC_LABEL, CIP112_RECEIVER_ID_META_KEY } from './token-pool/shared.ts'
+export {
+  CCIP_PUBLIC_LABEL,
+  CIP112_RECEIVER_ID_META_KEY,
+  CIP112_SENDER_ID_META_KEY,
+} from './token-pool/shared.ts'
 export { decodeDamlRecord, extractFieldValue, extractRecordField } from '../../canton/daml-parse.ts'
 export type { CantonActiveContract } from '../../canton/types.ts'
 import { normalizeRemoteAddress } from './token-pool/shared.ts'

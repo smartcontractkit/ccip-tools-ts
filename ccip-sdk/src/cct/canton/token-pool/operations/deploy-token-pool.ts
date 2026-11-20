@@ -118,6 +118,12 @@ export interface DeployTokenPoolParams {
    * label; pass `{}` to opt out). Ignored for burn-mint.
    */
   poolReceiveMetadata?: Record<string, string>
+  /**
+   * Metadata on the pool's release transfers for lock-release pools (defaults to the
+   * sender label that keeps the pool's change labelled; pass `{}` to opt out).
+   * Ignored for burn-mint.
+   */
+  poolReleaseMetadata?: Record<string, string>
   /** Transfer timeout (Daml variant; defaults to `RelativeHours 24`, matching Go). */
   transferTimeout?: TransferTimeout
   /**
@@ -250,6 +256,7 @@ export class DeployTokenPool extends CantonOperation<
       // mutated in between.
       transferTimeout: p.transferTimeout ? { ...p.transferTimeout } : undefined,
       poolReceiveMetadata: p.poolReceiveMetadata ? { ...p.poolReceiveMetadata } : undefined,
+      poolReleaseMetadata: p.poolReleaseMetadata ? { ...p.poolReleaseMetadata } : undefined,
       // oxlint-disable-next-line typescript/no-unnecessary-condition
       lanes: (p.lanes ?? []).map((l, i) => parseLaneRemoteAddresses(this.name, `lanes[${i}]`, l)),
     }
@@ -399,6 +406,7 @@ export class DeployTokenPool extends CantonOperation<
       deps: p.deps ?? null,
       poolReceiveContext: p.poolReceiveContext ?? null,
       poolReceiveMetadata: p.poolReceiveMetadata ?? null,
+      poolReleaseMetadata: p.poolReleaseMetadata ?? null,
       transferTimeout: p.transferTimeout ?? null,
       lanes: p.lanes,
     }
