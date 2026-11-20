@@ -721,7 +721,7 @@ export function simulationProvider(
  * Returns the `InstructionError` of a failed simulation: the failed instruction's index relative
  * to the caller's instructions (negative if it's a prepended compute-budget ix), and its error.
  */
-function getInstructionError(err: unknown): { index: number; error: unknown } | undefined {
+export function getInstructionError(err: unknown): { index: number; error: unknown } | undefined {
   if (!(err instanceof SimulationFailedError)) return
   const { simulationError, instructionOffset } = err
   if (typeof simulationError !== 'object' || !('InstructionError' in simulationError)) return

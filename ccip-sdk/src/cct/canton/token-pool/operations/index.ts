@@ -55,6 +55,21 @@ export {
 } from './set-rate-limit-config.ts'
 
 export {
+  type AddPoolReceiveContextContractValueParams,
+  type ExecuteAddPoolReceiveContextContractValueParams,
+  type ExecuteAddPoolReceiveContextContractValueResult,
+  type ExecuteRemovePoolReceiveContextValueParams,
+  type ExecuteRemovePoolReceiveContextValueResult,
+  type GenerateAddPoolReceiveContextContractValueParams,
+  type GenerateAddPoolReceiveContextContractValueResult,
+  type GenerateRemovePoolReceiveContextValueParams,
+  type GenerateRemovePoolReceiveContextValueResult,
+  type RemovePoolReceiveContextValueParams,
+  AddPoolReceiveContextContractValue,
+  RemovePoolReceiveContextValue,
+} from './pool-receive-context.ts'
+
+export {
   type ExecuteSetObserversParams,
   type ExecuteSetObserversResult,
   type GenerateSetObserversParams,

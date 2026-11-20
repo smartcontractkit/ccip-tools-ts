@@ -30,7 +30,7 @@ describe('CantonOperation.execute error propagation', () => {
   const op = new NoopOperation()
   const wallet = { party: 'party::1220ab' }
 
-  it('wraps a transient CCIPError as CCTTxFailedError, preserving isTransient/retryAfterMs', async () => {
+  it('wraps a transient CCIPError as CCTTxFailedError (with a commandId), preserving isTransient/retryAfterMs', async () => {
     const chain = mockChain(async () => {
       throw new CCIPError(CCIPErrorCode.CANTON_API_ERROR, 'network blip', {
         isTransient: true,
@@ -39,7 +39,11 @@ describe('CantonOperation.execute error propagation', () => {
     })
 
     await assert.rejects(
-      () => op.execute(chain, { wallet } as unknown as CantonExecuteParams<Record<string, never>>),
+      () =>
+        op.execute(chain, {
+          wallet,
+          commandId: 'my-id',
+        } as unknown as CantonExecuteParams<Record<string, never>>),
       (err: unknown) => {
         assert.ok(err instanceof CCTTxFailedError)
         assert.equal(err.isTransient, true)
@@ -62,6 +66,28 @@ describe('CantonOperation.execute error propagation', () => {
         return true
       },
     )
+  })
+
+  it('keeps a transient failure retryable only when the caller supplied a commandId', async () => {
+    const chain = mockChain(async () => {
+      throw new CCIPError(CCIPErrorCode.CANTON_API_ERROR, 'timeout', { isTransient: true })
+    })
+    const run = (extra: object) =>
+      op.execute(chain, {
+        wallet,
+        ...extra,
+      } as unknown as CantonExecuteParams<Record<string, never>>)
+
+    await assert.rejects(run({}), (err: unknown) => {
+      assert.ok(err instanceof CCTTxFailedError)
+      assert.equal(err.isTransient, false)
+      return true
+    })
+    await assert.rejects(run({ commandId: 'my-id' }), (err: unknown) => {
+      assert.ok(err instanceof CCTTxFailedError)
+      assert.equal(err.isTransient, true)
+      return true
+    })
   })
 
   it('maps DUPLICATE_COMMAND to a non-transient CCTTxFailedError naming the commandId', async () => {

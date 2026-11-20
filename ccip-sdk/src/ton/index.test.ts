@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 
-import { type Cell, Address, Dictionary, beginCell, toNano } from '@ton/core'
+import {
+  Address,
+  Cell,
+  Dictionary,
+  ExternalAddress,
+  beginCell,
+  storeMessage,
+  toNano,
+} from '@ton/core'
 import type { TonClient } from '@ton/ton'
 
 import { CCIPLogsStreamInconsistentError } from '../errors/index.ts'
@@ -1193,6 +1201,14 @@ describe('TON index unit tests', () => {
            * created_at order) — lets tests inject created_lt disorder. Each row's tx
            * must be one of `all`; `out_msg_tx_hash` is derived from `txLt`. */
           rows?: { txLt: number; createdLt: string; createdAt: string; noHash?: boolean }[]
+          /** Anchored (batched hydration) v2 pages throw: the per-tx fetch must take over. */
+          failChunk?: boolean
+          /** v2 no longer keeps transactions at or below this lt: reads of them fail with
+           * the endpoint's `LITE_SERVER_UNKNOWN ... lt not in db`. */
+          retention?: number
+          /** Transactions the index's `/transactions?hash=` lookup leaves out (an
+           * incomplete index; its ordered list still has them). */
+          unindexed?: number[]
         }
       } = {},
     ) {
@@ -1213,6 +1229,29 @@ describe('TON index unit tests', () => {
       // The v3 index: one row per account out-message. Default rows are derived
       // lt-ascending (created_at = 100 + lt, matching every tx builder); explicit
       // `rows` are served verbatim, in the given order.
+      const bodyOf = (msg: { body: Cell }) => ({ body: msg.body.toBoc().toString('base64') })
+      // The index's message hash: the hash of the full log message cell, whose 256-bit
+      // external destination holds the topic (as chainlink-ton emits it).
+      const msgHashOf = (
+        msg: { info: { src: Address; dest: { value: bigint }; createdLt: bigint }; body: Cell },
+        createdAt: number | string,
+      ) =>
+        beginCell()
+          .store(
+            storeMessage({
+              info: {
+                type: 'external-out',
+                src: msg.info.src,
+                dest: new ExternalAddress(msg.info.dest.value, 256),
+                createdLt: msg.info.createdLt,
+                createdAt: Number(createdAt),
+              },
+              body: msg.body,
+            }),
+          )
+          .endCell()
+          .hash()
+          .toString('base64')
       const v3Rows: {
         hash: string
         source: string | null
@@ -1220,33 +1259,75 @@ describe('TON index unit tests', () => {
         created_lt: string
         created_at: string
         out_msg_tx_hash?: string | null
+        message_content?: { body: string }
       }[] =
         v3?.rows?.map((r) => ({
-          hash: `${hashB64(r.txLt)}#${r.createdLt}`,
+          hash: msgHashOf(
+            {
+              ...[...byLt.get(BigInt(r.txLt))!.outMessages.values()][0]!,
+              info: {
+                ...[...byLt.get(BigInt(r.txLt))!.outMessages.values()][0]!.info,
+                createdLt: BigInt(r.createdLt),
+              },
+            },
+            r.createdAt,
+          ),
           source: OFFRAMP,
           destination: null,
           created_lt: r.createdLt,
           created_at: r.createdAt,
           out_msg_tx_hash: r.noHash ? null : hashB64(r.txLt),
+          message_content: bodyOf([...byLt.get(BigInt(r.txLt))!.outMessages.values()][0]!),
         })) ??
         asc.flatMap((lt) => {
           const t = byLt.get(BigInt(lt))!
           return [...t.outMessages.values()].map((msg) => ({
-            hash: `${hashB64(lt)}#${String(msg.info.createdLt)}`,
+            hash: msgHashOf(msg, t.now),
             source: OFFRAMP,
             destination: null,
             created_lt: String(msg.info.createdLt),
             created_at: String(t.now),
             out_msg_tx_hash: hashB64(lt),
+            message_content: bodyOf(msg),
           }))
         })
+      // The index filters rows by the first 32 bits of their body (`opcode`).
+      const opcodeOf = (row: (typeof v3Rows)[number]) => {
+        const body = Cell.fromBase64(row.message_content!.body).beginParse()
+        return body.remainingBits >= 32 ? body.preloadUint(32) : undefined
+      }
+      const retained = (lt: bigint | string) => v3?.retention == null || BigInt(lt) > v3.retention
+      const retentionError = () =>
+        Object.assign(new Error('Request failed with status code 500'), {
+          response: {
+            status: 500,
+            data: {
+              ok: false,
+              error:
+                'LITE_SERVER_UNKNOWN: cannot compute block with specified transaction: lt not in db',
+            },
+          },
+        })
 
-      const calls = { v3Messages: 0, v3Reqs: [] as Record<string, string>[], v2Walk: 0 }
+      const calls = {
+        v3Messages: 0,
+        v3Reqs: [] as Record<string, string>[],
+        /** Every v3 index URL requested. */
+        v3Urls: [] as string[],
+        /** v2 getTransactions pages that WALK the account's tx chain (no inclusive anchor). */
+        v2Walk: 0,
+        /** `limit` of each anchored inclusive v2 page: the fast path's batched hydration
+         * (and the index-driven deep walk, which pages the same way). */
+        v2Chunks: [] as number[],
+        /** lts hydrated one by one through getTransaction(lt, hash). */
+        v2Single: [] as number[],
+      }
       const fetchImpl = (async (input: unknown, opts?: { body?: string }) => {
         const url = String(input instanceof Request ? input.url : input)
         if (url.includes('/api/v3/')) {
           if (!v3) throw new Error(`unexpected v3 url (harness has no v3): ${url}`)
           calls.v3Messages++
+          calls.v3Urls.push(url)
           const req = Object.fromEntries(new URL(url).searchParams.entries())
           if (url.includes('/messages')) {
             if (v3.fail) return new Response('v3 down', { status: 500 })
@@ -1258,6 +1339,7 @@ describe('TON index unit tests', () => {
             const offset = Number(req.offset ?? 0)
             let msgs = v3Rows.filter((m) => Number(m.created_at) >= startUtime)
             if (startLt != null) msgs = msgs.filter((m) => BigInt(m.created_lt) >= startLt)
+            if (req.opcode != null) msgs = msgs.filter((m) => opcodeOf(m) === Number(req.opcode))
             return json({ messages: msgs.slice(offset, offset + limit) })
           }
           if (url.includes('/transactions')) {
@@ -1268,13 +1350,30 @@ describe('TON index unit tests', () => {
             let txs = asc
               .filter((lt) => startLt == null || BigInt(lt) >= startLt)
               .map((lt) => ({
-                account: OFFRAMP,
+                account: OFFRAMP.toUpperCase(),
                 hash: hashB64(lt),
                 lt: String(lt),
                 now: 100 + lt,
                 mc_block_seqno: blockOf(BigInt(lt)),
+                prev_trans_lt: String(prevLt.get(BigInt(lt))),
+                out_msgs: [...byLt.get(BigInt(lt))!.outMessages.values()].map((msg) => ({
+                  hash: msgHashOf(msg, 100 + lt),
+                  source: OFFRAMP.toUpperCase(),
+                  destination: null,
+                  created_lt: String(msg.info.createdLt),
+                  created_at: String(100 + lt),
+                  message_content: bodyOf(msg),
+                })),
               }))
-            if (req.hash != null) txs = txs.filter((t) => t.hash === req.hash)
+            // The index takes the hash as base64 or hex.
+            if (req.hash != null)
+              txs = txs
+                .filter((t) => !v3.unindexed?.includes(Number(t.lt)))
+                .filter(
+                  (t) =>
+                    t.hash === req.hash ||
+                    Buffer.from(t.hash, 'base64').toString('hex') === req.hash!.toLowerCase(),
+                )
             return json({ transactions: txs.slice(0, Number(req.limit ?? 100)) })
           }
           if (url.includes('/masterchainInfo')) return json({ last: { seqno: v3.tip ?? latest } })
@@ -1307,7 +1406,10 @@ describe('TON index unit tests', () => {
           _a: Address,
           o: { limit: number; lt?: string; hash?: string; to_lt?: string; inclusive?: boolean },
         ) => {
-          calls.v2Walk++
+          if (o.lt != null && o.hash != null && o.inclusive) {
+            if (v3?.failChunk) throw new Error('chunk page failed')
+            calls.v2Chunks.push(o.limit)
+          } else calls.v2Walk++
           let start = 0
           if (o.lt != null) {
             const at = linked.findIndex((t) => t.lt === BigInt(o.lt!))
@@ -1315,12 +1417,16 @@ describe('TON index unit tests', () => {
           }
           let page = linked.slice(start, start + o.limit)
           if (o.to_lt != null) page = page.filter((t) => t.lt >= BigInt(o.to_lt!))
+          if (page.some((t) => !retained(t.lt))) throw retentionError()
           return page as unknown as Awaited<ReturnType<TonClient['getTransactions']>>
         },
         // Fast-path hydration fetches raw txs by (lt, hash) straight from the client;
         // the LINKED copy carries prevTransactionLt, which buildChainTransaction reads.
-        getTransaction: async (_a: Address, lt: string, _hash: string) =>
-          linked.find((t) => t.lt === BigInt(lt)) ?? null,
+        getTransaction: async (_a: Address, lt: string, _hash: string) => {
+          calls.v2Single.push(Number(lt))
+          if (!retained(lt)) throw retentionError()
+          return linked.find((t) => t.lt === BigInt(lt)) ?? null
+        },
       } as unknown as TonClient
 
       const chain = new TONChain(client, mockNetworkInfo, { fetch: fetchImpl })
@@ -1934,6 +2040,643 @@ describe('TON index unit tests', () => {
           '10105',
           "the turn cursor is the page's max created_at, not its lt-max row's",
         )
+      })
+
+      describe('batched hydration', () => {
+        // A tx without ext-out messages: part of the account's chain (and of the
+        // index's tx list), absent from /messages.
+        const silent = (lt: number) => ({ ...tx(lt), outMessages: new Map() })
+
+        it('hydrates the event txs of a page with one anchored v2 page', async () => {
+          // Three event txs with event-less txs between them sit at positions 0, 2, 4
+          // of the account's chain: one page of 5 anchored at the newest covers them.
+          const chain = makeChain(13, [10_001, 10_002, 11_001, 11_002, 12_001], [], {
+            v3: {},
+            txOf: (lt) => (lt === 10_002 || lt === 11_002 ? silent(lt) : tx(lt)),
+          })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            ['10001', '11001', '12001'],
+          )
+          assert.deepEqual(chain.calls.v2Chunks, [5], 'one page spans the three event txs')
+          assert.deepEqual(chain.calls.v2Single, [], 'no per-tx hydration')
+          assert.equal(chain.calls.v2Walk, 0, 'no tx-chain walk')
+        })
+
+        it('keeps the single (lt, hash) fetch for a lone event tx', async () => {
+          const chain = makeChain(13, [11_001], [], { v3: {} })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            ['11001'],
+          )
+          assert.deepEqual(chain.calls.v2Chunks, [], 'a page would cost the same call')
+          assert.deepEqual(chain.calls.v2Single, [11_001])
+        })
+
+        it('never spans more than one page between event txs', async () => {
+          // 120 consecutive account txs; only the first and the last carry an event.
+          // They are 119 positions apart: no single page covers both.
+          const lts = [
+            ...Array.from({ length: 60 }, (_, i) => 10_001 + i),
+            ...Array.from({ length: 60 }, (_, i) => 11_001 + i),
+          ]
+          const first = lts[0]!
+          const last = lts[lts.length - 1]!
+          const chain = makeChain(13, lts, [], {
+            v3: {},
+            txOf: (lt) => (lt === first || lt === last ? tx(lt) : silent(lt)),
+          })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            [String(first), String(last)],
+          )
+          assert.deepEqual(chain.calls.v2Chunks, [])
+          assert.deepEqual(chain.calls.v2Single, [first, last])
+        })
+
+        it('falls back to per-tx hydration when the page fails', async () => {
+          const chain = makeChain(13, [10_001, 11_001, 12_001], [], { v3: { failChunk: true } })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            ['10001', '11001', '12001'],
+            'the scan is complete without the batch',
+          )
+          assert.deepEqual(chain.calls.v2Single, [10_001, 11_001, 12_001])
+        })
+
+        it('does not read ahead past the seal boundary', async () => {
+          // Tip 13 ⇒ cutoff 12. The index stamps tx 13_001 with block 13: the page
+          // stops at 12_001, and only the row loop reads the first unsealed tx (the
+          // consumer stops at it), as it did before.
+          const chain = makeChain(13, [11_001, 12_001, 13_001], [], { v3: {} })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            ['11001', '12001'],
+            'the sealed blocks are complete',
+          )
+          assert.deepEqual(chain.calls.v2Chunks, [2], 'the page stops at the cutoff')
+          assert.deepEqual(chain.calls.v2Single, [13_001])
+        })
+
+        it('reads at most one index page ahead of the tx it hydrates', async () => {
+          // 300 consecutive account txs (three index pages of 100); only the tx at
+          // position 50 carries an event. Its own meta is on page 1; looking for
+          // followers within 100 positions needs page 2, and never page 3.
+          const lts = Array.from(
+            { length: 300 },
+            (_, i) => 10_001 + Math.floor(i / 90) * 1000 + (i % 90),
+          )
+          const event = lts[50]!
+          const chain = makeChain(20, lts, [], {
+            v3: {},
+            txOf: (lt) => (lt === event ? tx(lt) : silent(lt)),
+          })
+          const logs = await collect(chain, { startTime: 1 })
+          assert.deepEqual(
+            logs.map((l) => l.lt),
+            [String(event)],
+          )
+          assert.equal(
+            chain.calls.v3Urls.filter((url) => url.includes('/transactions')).length,
+            2,
+            'index tx pages read',
+          )
+          assert.deepEqual(chain.calls.v2Single, [event], 'no follower: the single fetch')
+          assert.deepEqual(chain.calls.v2Chunks, [])
+        })
+      })
+
+      describe('index fallback when v2 no longer keeps the data', () => {
+        const SEPOLIA = 16015286601757825753n
+        const SEPOLIA_ONRAMP = '0x23a5084Fa78104F3DF11C63Ae59fcac4f6AD9DeE'
+        const MESSAGE_ID = `0x${'1'.repeat(64)}`
+        type Harness = ReturnType<typeof makeChain>
+        const withVersion = (chain: Harness, version: string) => {
+          chain.typeAndVersion = async () => ['OffRamp', '1.6.0', `OffRamp ${version}`]
+          return chain
+        }
+        /** The hash of a harness tx, as the hex the public API takes. */
+        const hexOf = (lt: number) => {
+          const buf = Buffer.alloc(32)
+          buf.writeUInt32BE(lt >>> 0, 28)
+          return buf.toString('hex')
+        }
+        /** A tx carrying a rooted sepolia CommitReportAccepted of [min, max]. */
+        const commitTx = (lt: number, min: bigint, max: bigint) => ({
+          ...tx(lt),
+          outMessages: new Map([
+            [
+              0,
+              {
+                info: {
+                  type: 'external-out' as const,
+                  src: Address.parse(OFFRAMP),
+                  dest: { value: BigInt(crc32('CommitReportAccepted')) },
+                  createdLt: BigInt(lt),
+                },
+                body: beginCell()
+                  .storeBit(1)
+                  .storeUint(SEPOLIA, 64)
+                  .storeUint(20, 8)
+                  .storeBuffer(Buffer.from(SEPOLIA_ONRAMP.slice(2), 'hex'))
+                  .storeUint(min, 64)
+                  .storeUint(max, 64)
+                  .storeUint(BigInt(`0x${'5'.repeat(64)}`), 256)
+                  .storeBit(0)
+                  .endCell(),
+              },
+            ],
+          ]),
+        })
+
+        /** The harness's error for a v2 read its liteserver no longer keeps. */
+        const retentionError = () =>
+          Object.assign(new Error('Request failed with status code 500'), {
+            response: { status: 500, data: { error: 'LITE_SERVER_UNKNOWN: lt not in db' } },
+          })
+        const timeoutError = () =>
+          Object.assign(new Error('timeout of 30000ms exceeded'), { code: 'ECONNABORTED' })
+        const indexTxReads = (chain: Harness) =>
+          chain.calls.v3Urls.filter((u) => u.includes('/transactions'))
+
+        it('getTransaction rebuilds a transaction v2 no longer keeps from the index', async () => {
+          // No version gate: the index proves each log's topic from its message hash.
+          const chain = withVersion(
+            makeChain(20, [10_001, 11_001], [], { v3: { retention: 10_500 } }),
+            '9.9.9',
+          )
+          const old = await chain.getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`)
+          assert.equal(old.hash, `${OFFRAMP}:10001:${hexOf(10_001)}`)
+          assert.equal(old.blockNumber, 10, 'the block the index stamps')
+          assert.equal(old.timestamp, 100 + 10_001)
+          assert.deepEqual(
+            old.logs.map((l) => [l.topics[0], l.index, l.transactionHash]),
+            [[topicCrc, 10_001, old.hash]],
+            'its log, with the topic its message hash proves',
+          )
+          assert.equal(TONChain.decodeReceipt(old.logs[0]!)?.messageId, MESSAGE_ID)
+          assert.deepEqual(chain.calls.v2Single, [10_001], 'v2 was asked first')
+
+          const recent = await chain.getTransaction(`${OFFRAMP}:11001:${hexOf(11_001)}`)
+          assert.equal(recent.blockNumber, 11)
+          assert.equal(
+            indexTxReads(chain).length,
+            1,
+            'a transaction v2 still keeps is not read from the index',
+          )
+        })
+
+        it('getTransaction by raw hash reuses the lookup row for the fallback', async () => {
+          const chain = makeChain(20, [10_001], [], { v3: { retention: 10_500 } })
+          const old = await chain.getTransaction(hexOf(10_001))
+          assert.equal(old.hash, `${OFFRAMP}:10001:${hexOf(10_001)}`)
+          assert.deepEqual(old.logs[0]?.topics, [topicCrc])
+          assert.equal(indexTxReads(chain).length, 1, 'only the raw-hash lookup read the index')
+        })
+
+        it('getTransaction keeps the v2 error when the index lacks the transaction', async () => {
+          const chain = makeChain(20, [10_001], [], {
+            v3: { retention: 10_500, unindexed: [10_001] },
+          })
+          await assert.rejects(
+            chain.getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`),
+            /status code 500/,
+          )
+        })
+
+        it('getTransaction takes a v2 timeout to the index only for an old transaction', async (t) => {
+          const timingOut = () => {
+            const chain = makeChain(20, [10_001], [], { v3: {} })
+            ;(chain as unknown as { provider: TonClient }).provider.getTransaction = async () => {
+              throw timeoutError()
+            }
+            return chain
+          }
+          // The harness's tx is from unix time 10_101: old by default.
+          const old = await timingOut().getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`)
+          assert.deepEqual(old.logs[0]?.topics, [topicCrc], 'an old tx: the index answers')
+
+          t.mock.method(Date, 'now', () => (100 + 10_001 + 60) * 1e3) // the tx is 1 min old
+          await assert.rejects(
+            timingOut().getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`),
+            /timeout of 30000ms exceeded/,
+            'a recent tx: a slow v2 answer, not a retention limit',
+          )
+        })
+
+        it('getTransaction keeps the v2 transaction and takes only the block from the index', async () => {
+          const chain = makeChain(20, [10_001], [], { v3: {} })
+          ;(chain as unknown as { committingSeqno: () => Promise<number> }).committingSeqno =
+            async () => {
+              throw retentionError()
+            }
+          const res = await chain.getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`)
+          assert.equal(res.blockNumber, 10, 'the block the index stamps')
+          assert.deepEqual(chain.calls.v2Single, [10_001], 'the transaction came from v2')
+          assert.deepEqual(res.logs[0]?.topics, [topicCrc], 'v2 logs keep their topic')
+          assert.equal(indexTxReads(chain).length, 1)
+        })
+
+        it('getTransaction keeps other v2 errors, with no index read', async () => {
+          const chain = makeChain(20, [10_001], [], { v3: {} })
+          ;(chain as unknown as { provider: TonClient }).provider.getTransaction = async () => {
+            throw new Error('Request failed with status code 429')
+          }
+          await assert.rejects(
+            chain.getTransaction(`${OFFRAMP}:10001:${hexOf(10_001)}`),
+            /status code 429/,
+          )
+          assert.equal(chain.calls.v3Urls.length, 0)
+        })
+
+        it('getExecutionReceipts reads the executions from the index after the v2 scan fails', async () => {
+          const chain = withVersion(
+            makeChain(20, [10_001, 11_001, 12_001], [], { v3: { retention: 15_000 } }),
+            '1.6.2',
+          )
+          const out = []
+          for await (const exec of chain.getExecutionReceipts({
+            offRamp: OFFRAMP,
+            sourceChainSelector: SEPOLIA,
+            messageId: MESSAGE_ID,
+            startTime: 1,
+          }))
+            out.push(exec)
+          assert.deepEqual(
+            out.map((e) => [e.receipt.state, e.log.blockNumber, e.log.index]),
+            [[2, 10, 10_001]],
+            'the first Success, stamped with its block, and nothing after it',
+          )
+          const messages = chain.calls.v3Reqs.filter((r) => r.opcode != null)
+          assert.ok(messages.length >= 1, 'the index rows were narrowed to the source chain')
+          assert.ok(messages.every((r) => r.opcode === '0xde41ba4f'))
+        })
+
+        it('getExecutionReceipts keeps the v2 failure when watching, or on an unverified version', async () => {
+          for (const [version, watch] of [
+            ['1.6.2', AbortSignal.timeout(60_000)],
+            ['1.8.0', undefined],
+          ] as const) {
+            const chain = withVersion(
+              makeChain(20, [10_001, 11_001], [], { v3: { retention: 15_000 } }),
+              version,
+            )
+            const scan = async () => {
+              for await (const _ of chain.getExecutionReceipts({
+                offRamp: OFFRAMP,
+                sourceChainSelector: SEPOLIA,
+                startTime: 1,
+                ...(watch && { watch }),
+              }));
+            }
+            await assert.rejects(scan(), `no index fallback (${version}, watch=${!!watch})`)
+          }
+        })
+
+        it('the receipt fallback keeps the start block and leaves since resumes on v2', async () => {
+          const make = () =>
+            withVersion(
+              makeChain(20, [10_001, 11_001, 12_001], [], { v3: { retention: 15_000 } }),
+              '1.6.2',
+            )
+          const scan = async (chain: Harness, opts: Record<string, unknown>) => {
+            const out = []
+            for await (const exec of chain.getExecutionReceipts({
+              offRamp: OFFRAMP,
+              sourceChainSelector: SEPOLIA,
+              startTime: 1,
+              ...opts,
+            } as never))
+              out.push(exec.log.blockNumber)
+            return out
+          }
+          assert.deepEqual(await scan(make(), { startBlock: 11 }), [11], 'block 10 is below it')
+          assert.deepEqual(
+            await scan(make(), {
+              verifications: {
+                report: { merkleRoot: `0x${'5'.repeat(64)}` },
+                log: { blockNumber: 12, blockTimestamp: 1 },
+              },
+            }),
+            [12],
+            "the commit's block is the floor",
+          )
+          // A since scan that emitted nothing ends quietly (its poller re-polls); no
+          // fallback answers it.
+          assert.deepEqual(await scan(make(), { since: hintFor(10_001) }), [])
+        })
+
+        it('reports a matching row whose transaction the index lacks as an incomplete read', async () => {
+          const chain = withVersion(
+            makeChain(20, [10_001, 11_001], [], { v3: { retention: 15_000, unindexed: [10_001] } }),
+            '1.6.2',
+          )
+          const scan = async () => {
+            for await (const _ of chain.getExecutionReceipts({
+              offRamp: OFFRAMP,
+              sourceChainSelector: SEPOLIA,
+              messageId: MESSAGE_ID,
+              startTime: 1,
+            }));
+          }
+          await assert.rejects(
+            scan(),
+            (err: unknown) =>
+              err instanceof CCIPLogsStreamInconsistentError &&
+              /missing from the index/.test(err.message),
+            'not an empty result',
+          )
+        })
+
+        it('takes no fallback when the scan failed for another reason than v2 retention', async () => {
+          // A row without its tx hash: an index self-contradiction, not v2's data age.
+          const chain = withVersion(
+            makeChain(20, [10_001], [], {
+              v3: {
+                rows: [{ txLt: 10_001, createdLt: '10001', createdAt: '10101', noHash: true }],
+              },
+            }),
+            '1.6.2',
+          )
+          await assert.rejects(async () => {
+            for await (const _ of chain.getExecutionReceipts({
+              offRamp: OFFRAMP,
+              sourceChainSelector: SEPOLIA,
+              startTime: 1,
+            }));
+          }, CCIPLogsStreamInconsistentError)
+          const indexReads = chain.calls.v3Reqs.filter(
+            (r) => r.opcode != null && r.start_utime === '1',
+          )
+          assert.equal(indexReads.length, 1, 'only the scan read the index; no fallback pass')
+        })
+
+        it('getVerifications reads the commit from the index after the v2 scan fails', async () => {
+          const chain = withVersion(
+            makeChain(20, [10_001, 11_001, 12_001], [], {
+              v3: { retention: 15_000 },
+              txOf: (lt) =>
+                lt === 10_001
+                  ? commitTx(lt, 5n, 6n)
+                  : lt === 11_001
+                    ? commitTx(lt, 7n, 9n)
+                    : tx(lt),
+            }),
+            '1.6.2',
+          )
+          const verifications = await chain.getVerifications({
+            offRamp: OFFRAMP,
+            request: {
+              lane: {
+                sourceChainSelector: SEPOLIA,
+                destChainSelector: 13879075125137744094n,
+                onRamp: SEPOLIA_ONRAMP,
+                version: '1.6.0',
+              },
+              message: { sequenceNumber: 8n, messageId: MESSAGE_ID },
+              log: { blockTimestamp: 1 },
+            },
+          } as never)
+          assert.ok('report' in verifications)
+          assert.equal(verifications.report.minSeqNr, 7n, 'the commit that covers the message')
+          assert.equal(verifications.log.index, 11_001)
+          assert.equal(verifications.log.blockNumber, 11)
+          assert.equal(verifications.log.topics[0], crc32('CommitReportAccepted'))
+          assert.ok(
+            chain.calls.v3Reqs.some((r) => r.opcode === '0xef20dd27'),
+            'only rooted sepolia commits were read',
+          )
+        })
+
+        it('the commit fallback keeps the start block', async () => {
+          const chain = withVersion(
+            makeChain(20, [10_001, 11_001], [], {
+              v3: { retention: 15_000 },
+              txOf: (lt) => commitTx(lt, 7n, 9n),
+            }),
+            '1.6.2',
+          )
+          const verifications = await chain.getVerifications({
+            offRamp: OFFRAMP,
+            startBlock: 11,
+            request: {
+              lane: {
+                sourceChainSelector: SEPOLIA,
+                destChainSelector: 13879075125137744094n,
+                onRamp: SEPOLIA_ONRAMP,
+                version: '1.6.0',
+              },
+              message: { sequenceNumber: 8n, messageId: MESSAGE_ID },
+              log: { blockTimestamp: 1 },
+            },
+          } as never)
+          assert.ok('report' in verifications)
+          assert.equal(
+            verifications.log.blockNumber,
+            11,
+            'the covering commit at block 10 is below it',
+          )
+        })
+      })
+
+      describe('execution scan shortcuts (getExecutionReceipts)', () => {
+        const SEPOLIA = 16015286601757825753n
+        const ROOT = `0x${'5'.repeat(64)}`
+        type Harness = ReturnType<typeof makeChain>
+
+        const withVersion = (chain: Harness, version: string) => {
+          chain.typeAndVersion = async () => ['OffRamp', '1.6.0', `OffRamp ${version}`]
+          return chain
+        }
+        /** Replaces the MerkleRoot lookup; records the roots it was asked for. */
+        const withRootRoute = (chain: Harness, answer: number[] | undefined) => {
+          const asked: string[] = []
+          ;(
+            chain as unknown as {
+              executionTxsViaMerkleRoot: (a: string, root: string) => Promise<unknown>
+            }
+          ).executionTxsViaMerkleRoot = async (_a, root) => {
+            asked.push(root)
+            return (
+              answer &&
+              Promise.all(
+                answer.map((lt) =>
+                  chain.buildChainTransaction(
+                    { ...tx(lt), prevTransactionLt: 0n } as never,
+                    Address.parse(OFFRAMP),
+                  ),
+                ),
+              )
+            )
+          }
+          return asked
+        }
+        const receipts = async (chain: Harness, opts: Record<string, unknown>) => {
+          const out = []
+          for await (const exec of chain.getExecutionReceipts({
+            offRamp: OFFRAMP,
+            startTime: 1,
+            ...opts,
+          } as never))
+            out.push(exec)
+          return out
+        }
+        const commit = (blockNumber: number) => ({
+          report: { merkleRoot: ROOT },
+          log: { blockNumber },
+        })
+        // No receipt matches this id, so a scan reads every page instead of stopping
+        // at the first Success.
+        const NO_SUCH_MESSAGE = `0x${'2'.repeat(64)}`
+
+        it('asks the index for the source chain rows only, on every page', async () => {
+          const chain = withVersion(
+            makeChain(13, [10_001, 11_001, 12_001], [], { v3: {} }),
+            '1.6.2',
+          )
+          await receipts(chain, {
+            sourceChainSelector: SEPOLIA,
+            messageId: NO_SUCH_MESSAGE,
+            page: 1,
+          })
+          assert.ok(chain.calls.v3Reqs.length > 1, 'the scan turned pages')
+          assert.deepEqual(
+            [...new Set(chain.calls.v3Reqs.map((r) => r.opcode))],
+            ['0xde41ba4f'],
+            'the high 32 bits of the selector filter the seed and every turn',
+          )
+        })
+
+        it('scans unfiltered on an OffRamp version that was not verified', async () => {
+          const chain = withVersion(makeChain(13, [11_001], [], { v3: {} }), '1.8.0')
+          const out = await receipts(chain, { sourceChainSelector: SEPOLIA })
+          assert.equal(out.length, 1)
+          assert.equal(chain.calls.v3Reqs[0]?.opcode, undefined)
+        })
+
+        it('scans unfiltered when the OffRamp version cannot be read', async () => {
+          const chain = makeChain(13, [11_001], [], { v3: {} })
+          chain.typeAndVersion = async () => {
+            throw new Error('getter failed')
+          }
+          const out = await receipts(chain, { sourceChainSelector: SEPOLIA })
+          assert.equal(out.length, 1, 'the plain scan still answers')
+          assert.equal(chain.calls.v3Reqs[0]?.opcode, undefined)
+        })
+
+        it('getLogs itself never narrows', async () => {
+          const chain = withVersion(makeChain(13, [11_001], [], { v3: {} }), '1.6.2')
+          await collect(chain, { startTime: 1 })
+          assert.equal(chain.calls.v3Reqs[0]?.opcode, undefined)
+        })
+
+        it('reads executions through the MerkleRoot contract when the commit is known', async () => {
+          const chain = withVersion(
+            makeChain(20, [10_001, 11_001, 12_001], [], { v3: {} }),
+            '1.6.2',
+          )
+          const asked = withRootRoute(chain, [11_001])
+          const out = await receipts(chain, { verifications: commit(10) })
+          assert.deepEqual(asked, [ROOT])
+          assert.deepEqual(
+            out.map((e) => [e.log.blockNumber, e.log.index]),
+            [[11, 11_001]],
+            'only the tx the MerkleRoot contract leads to, stamped with its block',
+          )
+          assert.equal(chain.calls.v3Messages, 0, 'no index scan')
+          assert.equal(chain.calls.v2Walk, 0, 'no walk of the OffRamp history')
+        })
+
+        it('answers "not executed yet" without a scan', async () => {
+          const chain = withVersion(makeChain(20, [10_001, 11_001], [], { v3: {} }), '1.6.2')
+          withRootRoute(chain, [])
+          assert.deepEqual(await receipts(chain, { verifications: commit(10) }), [])
+          assert.equal(chain.calls.v3Messages + chain.calls.v2Walk, 0)
+        })
+
+        it('scans when the MerkleRoot route cannot answer', async () => {
+          const chain = withVersion(makeChain(20, [10_001, 11_001], [], { v3: {} }), '1.6.2')
+          withRootRoute(chain, undefined)
+          const out = await receipts(chain, { verifications: commit(10) })
+          assert.equal(out.length, 1, 'the scan found the execution')
+          assert.ok(chain.calls.v2Walk >= 1, 'the OffRamp history was walked')
+        })
+
+        it('keeps explicit start floors on the MerkleRoot route', async () => {
+          const chain = withVersion(makeChain(20, [], [], { v3: {} }), '1.6.2')
+          withRootRoute(chain, [10_001, 12_001])
+          const byBlock = await receipts(chain, { verifications: commit(10), startBlock: 11 })
+          assert.deepEqual(
+            byBlock.map((e) => e.log.blockNumber),
+            [12],
+            'the block-10 tx is below startBlock',
+          )
+          // The harness stamps a tx with timestamp 100 + lt.
+          const byTime = await receipts(chain, {
+            verifications: commit(10),
+            startTime: 100 + 12_001,
+          })
+          assert.deepEqual(
+            byTime.map((e) => e.log.blockNumber),
+            [12],
+            'the block-10 tx is before startTime',
+          )
+        })
+
+        it('applies the message filters and stops at the first Success', async () => {
+          // Every harness tx carries a Success receipt of the same message.
+          const chain = withVersion(makeChain(20, [], [], { v3: {} }), '1.6.2')
+          withRootRoute(chain, [11_001, 12_001])
+          const first = await receipts(chain, { verifications: commit(10) })
+          assert.deepEqual(
+            first.map((e) => e.log.index),
+            [11_001],
+            'nothing after the first Success',
+          )
+          assert.deepEqual(
+            await receipts(chain, { verifications: commit(10), messageId: NO_SUCH_MESSAGE }),
+            [],
+          )
+          assert.deepEqual(
+            await receipts(chain, { verifications: commit(10), sequenceNumber: 2n }),
+            [],
+          )
+          assert.deepEqual(
+            await receipts(chain, { verifications: commit(10), sourceChainSelector: 1n }),
+            [],
+          )
+        })
+
+        it('scans, without the MerkleRoot route, when resuming from a since hint', async () => {
+          const chain = withVersion(
+            makeChain(20, [10_001, 11_001, 12_001], [], { v3: {} }),
+            '1.6.2',
+          )
+          const asked = withRootRoute(chain, [])
+          const out = await receipts(chain, {
+            verifications: commit(10),
+            since: hintFor(11_001),
+          })
+          assert.deepEqual(asked, [])
+          assert.deepEqual(
+            out.map((e) => e.log.index),
+            [12_001],
+            'the scan resumed after the hinted log',
+          )
+        })
+
+        it('does not use the MerkleRoot route on an unverified OffRamp version', async () => {
+          const chain = withVersion(makeChain(20, [10_001, 11_001], [], { v3: {} }), '1.8.0')
+          const asked = withRootRoute(chain, [])
+          const out = await receipts(chain, { verifications: commit(10) })
+          assert.deepEqual(asked, [])
+          assert.equal(out.length, 1, 'the plain scan answered')
+        })
       })
     })
   })

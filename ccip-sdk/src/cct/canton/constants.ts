@@ -16,18 +16,18 @@ export type PoolType = 'burnMint' | 'lockRelease'
 export const FACTORY_TEMPLATE_ID = '#ccip-factory-v2:CCIP.FactoryV2:CCIPFactory'
 
 /** BurnMintTokenPool template — the registry-pools family
- * (`CCIP.Registry.BurnMintTokenPoolV2`, package `ccip-registry-burn-mint-token-pool`).
+ * (`CCIP.Registry.BurnMintTokenPoolV2`, package `ccip-registry-burn-mint-token-pool-v2`).
  * This is the ONLY BurnMintTokenPool family the SDK targets: it adds the
  * mandatory `observers` field (EDS auto-detection) and the atomic
  * `Initialize` choice the production-pools family (`CCIP.BurnMintTokenPoolV2`,
  * pre-registry) lacks. Nothing in this SDK should reference the production
  * package. */
 export const BURN_MINT_POOL_TEMPLATE_ID =
-  '#ccip-registry-burn-mint-token-pool:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
+  '#ccip-registry-burn-mint-token-pool-v2:CCIP.Registry.BurnMintTokenPoolV2:BurnMintTokenPool'
 
 /** LockReleaseTokenPool template (registry-pools family). */
 export const LOCK_RELEASE_POOL_TEMPLATE_ID =
-  '#ccip-registry-lock-release-token-pool:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
+  '#ccip-registry-lock-release-token-pool-v2:CCIP.Registry.LockReleaseTokenPoolV2:LockReleaseTokenPool'
 
 /** Symbolic template ID per {@link PoolType}. */
 export const POOL_TEMPLATE_IDS: Readonly<Record<PoolType, string>> = {
@@ -37,7 +37,7 @@ export const POOL_TEMPLATE_IDS: Readonly<Record<PoolType, string>> = {
 
 /** Registry RateLimiter template. */
 export const RATE_LIMITER_TEMPLATE_ID =
-  '#ccip-registry-rate-limiter:CCIP.Registry.RateLimiterV2:RateLimiter'
+  '#ccip-registry-rate-limiter-v2:CCIP.Registry.RateLimiterV2:RateLimiter'
 
 /** TokenAdminRegistry template. */
 export const TAR_TEMPLATE_ID = '#ccip-core-v2:CCIP.CoreV2.TokenAdminRegistry:TokenAdminRegistry'

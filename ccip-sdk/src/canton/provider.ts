@@ -8,16 +8,26 @@ import type {
   RpcTypes,
   Wallet,
 } from '@canton-network/core-wallet-dapp-rpc-client'
-import { type PartyId, parsePartyId } from '@chainlink/ccip-sdk/src/canton/addressCodec.ts'
+import axios from 'axios'
+
+import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
+import { getDataBytes } from '../utils.ts'
+import { type PartyId, parsePartyId } from './addressCodec.ts'
 import type {
   JsExecuteSubmissionAndWaitForTransactionRequest,
   JsPrepareSubmissionRequest,
   JsPrepareSubmissionResponse,
   SinglePartySignatures,
-} from '@chainlink/ccip-sdk/src/canton/clients/ledger-api/client.ts'
-import type { CantonRpcProvider } from '@chainlink/ccip-sdk/src/canton/types.ts'
-import { CCIPError, CCIPErrorCode, getDataBytes } from '@chainlink/ccip-sdk/src/index.ts'
-import axios from 'axios'
+} from './clients/ledger-api/client.ts'
+import type { CantonRpcProvider } from './types.ts'
+
+/**
+ * Node-side Canton provider (`CantonJsonRpcProvider`) for the Canton Ledger
+ * API, plus the {@link TransactionSigner} interface for external signing
+ * (e.g. Ledger devices).
+ *
+ * @packageDocumentation
+ */
 
 /**
  * Signs a prepared Canton transaction hash on behalf of an external party.
@@ -29,7 +39,7 @@ import axios from 'axios'
  * @example
  * ```ts
  * const signer: TransactionSigner = {
- *   async sign(hash) {
+ *   async signTxHash(hash) {
  *     const sig = ed25519.sign(hash, privateKey)
  *     return {
  *       signatures: [{
@@ -48,14 +58,14 @@ export interface TransactionSigner {
 }
 
 /**
- * Node-side Canton provider for the CLI.
+ * Node-side Canton provider.
  *
  * Unlike the in-browser dApp provider, which proxies `ledgerApi` requests
  * through the validator wallet, this provider talks to the Canton JSON Ledger
  * API directly: `ledgerApi` requests are already in wire format, so the
  * translation layer is a thin HTTP pass-through with JWT authentication.
  */
-export class JsonRpcProvider implements CantonRpcProvider {
+export class CantonJsonRpcProvider implements CantonRpcProvider {
   // CAIP-2 compliant chain ID, e.g. canton:mainnet
   private readonly chainId: string
   private readonly party: PartyId
@@ -119,7 +129,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
       partyId = parsePartyId(data.user.primaryParty)
     }
 
-    return new JsonRpcProvider(chainId, baseUrl, jwt, fetchFn, httpVersion, partyId, signer)
+    return new CantonJsonRpcProvider(chainId, baseUrl, jwt, fetchFn, httpVersion, partyId, signer)
   }
 
   async request<M extends keyof RpcTypes>(
@@ -153,7 +163,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
       case 'messageSignature':
         throw new CCIPError(
           CCIPErrorCode.NOT_IMPLEMENTED,
-          `Canton JsonRpcProvider does not implement '${methodName}' yet`,
+          `CantonJsonRpcProvider does not implement '${methodName}' yet`,
         )
       default:
         throw new CCIPError(
@@ -231,7 +241,7 @@ export class JsonRpcProvider implements CantonRpcProvider {
     params: PrepareExecuteParams,
   ): Promise<PrepareExecuteAndWaitResult> {
     const commandId =
-      params.commandId ?? `ccip-cli-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      params.commandId ?? `ccip-sdk-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
     if (this.signer) {
       return (await this.interactiveSubmission(commandId, params)) as PrepareExecuteAndWaitResult

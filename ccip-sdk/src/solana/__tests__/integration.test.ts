@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 
-import { Connection, PublicKey } from '@solana/web3.js'
+import { PublicKey } from '@solana/web3.js'
 
 import { raceRpcEndpoint, rpcEndpoint } from '../../../../scripts/test-endpoints.ts'
 import { useResourceForDescribe } from '../../../../scripts/useResource.ts'
@@ -10,6 +10,7 @@ import { EVMChain } from '../../evm/index.ts'
 import { discoverOffRamp } from '../../execution.ts'
 import { networkInfo } from '../../index.ts'
 import { CCIPVersion, ExecutionState } from '../../types.ts'
+import { withRetry } from '../../utils.ts'
 import {
   FUJI_TO_SOLANA,
   SOLANA_ESTIMATE_RECEIVER_MESSAGE,
@@ -347,16 +348,35 @@ describe('SolanaChain Mainnet CCIP Integration', { skip, timeout: 60_000 }, () =
   useResourceForDescribe(['solana-mainnet'])
   let solanaChain: SolanaChain
 
-  before(async () => {
-    const connection = new Connection('https://api.mainnet-beta.solana.com', 'confirmed')
-    solanaChain = new SolanaChain(connection, networkInfo('solana-mainnet'), { apiClient: null })
+  before(() => {
+    // the SDK's connection (rate-limited fetch): the public RPC answers 429 per method in bursts
+    const connection = SolanaChain._getConnection('https://api.mainnet-beta.solana.com', {
+      logger: testLogger,
+    })
+    solanaChain = new SolanaChain(connection, networkInfo('solana-mainnet'), {
+      apiClient: null,
+      logger: testLogger,
+    })
   })
+
+  // The fixture transaction is months old, so the RPC reads it from long-term storage, which at
+  // times answers null for a transaction it holds (seen on CI). Read it once for both tests, and
+  // retry a not-found (a transient error) before the test fails.
+  const msg = SOLANA_TO_ETHEREUM[0]!
+  let fixtureTx: ReturnType<SolanaChain['getTransaction']> | undefined
+  const getFixtureTx = () =>
+    (fixtureTx ??= withRetry(() => solanaChain.getTransaction(msg.txHash), {
+      maxAttempts: 3,
+      maxDelayMs: 5_000,
+      logger: testLogger,
+    }).catch((err: unknown) => {
+      fixtureTx = undefined // let the next test read it again
+      throw err
+    }))
 
   describe('getMessagesInTx', () => {
     it('should decode CCIP messages from a known Solana mainnet transaction', async () => {
-      const msg = SOLANA_TO_ETHEREUM[0]!
-      const tx = await solanaChain.getTransaction(msg.txHash)
-      const requests = await solanaChain.getMessagesInTx(tx)
+      const requests = await solanaChain.getMessagesInTx(await getFixtureTx())
 
       assert.ok(requests.length > 0, 'should find at least one CCIP message')
       const request = requests.find((r) => r.message.messageId === msg.messageId)
@@ -373,9 +393,7 @@ describe('SolanaChain Mainnet CCIP Integration', { skip, timeout: 60_000 }, () =
 
   describe('getBalance', () => {
     it('should return native SOL balance for a known CCIP participant', async () => {
-      const msg = SOLANA_TO_ETHEREUM[0]!
-      const tx = await solanaChain.getTransaction(msg.txHash)
-      const requests = await solanaChain.getMessagesInTx(tx)
+      const requests = await solanaChain.getMessagesInTx(await getFixtureTx())
       const request = requests.find((r) => r.message.messageId === msg.messageId)
       assert.ok(request, 'should find the message')
 
@@ -681,12 +699,11 @@ describe('Solana Devnet 2.0 router serving 1.6 and 2.0 lanes', { skip, timeout: 
     assert.equal(v16!.offramp ?? v16!.offRamp, undefined)
     // 2.0 lane (`dest_chain_state_v2`): names its offRamp
     assert.equal(v2!.offramp ?? v2!.offRamp, DUAL_SEPOLIA_OFFRAMP_V2)
-    // without a version, the config of the lane messages are sent over is read. The 2.0 lane to
-    // Sepolia has its sender allowlist enabled (in testing, read 2026-11-10), so that is the 1.6
-    // lane. Change these to the 2.0 values when the allowlist is lifted.
-    assert.equal(v2!.allowListEnabled, true)
-    assert.equal(byDefault!.laneVersion, CCIPVersion.V1_6)
-    assert.equal(byDefault!.offramp ?? byDefault!.offRamp, undefined)
+    // without a version, the config of the lane messages are sent over is read: the 2.0 lane,
+    // since its sender allowlist was lifted (read 2026-11-14).
+    assert.equal(v2!.allowListEnabled, false)
+    assert.equal(byDefault!.laneVersion, CCIPVersion.V2_0)
+    assert.equal(byDefault!.offramp ?? byDefault!.offRamp, DUAL_SEPOLIA_OFFRAMP_V2)
   })
 
   it('finds the 1.6 and the 2.0 offRamp allowed by the router for a source chain', async () => {

@@ -77,9 +77,6 @@ const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isSurfpoolAvailable()
 const testLogger = new Console(process.stdout, process.stderr)
 if (!VERBOSE) testLogger.debug = () => {}
 
-// WARNING: these assume the mainnet router has no CCIP 2.0 support yet, so sends go over 1.6.
-// Once mainnet gets 2.0 support (an in-place upgrade), the sends switch to ccip_send_v2 and the
-// 2.0 rejection test below fails: update them then.
 describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
   let solanaChain: SolanaChain | undefined
   let surfpoolInstance: SurfpoolInstance | undefined
@@ -237,27 +234,6 @@ describe('Solana Fork Tests', { skip, timeout: 180_000 }, () => {
       )
       assert.equal(decoded[0]!.message.tokenAmounts.length, 1)
       assert.equal(decoded[0]!.message.tokenAmounts[0]?.amount, 1_000_000n)
-    })
-
-    // WARNING: fails once the mainnet router gets CCIP 2.0 support; see the note on this suite
-    it('should reject GenericExtraArgsV3 on a router without CCIP 2.0', async () => {
-      assert.ok(solanaChain, 'chain should be initialized')
-      assert.ok(wallet, 'wallet should be initialized')
-
-      // the legacy sends above went over 1.6: this router doesn't have 2.0 support yet
-      await assert.rejects(
-        solanaChain.getFee({
-          router: SOLANA_ROUTER,
-          destChainSelector: ETH_MAINNET_SELECTOR,
-          message: {
-            receiver: '0x9eC0e4A4c411493773E01e2ABF4D42395788846b',
-            extraArgs: { finality: 'finalized' },
-          },
-        }),
-        (err: unknown) =>
-          err instanceof CCIPSolanaV2LaneUnavailableError &&
-          err.context.reason === 'router-without-v2-support',
-      )
     })
   })
 
@@ -894,6 +870,34 @@ describe('Solana Devnet v2 Account Resolution Fork Tests', { skip, timeout: 300_
           ({ accountKey }) => accountKey.toBase58() === STAGING.sendLookupTable,
         ),
         'the send should use the deployment lookup table',
+      )
+    })
+
+    it("estimates a token transfer's total fees at what the send charges and deducts", async () => {
+      const amount = 10_000n
+      const message = {
+        receiver,
+        tokenAmounts: [{ token: STAGING.sepoliaToken, amount }],
+        extraArgs: { finality: 'finalized' as const },
+      }
+      const estimate = await solanaChain!.getTotalFeesEstimate({
+        router: STAGING.router,
+        destChainSelector: STAGING.sepoliaSelector,
+        message,
+      })
+      if (estimate.tokenTransferFee) {
+        const { feeDeducted, bps } = estimate.tokenTransferFee
+        assert.equal(feeDeducted, (amount * BigInt(bps)) / 10_000n)
+      }
+
+      const request = await solanaChain!.sendMessage(sendOpts(message))
+      assert.equal(request.lane.version, CCIPVersion.V2_0)
+      const sent = request.message as CCIPMessage<typeof CCIPVersion.V2_0>
+      assert.equal(sent.feeTokenAmount, estimate.ccipFee, 'the send should charge the ccipFee')
+      // the pool locks or burns, and sends, only what's left after its fee
+      assert.equal(
+        sent.tokenAmounts[0]?.amount,
+        amount - (estimate.tokenTransferFee?.feeDeducted ?? 0n),
       )
     })
 

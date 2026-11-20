@@ -175,9 +175,10 @@ export type {
   CantonCreatedContract,
   PartyId,
   SinglePartySignatures,
+  TransactionSigner,
   UnsignedCantonTx,
 } from './canton/index.ts'
-export { parsePartyId } from './canton/index.ts'
+export { CantonJsonRpcProvider, parsePartyId } from './canton/index.ts'
 export {
   type CantonOperationalDefaults,
   CANTON_FEE_TOKEN_CLI_SYMBOLS,

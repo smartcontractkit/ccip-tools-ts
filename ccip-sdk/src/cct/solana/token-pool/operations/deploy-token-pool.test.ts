@@ -10,7 +10,7 @@ import { Keypair, PublicKey } from '@solana/web3.js'
 
 import { ChainFamily } from '../../../../networks.ts'
 import type { SolanaChain } from '../../../../solana/index.ts'
-import { CCTParamsInvalidError } from '../../../errors.ts'
+import { CCTOperationUnsupportedError, CCTParamsInvalidError } from '../../../errors.ts'
 import { deriveTokenPoolSignerPda, resolveTokenPoolProgram } from '../../index.ts'
 import { deriveTokenPoolConfigPda } from '../../programs/token-pool.ts'
 import { DeployTokenPool } from './deploy-token-pool.ts'
@@ -144,6 +144,54 @@ describe('DeployTokenPool (cct/solana)', () => {
       const unsigned = await generate({ authority: undefined })
 
       assert.ok(unsigned.instructions[0]!.keys.some((key) => key.pubkey.toBase58() === PAYER))
+    })
+  })
+
+  describe('mintAuthorityMultisig', () => {
+    const multisig = Keypair.generate().publicKey.toBase58()
+    const chainAt = (version: string) =>
+      Object.assign(stubChain(), { typeAndVersion: async () => ['burnmintTokenPool', version] })
+
+    it('initializes by multisig on a 2.0 pool program', async () => {
+      const unsigned = await new DeployTokenPool().generate(chainAt('2.0.0'), {
+        tokenAddress: TOKEN,
+        poolType: 'burn-mint',
+        payer: PAYER,
+        authority: AUTHORITY,
+        mintAuthorityMultisig: multisig,
+        allowlist: [PAYER],
+      })
+      const [initialize, allowlist] = unsigned.instructions
+
+      assert.equal(unsigned.mainIndex, 0)
+      // `initialize_by_multisig`, from the program's IDL
+      assert.deepEqual([...initialize!.data], [170, 42, 240, 9, 144, 13, 204, 211])
+      assert.equal(initialize!.keys.length, 8)
+      assert.equal(initialize!.keys[2]!.pubkey.toBase58(), AUTHORITY)
+      assert.equal(initialize!.keys[7]!.pubkey.toBase58(), multisig)
+      assert.equal(allowlist!.programId.toBase58(), BURN_MINT_POOL_PROGRAM)
+    })
+
+    it('rejects pool programs before CCIP 2.0 and invalid multisig addresses', async () => {
+      const params = {
+        tokenAddress: TOKEN,
+        poolType: 'burn-mint',
+        payer: PAYER,
+        mintAuthorityMultisig: multisig,
+      } as const
+      await assert.rejects(
+        () => new DeployTokenPool().generate(chainAt('1.6.2'), params),
+        CCTOperationUnsupportedError,
+      )
+      await assert.rejects(
+        () =>
+          new DeployTokenPool().generate(chainAt('2.0.0'), {
+            ...params,
+            mintAuthorityMultisig: 'not-a-key',
+          }),
+        (err: unknown) =>
+          err instanceof CCTParamsInvalidError && err.context.param === 'mintAuthorityMultisig',
+      )
     })
   })
 

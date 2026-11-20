@@ -126,7 +126,7 @@ describe('decodeTokenPoolChainConfig', () => {
 })
 
 describe('decodeTokenPoolChainConfigV2', () => {
-  it('decodes the allowed finality and token transfer fees, ignoring the CCV config', () => {
+  it('decodes the allowed finality, token transfer fees and CCV config', () => {
     const config = decodeTokenPoolChainConfigV2(
       account(
         'ChainConfigV2',
@@ -143,9 +143,15 @@ describe('decodeTokenPoolChainConfigV2', () => {
         u16(10), // finality_bps_fee
         u16(20), // fast_finality_bps_fee
         u8(1), // is_enabled
-        u64(0n), // ccv_config.threshold_amount
-        ...[1, 0, 0, 0].map(u32), // ccv_config's 4 CCV lists
+        u64(1_000_000n), // ccv_config.threshold_amount
+        u32(1), // outbound_ccvs
         key(5).toBuffer(),
+        u32(1), // threshold_outbound_ccvs
+        key(6).toBuffer(),
+        u32(2), // inbound_ccvs
+        key(7).toBuffer(),
+        key(8).toBuffer(),
+        u32(0), // threshold_inbound_ccvs
       ),
     )
     assert.deepEqual(config.allowedFinalityConfig, { flags: 1, blockDepth: 12 })
@@ -158,6 +164,33 @@ describe('decodeTokenPoolChainConfigV2', () => {
       fastFinalityBpsFee: 20,
       isEnabled: true,
     })
+    const { thresholdAmount, ...ccvs } = config.ccvConfig
+    assert.equal(thresholdAmount.toString(), '1000000')
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries(ccvs).map(([name, list]) => [name, list.map((ccv) => ccv.toBase58())]),
+      ),
+      {
+        outboundCcvs: [key(5).toBase58()],
+        thresholdOutboundCcvs: [key(6).toBase58()],
+        inboundCcvs: [key(7).toBase58(), key(8).toBase58()],
+        thresholdInboundCcvs: [],
+      },
+    )
+  })
+
+  it('rejects a ChainConfigV2 truncated inside its CCV config', () => {
+    const data = account(
+      'ChainConfigV2',
+      u8(254),
+      u8(1),
+      u64(16015286601757825753n),
+      key(1).toBuffer(),
+      Buffer.alloc(4 + 22), // finality and fee configs
+      u64(0n),
+      u32(1), // one outbound CCV, missing
+    )
+    assert.throws(() => decodeTokenPoolChainConfigV2(data))
   })
 })
 

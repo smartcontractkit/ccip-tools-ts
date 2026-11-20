@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import { beginCell } from '@ton/core'
 
+import { CCIPLogsStreamInconsistentError } from '../errors/index.ts'
 import {
   EVMExtraArgsV1Tag,
   EVMExtraArgsV2Tag,
@@ -12,11 +13,15 @@ import {
 import { originKey } from '../fetch.ts'
 import { NetworkType } from '../networks.ts'
 import {
+  TON_V2_SURE_RETENTION_S,
   crc32,
   extractMagicTag,
+  isRetentionError,
+  isTimeoutError,
   lookupTxByRawHash,
   tonRateLimitProfile,
   tryParseCell,
+  v2CannotServe,
 } from './utils.ts'
 
 describe('TON utils unit tests', () => {
@@ -236,5 +241,103 @@ describe('tonRateLimitProfile', () => {
       originKey('https://testnet.toncenter.com/api/v2/jsonRPC'),
       originKey('https://testnet.toncenter.com/api/v3/masterchainInfo'),
     )
+  })
+})
+
+describe('isRetentionError / v2CannotServe / tonRateLimitProfile', () => {
+  const retentionBody =
+    '{"ok":false,"error":"LITE_SERVER_UNKNOWN: cannot compute block with specified transaction: cannot find block (0,cfb90d27c9d457c9) lt=110247650000005: lt not in db"}'
+
+  it('is true for retention failures', () => {
+    assert.equal(
+      isRetentionError({
+        response: {
+          data: {
+            ok: false,
+            error:
+              'LITE_SERVER_UNKNOWN: cannot compute block with specified transaction: cannot find block (0,cfb90d27c9d457c9) lt=110247650000005: lt not in db',
+            code: 500,
+          },
+        },
+      }),
+      true,
+    )
+    assert.equal(
+      isRetentionError(
+        new Error(
+          'HTTP 500: Failed to getBlockHeader by seqno=98258545: {"ok":false,"error":"LITE_SERVER_NOTREADY: cannot find block (-1,8000000000000000) seqno=98258545: seqno not in db","code":500}',
+        ),
+      ),
+      true,
+    )
+    assert.equal(
+      isRetentionError({
+        response: { data: '...LITE_SERVER_UNKNOWN: cannot locate transaction...' },
+      }),
+      true,
+    )
+  })
+
+  it('is false for unrelated failures', () => {
+    assert.equal(isRetentionError(undefined), false)
+    assert.equal(isRetentionError(null), false)
+    assert.equal(isRetentionError(new Error('Request failed with status code 429')), false)
+    assert.equal(
+      isRetentionError({ response: { data: { error: 'LITE_SERVER_NETWORK chain->to=96502795' } } }),
+      false,
+    )
+    assert.equal(isRetentionError(new Error('LITE_SERVER_UNKNOWN: some other failure')), false)
+    assert.equal(isRetentionError({ code: 'ECONNABORTED' }), false, 'a timeout is not retention')
+    assert.equal(isRetentionError(new Error('timeout of 30000ms exceeded')), false)
+  })
+
+  it('isTimeoutError names HTTP client timeouts', () => {
+    assert.equal(isTimeoutError({ code: 'ECONNABORTED' }), true)
+    assert.equal(isTimeoutError(new Error('timeout of 30000ms exceeded')), true)
+    assert.equal(isTimeoutError(new Error('Request failed with status code 500')), false)
+    assert.equal(isTimeoutError(undefined), false)
+  })
+
+  it('v2CannotServe takes a timeout as retention only for old data', () => {
+    const now = Date.now() / 1e3
+    const old = now - TON_V2_SURE_RETENTION_S - 60
+    const recent = now - 60
+    const timeout = new Error('timeout of 30000ms exceeded')
+    const retention = new Error(retentionBody)
+    assert.equal(v2CannotServe(retention, recent), true, 'a retention answer, at any age')
+    assert.equal(v2CannotServe(retention), true)
+    assert.equal(v2CannotServe(timeout, old), true)
+    assert.equal(v2CannotServe(timeout, recent), false, 'a slow read of recent data')
+    assert.equal(v2CannotServe(timeout), false, 'the data age is unknown')
+    assert.equal(v2CannotServe(new Error('Request failed with status code 429'), old), false)
+  })
+
+  it('v2CannotServe reads the cause of a truncated index scan', () => {
+    const old = Date.now() / 1e3 - TON_V2_SURE_RETENTION_S - 60
+    const truncated = (cause?: Error) =>
+      new CCIPLogsStreamInconsistentError('truncated', cause ? { cause } : undefined)
+    assert.equal(v2CannotServe(truncated(new Error(retentionBody))), true)
+    assert.equal(v2CannotServe(truncated(new Error('timeout of 30000ms exceeded')), old), true)
+    assert.equal(v2CannotServe(truncated(new Error('timeout of 30000ms exceeded'))), false)
+    assert.equal(v2CannotServe(truncated()), false, 'an index self-contradiction')
+  })
+
+  it('tonRateLimitProfile.isFinalResponse is true only for a 5xx retention body', async () => {
+    const { isFinalResponse } = tonRateLimitProfile('https://testnet.toncenter.com/api/v2')
+    assert.ok(isFinalResponse)
+    assert.equal(await isFinalResponse(new Response(retentionBody, { status: 500 })), true)
+    assert.equal(await isFinalResponse(new Response(retentionBody, { status: 429 })), false)
+    assert.equal(
+      await isFinalResponse(new Response('{"ok":false,"error":"internal"}', { status: 500 })),
+      false,
+    )
+  })
+
+  it('tonRateLimitProfile keys by origin and accepts overrides', () => {
+    const profile = tonRateLimitProfile('https://testnet.toncenter.com/api/v2')
+    assert.equal(profile.keyBy, 'origin')
+    const over = tonRateLimitProfile('https://testnet.toncenter.com/api/v2', { maxRetries: 7 })
+    assert.equal(over.maxRetries, 7)
+    assert.equal(over.keyBy, 'origin')
   })
 })

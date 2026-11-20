@@ -261,6 +261,37 @@ describe('deployTokenPool command building', () => {
     })
   })
 
+  // The command ID is derived from the CALLER'S PARAMS, not the resolved
+  // contract CIDs: a regenerated retry after a committed-but-unacknowledged
+  // deploy re-resolves CIDs (SetPool recreates the TokenConfig) and must still
+  // land on the same ID, so Canton rejects it as DUPLICATE_COMMAND instead of
+  // silently deploying a second pool.
+  it('derives the command ID from params — stable across re-resolved CIDs', async () => {
+    const acceptedConfig: CantonActiveContract = {
+      contractId: TOKEN_CONFIG_CID,
+      templateId: TOKEN_CONFIG_TEMPLATE_ID,
+      createdEventBlob: 'token-config-blob',
+      synchronizerId: 'sync-1',
+      signatories: [CANTON_NETWORKS['canton:TestNet']!.ccipOwner],
+      createArgument: { admin: POOL_OWNER },
+    }
+    const fresh = await op.generate(mockChain('canton:TestNet', {}, null), baseParams())
+    const afterSetPool = await op.generate(
+      mockChain('canton:TestNet', {}, acceptedConfig),
+      baseParams(),
+    )
+    const freshId = fresh.commands.commandId
+    const afterId = afterSetPool.commands.commandId
+    assert.ok(freshId && afterId, 'command IDs must be set')
+    assert.equal(freshId, afterId)
+  })
+
+  it('derives different command IDs for different params', async () => {
+    const a = await op.generate(mockChain('canton:TestNet'), baseParams())
+    const b = await op.generate(mockChain('canton:TestNet'), baseParams({ instanceId: 'pool-2' }))
+    assert.notEqual(a.commands.commandId, b.commands.commandId)
+  })
+
   it('auto-wires a transfer preapproval into lock-release poolReceiveContext', async () => {
     const chain = mockChain('canton:TestNet', {
       ledgerApiClient: {
@@ -437,8 +468,7 @@ describe('deployTokenPool deps resolution', () => {
   })
   for (const [label, existing, existingTokenConfigCid] of [
     ['no TokenConfig yet', null, null],
-    ['a TokenConfig awaiting an admin', tokenConfig(null), TOKEN_CONFIG_CID],
-    ['a TokenConfig that already has an admin', tokenConfig(POOL_OWNER), null],
+    ['a TokenConfig already administered by this admin', tokenConfig(POOL_OWNER), TOKEN_CONFIG_CID],
   ] as const) {
     it(`resolves existingTokenConfigCid for ${label}`, async () => {
       const tx = await op.generate(mockChain('canton:TestNet', {}, existing), baseParams())
@@ -449,6 +479,25 @@ describe('deployTokenPool deps resolution', () => {
       assert.deepEqual(
         tx.commands.disclosedContracts?.map((c) => c.contractId),
         existingTokenConfigCid ? [TAR_CID, TOKEN_CONFIG_CID] : [TAR_CID],
+      )
+    })
+  }
+
+  // Initialize reuses a config only when the accepted admin matches, and the
+  // fresh-registration branch would create a duplicate TokenConfig — reject
+  // both mismatches before submitting.
+  for (const [label, existing, message] of [
+    ['awaiting an admin', tokenConfig(null), /no accepted admin/],
+    ['administered by another party', tokenConfig(CCIP_OWNER), /transfer the admin role/],
+  ] as const) {
+    it(`rejects a TokenConfig ${label}`, async () => {
+      await assert.rejects(
+        op.generate(mockChain('canton:TestNet', {}, existing), baseParams()),
+        (err: unknown) => {
+          assert.ok(err instanceof CCTParamsInvalidError)
+          assert.match(err.message, message)
+          return true
+        },
       )
     })
   }

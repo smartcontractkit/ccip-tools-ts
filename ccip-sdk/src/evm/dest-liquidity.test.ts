@@ -48,6 +48,8 @@ const LOB_V1_FRAG = 'lockOrBurn((bytes,uint64,address,uint256,address))'
 const ROM_V2_SEL = pool.getFunction(ROM_V2_FRAG)!.selector
 const ROM_V1_SEL = pool.getFunction(ROM_V1_FRAG)!.selector
 const LOB_V1_SEL = pool.getFunction(LOB_V1_FRAG)!.selector
+const usdcProxy = interfaces.USDCTokenPoolProxy_v2_0
+const MECHANISM_SEL = usdcProxy.getFunction('getLockOrBurnMechanism')!.selector
 
 const SOURCE_SELECTOR = 16015286601757825753n // ethereum-sepolia
 const DEST_SELECTOR = 14767482510784806043n // avalanche-fuji
@@ -148,6 +150,8 @@ function makeProvider(opts: {
   destinationAmount?: bigint
   /** make the supportsInterface probes fail: a contract revert vs a transport error */
   probeError?: 'call-exception' | 'transport'
+  /** USDCTokenPoolProxy.getLockOrBurnMechanism answer (default 4 = CCV), or a transport error */
+  usdcMechanism?: number | 'transport'
 }) {
   const calls: Call[] = []
   const provider = {
@@ -165,6 +169,10 @@ function makeProvider(opts: {
           (id === IPOOL_V2_INTERFACE_ID && opts.isV2) ||
           (id === CCIP_POOL_V1_INTERFACE_ID && (opts.isV1 ?? true))
         return pool.encodeFunctionResult('supportsInterface', [supported])
+      }
+      if (sel === MECHANISM_SEL) {
+        if (opts.usdcMechanism === 'transport') throw new Error('could not detect network')
+        return usdcProxy.encodeFunctionResult('getLockOrBurnMechanism', [opts.usdcMechanism ?? 4])
       }
       if (sel === ROM_V2_SEL || sel === ROM_V1_SEL) {
         // rpcError: a transport failure with NO revert data (distinct from a contract revert)
@@ -519,34 +527,64 @@ describe('EVMChain.simulateLockOrBurn — OnRamp-version dispatch', () => {
     assert.ok(!sendCalls.some((c) => c.data?.startsWith(lobV2Sel)))
   })
 
-  function makeSourceEvmChain(revert: string) {
-    const ONRAMP = getAddress(hexlify(randomBytes(20)))
+  function makeSourceEvmChain(
+    revert: string | Error,
+    onRamp = getAddress(hexlify(randomBytes(20))),
+    network = {
+      name: 'ethereum-testnet-sepolia',
+      chainSelector: SOURCE_SELECTOR,
+      family: ChainFamily.EVM,
+      networkType: NetworkType.Testnet,
+    },
+  ) {
+    const ONRAMP = onRamp
+    const sendError =
+      typeof revert === 'string'
+        ? Object.assign(new Error('execution reverted'), { data: revert })
+        : revert
+    const provider = {
+      call: mock.fn(async () => {
+        throw Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION' })
+      }),
+      send: mock.fn(async () => {
+        throw sendError
+      }),
+    }
+    const getTokenAdminRegistryFor = mock.fn(async () => getAddress(hexlify(randomBytes(20))))
+    const getRegistryTokenConfig = mock.fn(async () => ({ tokenPool: POOL }))
+    const getTokenPoolRemote = mock.fn(async () => ({
+      outboundRateLimiterState: {
+        tokens: 1_000_000n,
+        lastUpdated: 0n,
+        isEnabled: true,
+        capacity: 1_000_000n,
+        rate: 1n,
+      },
+    }))
+    const getOnRampForRouter = mock.fn(async () => ONRAMP)
     const chain = Object.create(EVMChain.prototype) as EVMChain
     Object.assign(chain, {
-      provider: {
-        call: mock.fn(async () => {
-          throw Object.assign(new Error('execution reverted'), { code: 'CALL_EXCEPTION' })
-        }),
-        send: mock.fn(async () => {
-          throw Object.assign(new Error('execution reverted'), { data: revert })
-        }),
-      },
+      provider,
       logger: { debug() {}, info() {}, warn() {}, error() {} },
-      network: {
-        name: 'ethereum-testnet-sepolia',
-        chainSelector: SOURCE_SELECTOR,
-        family: ChainFamily.EVM,
-        networkType: NetworkType.Testnet,
-      },
-      getTokenAdminRegistryFor: mock.fn(async () => getAddress(hexlify(randomBytes(20)))),
-      getRegistryTokenConfig: mock.fn(async () => ({ tokenPool: POOL })),
+      network,
+      getTokenAdminRegistryFor,
+      getRegistryTokenConfig,
+      getTokenPoolRemote,
+      getOnRampForRouter,
       typeAndVersion: mock.fn(async (address: string) =>
-        address === ONRAMP
+        address.toLowerCase() === ONRAMP.toLowerCase()
           ? (['EVM2EVMOnRamp', '1.5.0', 'EVM2EVMOnRamp 1.5.0'] as const)
           : (['BurnMintTokenPool', '1.5.1', 'BurnMintTokenPool 1.5.1'] as const),
       ),
     })
-    return { chain, ONRAMP }
+    return {
+      chain,
+      ONRAMP,
+      provider,
+      getTokenAdminRegistryFor,
+      getRegistryTokenConfig,
+      getTokenPoolRemote,
+    }
   }
   const lobOpts = (chain: EVMChain, onRamp: string) => ({
     onRamp,
@@ -556,6 +594,26 @@ describe('EVMChain.simulateLockOrBurn — OnRamp-version dispatch', () => {
     originalSender: RECEIVER,
     receiver: RECEIVER,
   })
+  const sendOpts = {
+    router: OFFRAMP,
+    destChainSelector: DEST_SELECTOR,
+    message: {
+      receiver: RECEIVER,
+      tokenAmounts: [{ token: TOKEN, amount: 1000n }],
+    },
+    sender: RECEIVER,
+  }
+  const callerRevert = (caller: string) =>
+    pool.encodeErrorResult('CallerIsNotARampOnRouter', [caller])
+  // values from the reported Hedera case; the artifact depends only on caller != onRamp
+  const HEDERA_REWRITTEN_CALLER = '0x0000000000000000000000000000000000000002'
+  const HEDERA_ONRAMP = getAddress('0x023b31f937cfb8ce59a264c73d3d4cb345fb3aef')
+  const HEDERA_NETWORK = {
+    name: 'hedera-testnet',
+    chainSelector: 222782988166878823n,
+    family: ChainFamily.EVM,
+    networkType: NetworkType.Testnet,
+  }
 
   it('genuine source-gate revert => typed CCIPSourcePoolRevertError with raw revert', async () => {
     const revert = interfaces.Custom.encodeErrorResult('SenderNotAllowed', [
@@ -588,6 +646,98 @@ describe('EVMChain.simulateLockOrBurn — OnRamp-version dispatch', () => {
       },
     )
   })
+
+  it('Hedera report: CallerIsNotARampOnRouter(0x…02) is a simulation artifact => raw error kept', async () => {
+    const raw = Object.assign(new Error('execution reverted'), {
+      data: callerRevert(HEDERA_REWRITTEN_CALLER),
+    })
+    const { chain } = makeSourceEvmChain(raw, HEDERA_ONRAMP, HEDERA_NETWORK)
+    await assert.rejects(
+      () => chain.simulateLockOrBurn(lobOpts(chain, HEDERA_ONRAMP)),
+      (err: Error) => {
+        assert.equal(err, raw, 'must rethrow the provider error unchanged')
+        assert.ok(!(err instanceof CCIPSourcePoolRevertError), 'artifact must not block')
+        return true
+      },
+    )
+  })
+
+  it('CallerIsNotARampOnRouter(requested onRamp) is a genuine mismatch => typed block', async () => {
+    const revert = callerRevert(HEDERA_ONRAMP)
+    const { chain } = makeSourceEvmChain(revert, HEDERA_ONRAMP, HEDERA_NETWORK)
+    await assert.rejects(
+      () => chain.simulateLockOrBurn(lobOpts(chain, HEDERA_ONRAMP)),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPSourcePoolRevertError, String(err))
+        assert.equal(err.context['revert'], revert)
+        return true
+      },
+    )
+  })
+
+  it('compares the decoded caller to the requested onRamp without checksum/case sensitivity', async () => {
+    const ONRAMP = getAddress(hexlify(randomBytes(20)))
+    const revert = callerRevert(ONRAMP)
+    const { chain } = makeSourceEvmChain(revert, ONRAMP)
+    for (const requested of [ONRAMP.toLowerCase(), '0x' + ONRAMP.slice(2).toUpperCase()]) {
+      await assert.rejects(
+        () => chain.simulateLockOrBurn(lobOpts(chain, requested)),
+        (err: CCIPError) => {
+          assert.ok(err instanceof CCIPSourcePoolRevertError, `${requested}: ${String(err)}`)
+          return true
+        },
+      )
+    }
+  })
+
+  it('malformed CallerIsNotARampOnRouter data cannot prove an artifact => typed block', async () => {
+    const selector = pool.getError('CallerIsNotARampOnRouter')!.selector
+    // 32-byte word, but nonzero high address padding: decoding fails only when the value is read
+    const dirtyPadding = selector + 'ff'.repeat(12) + HEDERA_REWRITTEN_CALLER.slice(2)
+    for (const revert of [selector, selector + '00'.repeat(20), dirtyPadding]) {
+      const { chain } = makeSourceEvmChain(revert, HEDERA_ONRAMP, HEDERA_NETWORK)
+      await assert.rejects(
+        () => chain.simulateLockOrBurn(lobOpts(chain, HEDERA_ONRAMP)),
+        (err: CCIPError) => {
+          assert.ok(err instanceof CCIPSourcePoolRevertError, `${revert}: ${String(err)}`)
+          assert.equal(err.context['revert'], revert)
+          return true
+        },
+      )
+    }
+  })
+
+  // checkSendMessage reuses the same fixture: registry and rate-limit reads run before the
+  // simulateLockOrBurn path, so the rewritten caller must fall back to a pass.
+  it('checkSendMessage passes on the rewritten caller after registry and rate-limit reads', async () => {
+    const {
+      chain,
+      provider,
+      getTokenAdminRegistryFor,
+      getRegistryTokenConfig,
+      getTokenPoolRemote,
+    } = makeSourceEvmChain(callerRevert(HEDERA_REWRITTEN_CALLER), HEDERA_ONRAMP, HEDERA_NETWORK)
+    assert.equal(await chain.checkSendMessage(sendOpts), true)
+    assert.ok(getTokenAdminRegistryFor.mock.callCount() >= 1, 'registry read')
+    assert.ok(getRegistryTokenConfig.mock.callCount() >= 1, 'token config read')
+    assert.equal(getTokenPoolRemote.mock.callCount(), 1, 'rate-limit read')
+    assert.equal(provider.send.mock.callCount(), 1, 'simulation ran')
+  })
+
+  it('checkSendMessage blocks when the decoded caller is the requested onRamp', async () => {
+    const revert = callerRevert(HEDERA_ONRAMP)
+    const { chain } = makeSourceEvmChain(revert, HEDERA_ONRAMP, HEDERA_NETWORK)
+    await assert.rejects(
+      () => chain.checkSendMessage(sendOpts),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPSourcePoolRevertError, String(err))
+        assert.equal(err.context['revert'], revert)
+        assert.equal(err.context['onRamp'], HEDERA_ONRAMP)
+        assert.equal(err.context['network'], 'hedera-testnet')
+        return true
+      },
+    )
+  })
 })
 
 // ============================================================================
@@ -600,6 +750,7 @@ function makeChain(opts: {
   revert?: string
   rpcError?: boolean
   probeError?: 'call-exception' | 'transport'
+  usdcMechanism?: number | 'transport'
   remotePoolsRpcError?: boolean
   remotePoolsRevert?: string
   noPool?: boolean
@@ -621,6 +772,7 @@ function makeChain(opts: {
     revert: opts.revert,
     rpcError: opts.rpcError,
     probeError: opts.probeError,
+    usdcMechanism: opts.usdcMechanism,
   })
   const tokenPool = opts.noPool ? undefined : POOL
   const warn = mock.fn()
@@ -982,6 +1134,97 @@ describe('EVMChain.checkExecute — dest-liquidity guard', () => {
         tnv,
       )
     }
+  })
+
+  // ==========================================================================
+  // USDCTokenPoolProxy 2.0 without the source's real pool data (non-EVM sources)
+  // ==========================================================================
+
+  const SOLANA_DEVNET_SELECTOR = 16423721717087811551n
+  const CCTP_V2_CCV_TAG = '0x3047587c' // bytes4(keccak256('CCTP_V2_CCV'))
+  const usdcProxy2 = {
+    poolTypeAndVersion: 'USDCTokenPoolProxy 2.0.0',
+    offRampTypeAndVersion: 'OffRamp 2.0.0',
+  } as const
+  const solanaMessage = { ...MESSAGE, sourceChainSelector: SOLANA_DEVNET_SELECTOR }
+  const decodeRomV2 = (calls: Call[]) => {
+    const simCall = calls.find((c) => c.data?.startsWith(ROM_V2_SEL))
+    assert.ok(simCall, 'the releaseOrMint simulation ran')
+    return pool.decodeFunctionData(ROM_V2_FRAG, simCall.data!)[0]
+  }
+
+  it('Solana-source USDC into USDCTokenPoolProxy 2.0.0 => simulates the CCV route with the CCTP v2 CCV tag', async () => {
+    // live-found false block: the decimals default has no routing tag, so the proxy reverted
+    // InvalidMessageVersion(0x00000000) although the real Solana message (sourcePoolData
+    // 0x3047587c) executes. The proxy's CCV mechanism for the source chain picks the tag.
+    const { chain, provider } = makeChain(usdcProxy2)
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }), true)
+    const mechanismCall = provider.calls.find((c) => c.data?.startsWith(MECHANISM_SEL))
+    assert.ok(mechanismCall, 'read the proxy mechanism')
+    const [mechanismSelector] = usdcProxy.decodeFunctionData(
+      'getLockOrBurnMechanism',
+      mechanismCall.data!,
+    )
+    assert.equal(mechanismSelector, SOLANA_DEVNET_SELECTOR)
+    const input = decodeRomV2(provider.calls)
+    assert.equal(input.sourcePoolData, CCTP_V2_CCV_TAG)
+    assert.equal(input.remoteChainSelector, SOLANA_DEVNET_SELECTOR)
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 tagged simulation stays strict: a child-pool revert still blocks', async () => {
+    const { chain } = makeChain({
+      ...usdcProxy2,
+      revert: encodeErr('ChainNotAllowed(uint64)', [SOLANA_DEVNET_SELECTOR]),
+    })
+    await assert.rejects(
+      () => chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }),
+      CCIPDestExecutionRevertError,
+    )
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 with a LOCK_RELEASE mechanism => simulates with the lock-release flag', async () => {
+    const { chain, provider } = makeChain({ ...usdcProxy2, usdcMechanism: 3 })
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }), true)
+    assert.equal(
+      decodeRomV2(provider.calls).sourcePoolData,
+      abi.encode(['bytes4'], [USDC_LOCK_RELEASE_FLAG]),
+    )
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 mechanism with no 2.0 inbound route => simulation skipped, not a false block', async () => {
+    // INVALID / CCTP_V1 / CCTP_V2: the source's tag can't be inferred
+    for (const usdcMechanism of [0, 1, 2]) {
+      const { chain, provider } = makeChain({ ...usdcProxy2, usdcMechanism })
+      assert.equal(
+        await chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }),
+        true,
+        `mechanism ${usdcMechanism}`,
+      )
+      assert.ok(!provider.calls.some((c) => c.data?.startsWith(ROM_V2_SEL)))
+    }
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 mechanism read transport failure => unavailable (transport)', async () => {
+    const { chain } = makeChain({ ...usdcProxy2, usdcMechanism: 'transport' })
+    await assert.rejects(
+      () => chain.checkExecute({ offRamp: OFFRAMP, message: solanaMessage }),
+      (err: CCIPError) => {
+        assert.ok(err instanceof CCIPDestSimulationUnavailableError)
+        assert.equal(err.reason, 'transport')
+        return true
+      },
+    )
+  })
+
+  it('USDCTokenPoolProxy 2.0.0 with real source pool data => uses it, no mechanism read', async () => {
+    const { chain, provider } = makeChain(usdcProxy2)
+    const message = {
+      ...solanaMessage,
+      tokenAmounts: [{ token: TOKEN, amount: 1000n, extraData: CCTP_V2_CCV_TAG }],
+    }
+    assert.equal(await chain.checkExecute({ offRamp: OFFRAMP, message }), true)
+    assert.ok(!provider.calls.some((c) => c.data?.startsWith(MECHANISM_SEL)))
+    assert.equal(decodeRomV2(provider.calls).sourcePoolData, CCTP_V2_CCV_TAG)
   })
 
   it('USDC hybrid lock-release branch (LOCK_RELEASE_FLAG sourcePoolData) => simulates normally', async () => {

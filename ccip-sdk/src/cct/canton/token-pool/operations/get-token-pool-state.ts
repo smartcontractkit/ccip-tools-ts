@@ -64,6 +64,12 @@ export interface GetTokenPoolStateResult {
   decimals: number
   /** Observer parties for EDS auto-detection (mandatory on the registry pool template). */
   observers: string[]
+  /**
+   * The pool's receive-context entries (key → contract ID or scalar value). For a
+   * lock-release pool the `transfer-preapproval` entry is the owner's pinned
+   * TransferPreapproval; without it, locks from other senders fail. Empty when unset.
+   */
+  poolReceiveContext: Record<string, string>
 }
 
 /** Parsed params for {@link GetTokenPoolState.read}. */
@@ -146,8 +152,44 @@ export class GetTokenPoolState extends CantonQuery<
       instrumentId,
       decimals: decodeInt(fields['decimals']),
       observers: decodeStringList(fields['observers']),
+      poolReceiveContext: decodePoolReceiveContext(fields['poolReceiveContext']),
     }
   }
+}
+
+/**
+ * Decode `poolReceiveContext` (`ChoiceContext { values : TextMap AnyValue }`) into
+ * key → value. A contract entry (`AV_ContractId`) yields its contract ID; other
+ * values their scalar text. Handles the natural JSON shapes (object or `[key, value]`
+ * pairs); unrecognised entries are skipped.
+ */
+function decodePoolReceiveContext(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!value) return out
+  const record = extractFieldValue(value)
+  const values: unknown =
+    record && typeof record === 'object' && 'values' in record
+      ? (record as { values: unknown }).values
+      : decodeDamlRecord(value)['values']
+  let entries: Array<[unknown, unknown]> = []
+  if (Array.isArray(values)) {
+    entries = (values as unknown[]).flatMap((e): Array<[unknown, unknown]> =>
+      Array.isArray(e) && e.length >= 2 ? [[e[0], e[1]]] : [],
+    )
+  } else if (values && typeof values === 'object') {
+    const map = (extractFieldValue(values) ?? values) as Record<string, unknown>
+    entries = Object.entries(map)
+  }
+  for (const [k, v] of entries) {
+    if (typeof k !== 'string') continue
+    const inner = extractFieldValue(v)
+    if (typeof inner === 'string') out[k] = inner
+    else if (inner && typeof inner === 'object' && 'value' in inner) {
+      const nested = extractFieldValue((inner as { value: unknown }).value)
+      if (typeof nested === 'string') out[k] = nested
+    }
+  }
+  return out
 }
 
 /** Decode a required string field. */

@@ -1,5 +1,6 @@
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto'
 
+import type { TransactionSigner } from '@chainlink/ccip-sdk/src/canton/provider.ts'
 import {
   type Logger,
   type SinglePartySignatures,
@@ -24,7 +25,6 @@ import { TransportStatusError } from '@ledgerhq/hw-transport/errors'
 import BIPPath from 'bip32-path'
 
 import { loadCantonConfig } from './config.ts'
-import type { TransactionSigner } from './provider.ts'
 
 // Unexported constants, copied from:
 // https://github.com/LedgerHQ/ledger-live/blob/6651fb6c9687afec979ffc7d8eddb0fcded452a7/libs/ledgerjs/packages/hw-app-canton/src/Canton.ts#L34-L40
@@ -41,9 +41,9 @@ const P1_SIGN_HASH = 0x00
 /**
  * Wallet object returned by {@link loadCantonWallet}.
  *
- * `signer` is the external signer (e.g. Ledger) handed to the
- * {@link JsonRpcProvider}, which then runs the interactive submission flow
- * (prepare → sign → execute). Without it, submissions are
+ * `signer` is the external signer (e.g. Ledger) handed to the SDK's
+ * {@link CantonJsonRpcProvider}, which then runs the interactive submission
+ * flow (prepare → sign → execute). Without it, submissions are
  * JWT-authenticated direct submits.
  */
 export interface CantonWalletWithSigner {

@@ -25,11 +25,10 @@ import type { JsCommands } from './clients/ledger-api/client.ts'
  * - **Browser (dApp SDK)** — connect to the user's Canton wallet and take the
  *   provider from it: `new DappSDK(config)` / `getConnectedProvider()`. This
  *   provider proxies `ledgerApi` requests through the validator wallet.
- * - **Node.js (ccip-cli)** — the CLI ships its own
- *   `ccip-cli/src/providers/canton/provider.ts` `JsonRpcProvider`, which talks
- *   to the Canton JSON Ledger API directly (JWT-authenticated wire-format
- *   pass-through, optional external signer e.g. Ledger). Built from the CLI's
- *   `CantonCliConfig` and handed to {@link CantonChain.fromProvider}.
+ * - **Node.js** — use the SDK's `CantonJsonRpcProvider`
+ *   (`canton/provider.ts`), which talks to the Canton JSON Ledger API directly
+ *   (JWT-authenticated wire-format pass-through, optional external signer e.g.
+ *   Ledger). Hand it to {@link CantonChain.fromProvider}.
  * - **Bring your own** — implement the `Provider` interface over
  *   `DappRpcTypes` and pass it to {@link CantonChain.fromProvider}.
  */
@@ -128,6 +127,13 @@ export interface CantonExtraArgsV1 {
    * - `none`: `Executor_NoExecutor` — no auto-execute on destination.
    */
   executorMode?: 'default' | 'none'
+  /**
+   * Ledger command ID for the send. Optional - if not set, a new ID is generated on every
+   * build. To retry a send whose outcome is unknown (no response), pass the SAME ID: the
+   * ledger rejects a repeat as DUPLICATE_COMMAND instead of sending a second message.
+   * Use a new ID for each distinct message.
+   */
+  commandId?: string
 }
 
 export type CantonTokenInfo = {

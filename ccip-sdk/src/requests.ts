@@ -64,6 +64,8 @@ export function normalizeDeep<T extends Record<string, unknown>>(
   opts: { sourceFamily?: ChainFamily; destFamily?: ChainFamily } = {},
 ): Normalized<T> {
   return convertKeysToCamelCase(data, (v, k) => {
+    // Flags such as tokenReceiverAllowed can match an address field name pattern.
+    if (typeof v === 'boolean') return v
     if (k === 'chainFamilySelector') return hexlify(getDataBytes(v as number[]))
     if (typeof v === 'object' && v != null && (v as { _bn?: unknown } | undefined)?._bn)
       return (v as PublicKey).toString()

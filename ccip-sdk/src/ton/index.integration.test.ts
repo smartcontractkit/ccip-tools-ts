@@ -6,11 +6,18 @@ import { Address } from '@ton/core'
 import '../index.ts'
 import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
-import { CCIPError } from '../errors/index.ts'
+import { CCIPAPIClient } from '../api/index.ts'
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import { isTransientHttpStatus } from '../http-status.ts'
-import { type ChainLog, type Lane, CCIPVersion } from '../types.ts'
-import { sleep } from '../utils.ts'
+import { NetworkType } from '../networks.ts'
+import { type ChainLog, type Lane, CCIPVersion, ExecutionState, MessageStatus } from '../types.ts'
+import {
+  type TonIndex,
+  bodyPrefix,
+  newestLogRows,
+  patientIndexFetch,
+  txBlock,
+} from './live-fixtures.integration.test.ts'
+import { tonV3BaseUrl } from './logs.ts'
 import { crc32 } from './utils.ts'
 import { TONChain } from './index.ts'
 
@@ -20,20 +27,24 @@ await useResource(['ton-testnet'])
  * Live-testnet coverage of the TON index-level APIs that the unit tests mock or
  * never reach: router/OffRamp bindings, CCIPMessageSent / CommitReportAccepted /
  * ExecutionStateChanged decoding against real BOCs, getTransaction, getMessagesInTx,
- * getBlockTimestamp, getTokenInfo and getBalance. The getLogs scan SHAPES (index vs
- * walk, wire call counts) are logs.integration.test.ts's job; this suite only needs
- * one recent log of each kind, so every scan uses a bounded window and a fixture
- * selected at RUNTIME — the pinned addresses and Jan-2026 sends of the old suite
- * aged out of the live deployment.
+ * getExecutionReceipts, getBlockTimestamp, getTokenInfo and getBalance. The getLogs
+ * scan SHAPES (index vs walk, wire call counts) are logs.integration.test.ts's job.
  *
- * A scan that finds nothing, or an endpoint that stops answering, FAILS with the
- * last reason after the retry budget — it never silently skips.
+ * This suite needs one real log of each kind, and takes each from the lane's NEWEST
+ * activity, whatever its age: the newest TON -> sepolia send and the newest executed
+ * sepolia -> TON message from the CCIP API (and the commit that carried it, from the
+ * index), read through `getTransaction` like any caller would. TON testnet lanes can be
+ * quiet for days, longer than the public v2 endpoint keeps a transaction (about two
+ * days); the SDK then reads such a transaction from the index (see indexed-tx.ts), so
+ * these tests cover both routes and never wait for traffic. The getLogs scans run on
+ * the OffRamp's own newest activity, which its price commits keep within minutes.
  *
  * Run against any TON v2 endpoint; defaults to the public index (paced, so slow):
  *   node --test src/ton/index.integration.test.ts
  *   SKIP_INTEGRATION_TESTS=1 npm test   # CI hermetic runs
  */
 const TON_TESTNET_RPC = rpcEndpoint('RPC_TON_TESTNET')
+const V3_BASE = tonV3BaseUrl(TON_TESTNET_RPC, NetworkType.Testnet)
 const skip = !!process.env.SKIP_INTEGRATION_TESTS
 const VERBOSE = !!process.env.VERBOSE
 const LOGGER = VERBOSE ? console : { ...console, debug: () => {} }
@@ -51,127 +62,144 @@ const TON_TESTNET_CHAIN_SELECTOR = 1399300952838017768n
 const CCIP_MESSAGE_SENT_TOPIC = crc32('CCIPMessageSent') // 0xa45d293c
 const COMMIT_REPORT_ACCEPTED_TOPIC = crc32('CommitReportAccepted') // 0x27d3bce8
 const EXECUTION_STATE_CHANGED_TOPIC = crc32('ExecutionStateChanged') // 0x4c94c360
-
-const HOUR_S = 3600
-const DAY_S = 86_400
-/** Fixture lookback: ton-testnet traffic bursts and then pauses for days; three days
- * matches logs.integration.test.ts's MAX_LOOKBACK_S, which still bounds the scan. */
-const FIXTURE_LOOKBACK_S = 3 * DAY_S
-/** Wall-clock a single fixture scan spends retrying before it fails. */
-const RETRY_SPACING_MS = [5_000, 15_000, 30_000]
-
-/** Transport degradation (throttling, 5xx, network blips, a mid-stream index
- * self-contradiction) — retried. Anything else is a bug and fails at once. */
-function isTransient(err: unknown): boolean {
-  if (err instanceof CCIPError) return err.isTransient
-  // AxiosError from @ton/ton's HttpApi: the response status is the verdict.
-  const status = Number((err as { response?: { status?: unknown } } | null)?.response?.status)
-  if (status > 0) return isTransientHttpStatus(status)
-  return /\b(429|rate.?limit|timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|fetch failed|socket)/i.test(
-    String((err as Error | null)?.message),
-  )
-}
-
+/** Every log an OffRamp emits while it commits and executes. */
+const RECENT_TOPICS = ['OCR3Base_Transmitted', 'CommitReportAccepted', 'ExecutionStateChanged']
 /**
- * Runs `scan` until it yields a fixture, retrying transient errors and empty results
- * with growing spacing. A scan that keeps finding nothing — or keeps failing — fails
- * the test with the last reason: a live suite must never pass by skipping.
+ * A sepolia -> TON message executed on 2026-11-13: far older than the public v2 endpoint
+ * keeps transactions, so its commit and receipts come through the SDK's index fallback
+ * there (see indexed-tx.ts) — a pinned regression guard for that route, which the
+ * newest-message fixtures only reach while the lane is quiet.
  */
-async function firstMatch<T>(what: string, scan: () => Promise<T | undefined>): Promise<T> {
-  let last: unknown
-  for (let attempt = 0; attempt <= RETRY_SPACING_MS.length; attempt++) {
-    try {
-      const found = await scan()
-      if (found !== undefined) return found
-      last = new Error(`none found (${what})`)
-    } catch (err) {
-      if (!isTransient(err)) throw err
-      last = err
-    }
-    if (attempt < RETRY_SPACING_MS.length) await sleep(RETRY_SPACING_MS[attempt]!)
-  }
-  assert.fail(
-    `${what}: gave up after ${RETRY_SPACING_MS.length + 1} attempts; last: ${
-      last instanceof Error ? last.message : JSON.stringify(last)
-    }`,
-  )
-}
+const OLD_MESSAGE_ID = '0xb63066957be861a6f100c09e3841374f632f983d7ad524455f30de4ea81aaf74'
 
 describe('TON index integration tests (live testnet)', { skip }, () => {
   let chain: TONChain
-  /** Recent-message fixture: the first TON -> sepolia send of the fixture lookback. */
-  let message$: Promise<{ log: ChainLog; message: CCIPMessage_V1_6_EVM }> | undefined
+  let index: TonIndex
+  const api = CCIPAPIClient.fromUrl(undefined, {
+    logger: { ...LOGGER, info: () => {} },
+  })
+  type Fixture<T> = Promise<{ log: ChainLog } & T>
+  /** The newest TON -> sepolia send. */
+  let message$: Fixture<{ message: CCIPMessage_V1_6_EVM }> | undefined
   let router$: Promise<string> | undefined
   let offRamp$: Promise<string> | undefined
-  let commit$:
-    | Promise<{
-        log: ChainLog
-        report: NonNullable<ReturnType<typeof TONChain.decodeCommits>>[number]
-      }>
-    | undefined
-  let receipt$:
-    | Promise<{ log: ChainLog; receipt: NonNullable<ReturnType<typeof TONChain.decodeReceipt>> }>
-    | undefined
+  type Report = NonNullable<ReturnType<typeof TONChain.decodeCommits>>[number]
+  type Receipt = NonNullable<ReturnType<typeof TONChain.decodeReceipt>>
+  /** The commit that carried the receipt fixture's message. */
+  let commit$: Fixture<{ report: Report }> | undefined
+  /** The Success receipt of the newest executed sepolia -> TON message. */
+  let receipt$: Fixture<{ receipt: Receipt }> | undefined
+  /** The OffRamp's newest log, with the one-block scan window that holds it. */
+  let recent$: Promise<{ log: ChainLog; startTime: number; endBlock: number }> | undefined
 
-  const recentStart = (ageS: number) => Math.floor(Date.now() / 1e3) - ageS
+  /** The newest message of a lane in the CCIP API, Success only if asked. */
+  const newestMessage = async (source: bigint, dest: bigint, executed: boolean) => {
+    const page = await api.searchMessages(
+      { sourceChainSelector: source, destChainSelector: dest },
+      { limit: 50 },
+    )
+    const msg = page.data.find((m) => !executed || m.status === MessageStatus.Success)
+    assert.ok(msg, `the CCIP API has no ${executed ? 'executed ' : ''}${source} -> ${dest} message`)
+    return msg
+  }
+
+  /** The log of transaction `hash` that `accept` takes. */
+  const logInTx = async <T>(hash: string, accept: (log: ChainLog) => T | undefined) => {
+    const tx = await chain.getTransaction(hash)
+    for (const log of tx.logs) {
+      const value = accept(log)
+      if (value !== undefined) return { log, value }
+    }
+    assert.fail(
+      `transaction ${tx.hash} holds no accepted log (topics: ${tx.logs.map((l) => l.topics[0]).join(',')})`,
+    )
+  }
 
   const messageFixture = () =>
-    (message$ ??= firstMatch('a TON -> sepolia CCIPMessageSent in the last 3 days', async () => {
-      for await (const log of chain.getLogs({
-        address: ONRAMP,
-        topics: ['CCIPMessageSent'],
-        startTime: recentStart(FIXTURE_LOOKBACK_S),
-      })) {
+    (message$ ??= (async () => {
+      const { messageId, sendTransactionHash } = await newestMessage(
+        TON_TESTNET_CHAIN_SELECTOR,
+        SEPOLIA_CHAIN_SELECTOR,
+        false,
+      )
+      const { log, value: message } = await logInTx(sendTransactionHash, (log) => {
         const message = TONChain.decodeMessage(log) as CCIPMessage_V1_6_EVM | undefined
-        if (message?.destChainSelector === SEPOLIA_CHAIN_SELECTOR) return { log, message }
-      }
-      return undefined
-    }))
+        return message?.messageId === messageId ? message : undefined
+      })
+      return { log, message }
+    })())
 
-  const routerFixture = () =>
-    (router$ ??= firstMatch('the OnRamp router', () =>
-      chain.getRouterForOnRamp(ONRAMP, SEPOLIA_CHAIN_SELECTOR),
-    ))
+  const routerFixture = () => (router$ ??= chain.getRouterForOnRamp(ONRAMP, SEPOLIA_CHAIN_SELECTOR))
 
   const offRampFixture = () =>
-    (offRamp$ ??= firstMatch('an OffRamp allowlisted for sepolia on the router', async () => {
+    (offRamp$ ??= (async () => {
       const offRamps = await chain.getOffRampsForRouter(
         await routerFixture(),
         SEPOLIA_CHAIN_SELECTOR,
       )
+      assert.ok(offRamps[0], 'the router has an OffRamp for sepolia')
       return offRamps[0]
-    }))
-
-  const commitFixture = () =>
-    (commit$ ??= firstMatch('a sepolia CommitReportAccepted in the last 12h', async () => {
-      for await (const log of chain.getLogs({
-        address: await offRampFixture(),
-        topics: ['CommitReportAccepted'],
-        startTime: recentStart(12 * HOUR_S),
-      })) {
-        const report = TONChain.decodeCommits(log)?.find(
-          (r) => r.sourceChainSelector === SEPOLIA_CHAIN_SELECTOR,
-        )
-        if (report) return { log, report }
-      }
-      return undefined
-    }))
+    })())
 
   const receiptFixture = () =>
-    (receipt$ ??= firstMatch('a sepolia ExecutionStateChanged in the last 12h', async () => {
-      for await (const log of chain.getLogs({
-        address: await offRampFixture(),
-        topics: ['ExecutionStateChanged'],
-        startTime: recentStart(12 * HOUR_S),
-      })) {
+    (receipt$ ??= (async () => {
+      const { messageId } = await newestMessage(
+        SEPOLIA_CHAIN_SELECTOR,
+        TON_TESTNET_CHAIN_SELECTOR,
+        true,
+      )
+      const { metadata } = await api.getMessageById(messageId)
+      assert.ok(metadata.receiptTransactionHash, `the CCIP API has no receipt for ${messageId}`)
+      const { log, value: receipt } = await logInTx(metadata.receiptTransactionHash, (log) => {
         const receipt = TONChain.decodeReceipt(log)
-        if (receipt?.sourceChainSelector === SEPOLIA_CHAIN_SELECTOR) return { log, receipt }
+        return receipt?.messageId === messageId && receipt.state === ExecutionState.Success
+          ? receipt
+          : undefined
+      })
+      return { log, receipt }
+    })())
+
+  const commitFixture = () =>
+    (commit$ ??= (async () => {
+      const { log: receiptLog, receipt } = await receiptFixture()
+      // The newest rooted sepolia commits up to the execution: one of them carried it.
+      const rows = await newestLogRows(index, await offRampFixture(), {
+        opcode: bodyPrefix.rootedCommitFrom(SEPOLIA_CHAIN_SELECTOR),
+        notAfter: receiptLog.blockTimestamp,
+      })
+      for (const row of rows) {
+        const hash = Buffer.from(row.txHash, 'base64').toString('hex')
+        const tx = await chain.getTransaction(hash)
+        for (const log of tx.logs) {
+          const report = TONChain.decodeCommits(log)?.find(
+            (r) =>
+              r.sourceChainSelector === SEPOLIA_CHAIN_SELECTOR &&
+              r.minSeqNr <= receipt.sequenceNumber &&
+              receipt.sequenceNumber <= r.maxSeqNr,
+          )
+          if (report) return { log, report }
+        }
       }
-      return undefined
-    }))
+      assert.fail(`no rooted sepolia commit before the execution covers ${receipt.sequenceNumber}`)
+    })())
+
+  const recentFixture = () =>
+    (recent$ ??= (async () => {
+      const offRamp = await offRampFixture()
+      const [row] = await newestLogRows(index, offRamp, { limit: 1 })
+      assert.ok(row, `the index has no log of OffRamp ${offRamp}`)
+      const window = {
+        startTime: row.createdAt,
+        endBlock: await txBlock(index, offRamp, row.txHash),
+      }
+      for await (const log of chain.getLogs({ address: offRamp, topics: RECENT_TOPICS, ...window }))
+        if (log.index === Number(row.createdLt)) return { log, ...window }
+      assert.fail(`the scan of ${JSON.stringify(window)} misses the OffRamp log ${row.createdLt}`)
+    })())
 
   before(async () => {
-    chain = await TONChain.fromUrl(TON_TESTNET_RPC, { logger: LOGGER })
+    index = { fetch: patientIndexFetch(V3_BASE, LOGGER), v3Base: V3_BASE }
+    chain = await TONChain.fromUrl(TON_TESTNET_RPC, { logger: LOGGER, v3Fetch: index.fetch })
   })
   after(() => chain.destroy())
 
@@ -237,8 +265,8 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
   })
 
   describe('getLogs', () => {
-    it('should return well-formed logs for the OnRamp', async () => {
-      const { log } = await messageFixture()
+    it('should return well-formed logs for the OffRamp', async () => {
+      const { log } = await recentFixture()
 
       assert.ok(log.address, 'log should have address')
       assert.equal(typeof log.data, 'string', 'log data should be a base64 BOC string')
@@ -248,31 +276,40 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       assert.equal(log.transactionHash.split(':').length, 4, 'composite hash has 4 parts')
       assert.equal(typeof log.index, 'number', 'log should have numeric index')
       assert.ok(Array.isArray(log.topics), 'log should have topics array')
-      assert.equal(log.topics[0], CCIP_MESSAGE_SENT_TOPIC, 'topics[0] should be CCIPMessageSent')
+      assert.ok(
+        RECENT_TOPICS.map((topic) => crc32(topic)).includes(log.topics[0]!),
+        `topics[0] ${log.topics[0]} should be one of ${RECENT_TOPICS.join(', ')}`,
+      )
     })
 
     it('should respect the endBlock filter', async () => {
-      const { log } = await messageFixture()
-      const endBlock = log.blockNumber
-
-      const logs: ChainLog[] = []
-      for await (const found of chain.getLogs({
-        address: ONRAMP,
-        topics: ['CCIPMessageSent'],
-        startTime: recentStart(FIXTURE_LOOKBACK_S),
-        endBlock,
-      })) {
-        logs.push(found)
-        if (logs.length >= 3) break
+      const { log, startTime } = await recentFixture()
+      const scan = async (endBlock: number) => {
+        const logs: ChainLog[] = []
+        for await (const found of chain.getLogs({
+          address: log.address,
+          topics: RECENT_TOPICS,
+          startTime,
+          endBlock,
+        }))
+          logs.push(found)
+        return logs
       }
 
-      assert.ok(logs.length > 0, 'Should find logs with endBlock filter')
-      for (const found of logs) {
+      const upTo = await scan(log.blockNumber)
+      assert.ok(
+        upTo.some((l) => l.transactionHash === log.transactionHash && l.index === log.index),
+        'endBlock is inclusive: the log of that block is returned',
+      )
+      for (const found of upTo) {
         assert.ok(
-          found.blockNumber <= endBlock,
-          `log.blockNumber ${found.blockNumber} should be <= endBlock ${endBlock}`,
+          found.blockNumber <= log.blockNumber,
+          `log.blockNumber ${found.blockNumber} should be <= endBlock ${log.blockNumber}`,
         )
       }
+
+      const below = await scan(log.blockNumber - 1)
+      assert.deepEqual(below, [], 'nothing at or above the block after endBlock')
     })
   })
 
@@ -280,34 +317,41 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
     let message: CCIPMessage_V1_6_EVM
     let messageLog: ChainLog
 
-    before(async () => {
-      ;({ message, log: messageLog } = await messageFixture())
-    })
+    /** `it` with `message` and `messageLog` read from the fixture. */
+    const itMessage = (name: string, fn: () => void) =>
+      it(name, async () => {
+        ;({ message, log: messageLog } = await messageFixture())
+        fn()
+      })
 
-    it('should decode CCIPMessageSent from the transaction log', () => {
+    itMessage('should decode CCIPMessageSent from the transaction log', () => {
       assert.ok(message, 'Should successfully decode message')
       assert.ok(messageLog.transactionHash, 'Should have found a valid transaction')
     })
 
-    it('should decode messageId as 32-byte hex', () => {
+    itMessage('should have CCIPMessageSent CRC32 as topics[0]', () => {
+      assert.equal(messageLog.topics[0], CCIP_MESSAGE_SENT_TOPIC)
+    })
+
+    itMessage('should decode messageId as 32-byte hex', () => {
       assert.ok(message.messageId.startsWith('0x'), 'messageId should be hex prefixed')
       assert.match(message.messageId, /^0x[a-f0-9]{64}$/, 'messageId should be 32 bytes')
     })
 
-    it('should decode sourceChainSelector as TON testnet', () => {
+    itMessage('should decode sourceChainSelector as TON testnet', () => {
       assert.equal(message.sourceChainSelector, TON_TESTNET_CHAIN_SELECTOR)
     })
 
-    it('should decode destChainSelector as Sepolia', () => {
+    itMessage('should decode destChainSelector as Sepolia', () => {
       assert.equal(message.destChainSelector, SEPOLIA_CHAIN_SELECTOR)
     })
 
-    it('should decode sequenceNumber as positive bigint', () => {
+    itMessage('should decode sequenceNumber as positive bigint', () => {
       assert.equal(typeof message.sequenceNumber, 'bigint')
       assert.ok(message.sequenceNumber > 0n, 'sequenceNumber should be positive')
     })
 
-    it('should decode nonce as bigint (typically 0 for out-of-order)', () => {
+    itMessage('should decode nonce as bigint (typically 0 for out-of-order)', () => {
       assert.equal(typeof message.nonce, 'bigint')
       // nonce is 0 when allowOutOfOrderExecution is true
       if (message.allowOutOfOrderExecution) {
@@ -315,7 +359,7 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       }
     })
 
-    it('should decode sender as a TON address', () => {
+    itMessage('should decode sender as a TON address', () => {
       // The body carries the sender in canonical raw form ("workchain:hash").
       assert.ok(message.sender.length > 0, 'sender should be set')
       assert.doesNotThrow(
@@ -324,19 +368,19 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       )
     })
 
-    it('should decode receiver as checksummed EVM address', () => {
+    itMessage('should decode receiver as checksummed EVM address', () => {
       assert.ok(message.receiver.startsWith('0x'), 'receiver should be hex prefixed')
       // Receiver should be a checksummed 20-byte EVM address (42 chars with 0x prefix)
       assert.equal(message.receiver.length, 42, 'receiver should be 20 bytes (42 chars with 0x)')
       assert.match(message.receiver, /^0x[a-fA-F0-9]{40}$/, 'receiver should be valid EVM address')
     })
 
-    it('should decode data as hex bytes', () => {
+    itMessage('should decode data as hex bytes', () => {
       assert.ok(message.data.startsWith('0x'), 'data should be hex prefixed')
       assert.match(message.data, /^0x([a-f0-9]{2})*$/, 'data should be valid hex bytes')
     })
 
-    it('should decode tokenAmounts as array', () => {
+    itMessage('should decode tokenAmounts as array', () => {
       assert.ok(Array.isArray(message.tokenAmounts), 'tokenAmounts should be array')
       for (const ta of message.tokenAmounts) {
         assert.ok('sourcePoolAddress' in ta, 'tokenAmount should have sourcePoolAddress')
@@ -344,7 +388,7 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       }
     })
 
-    it('should decode feeToken as TON address', () => {
+    itMessage('should decode feeToken as TON address', () => {
       assert.ok(message.feeToken, 'feeToken should be present')
       assert.doesNotThrow(
         () => Address.parse(message.feeToken),
@@ -352,17 +396,17 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       )
     })
 
-    it('should decode feeTokenAmount as positive bigint', () => {
+    itMessage('should decode feeTokenAmount as positive bigint', () => {
       assert.equal(typeof message.feeTokenAmount, 'bigint')
       assert.ok(message.feeTokenAmount > 0n, 'feeTokenAmount should be positive')
     })
 
-    it('should decode feeValueJuels as positive bigint', () => {
+    itMessage('should decode feeValueJuels as positive bigint', () => {
       assert.equal(typeof message.feeValueJuels, 'bigint')
       assert.ok(message.feeValueJuels > 0n, 'feeValueJuels should be positive')
     })
 
-    it('should decode extraArgs as a BOC carrying EVMExtraArgsV2', () => {
+    itMessage('should decode extraArgs as a BOC carrying EVMExtraArgsV2', () => {
       // The wire format is a serialized cell graph (BOC), not a bare tag+fields.
       assert.match(message.extraArgs, /^0x([a-f0-9]{2})+$/, 'extraArgs should be hex bytes')
       const decoded = TONChain.decodeExtraArgs(message.extraArgs)
@@ -375,14 +419,14 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       )
     })
 
-    it('should decode gasLimit as positive bigint', () => {
+    itMessage('should decode gasLimit as positive bigint', () => {
       assert.ok('gasLimit' in message, 'message should have gasLimit property')
       const { gasLimit } = message as { gasLimit: bigint }
       assert.equal(typeof gasLimit, 'bigint')
       assert.ok(gasLimit > 0n, 'gasLimit should be positive')
     })
 
-    it('should decode allowOutOfOrderExecution as boolean', () => {
+    itMessage('should decode allowOutOfOrderExecution as boolean', () => {
       assert.equal(typeof message.allowOutOfOrderExecution, 'boolean')
     })
 
@@ -410,10 +454,13 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
     let commitLog: ChainLog
     let commitReport: NonNullable<ReturnType<typeof TONChain.decodeCommits>>
 
-    before(async () => {
-      ;({ log: commitLog } = await commitFixture())
-      commitReport = TONChain.decodeCommits(commitLog) ?? []
-    })
+    /** `it` with `commitLog` and `commitReport` read from the fixture. */
+    const itCommit = (name: string, fn: () => void) =>
+      it(name, async () => {
+        ;({ log: commitLog } = await commitFixture())
+        commitReport = TONChain.decodeCommits(commitLog) ?? []
+        fn()
+      })
 
     it('should return undefined for invalid inputs', () => {
       assert.equal(TONChain.decodeCommits({ data: '' } as ChainLog), undefined, 'empty data')
@@ -438,12 +485,12 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       )
     })
 
-    it('should have CommitReportAccepted CRC32 as topics[0]', () => {
+    itCommit('should have CommitReportAccepted CRC32 as topics[0]', () => {
       assert.ok(commitLog.topics.length > 0, 'topics should not be empty')
       assert.equal(commitLog.topics[0], COMMIT_REPORT_ACCEPTED_TOPIC)
     })
 
-    it('should decode commit reports with correct lane info', () => {
+    itCommit('should decode commit reports with correct lane info', () => {
       assert.ok(commitReport.length > 0, 'Should decode commit report')
       const report = commitReport[0]!
       assert.equal(report.sourceChainSelector, SEPOLIA_CHAIN_SELECTOR)
@@ -454,18 +501,18 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       )
     })
 
-    it('should decode valid sequence number range', () => {
+    itCommit('should decode valid sequence number range', () => {
       const report = commitReport[0]!
       assert.ok(report.minSeqNr > 0n, 'minSeqNr should be positive')
       assert.ok(report.maxSeqNr >= report.minSeqNr, 'maxSeqNr >= minSeqNr')
     })
 
-    it('should decode valid merkleRoot', () => {
+    itCommit('should decode valid merkleRoot', () => {
       const report = commitReport[0]!
       assert.match(report.merkleRoot, /^0x[a-f0-9]{64}$/, 'merkleRoot should be 32-byte hex')
     })
 
-    it('should filter commits by lane', () => {
+    itCommit('should filter commits by lane', () => {
       const lane: Lane = {
         sourceChainSelector: SEPOLIA_CHAIN_SELECTOR,
         destChainSelector: TON_TESTNET_CHAIN_SELECTOR,
@@ -497,9 +544,12 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
     let receiptLog: ChainLog
     let receipt: NonNullable<ReturnType<typeof TONChain.decodeReceipt>>
 
-    before(async () => {
-      ;({ log: receiptLog, receipt } = await receiptFixture())
-    })
+    /** `it` with `receiptLog` and `receipt` read from the fixture. */
+    const itReceipt = (name: string, fn: () => void) =>
+      it(name, async () => {
+        ;({ log: receiptLog, receipt } = await receiptFixture())
+        fn()
+      })
 
     it('should return undefined for invalid inputs', () => {
       assert.equal(TONChain.decodeReceipt({ data: '' } as ChainLog), undefined, 'empty data')
@@ -524,25 +574,25 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       )
     })
 
-    it('should have ExecutionStateChanged CRC32 as topics[0]', () => {
+    itReceipt('should have ExecutionStateChanged CRC32 as topics[0]', () => {
       assert.ok(receiptLog.topics.length > 0, 'topics should not be empty')
       assert.equal(receiptLog.topics[0], EXECUTION_STATE_CHANGED_TOPIC)
     })
 
-    it('should decode receipt with valid sourceChainSelector', () => {
+    itReceipt('should decode receipt with valid sourceChainSelector', () => {
       assert.equal(receipt.sourceChainSelector, SEPOLIA_CHAIN_SELECTOR)
     })
 
-    it('should decode valid sequenceNumber', () => {
+    itReceipt('should decode valid sequenceNumber', () => {
       assert.equal(typeof receipt.sequenceNumber, 'bigint')
       assert.ok(receipt.sequenceNumber > 0n, 'sequenceNumber should be positive')
     })
 
-    it('should decode valid messageId', () => {
+    itReceipt('should decode valid messageId', () => {
       assert.match(receipt.messageId, /^0x[a-f0-9]{64}$/, 'messageId should be 32-byte hex')
     })
 
-    it('should decode valid state', () => {
+    itReceipt('should decode valid state', () => {
       assert.ok(
         [0, 1, 2, 3].includes(receipt.state),
         'state should be Untouched(0), InProgress(1), Success(2), or Failure(3)',
@@ -604,16 +654,17 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
   describe('getTransaction', () => {
     let knownTxHash: string
 
-    before(async () => {
-      ;({
-        log: { transactionHash: knownTxHash },
-      } = await messageFixture())
-    })
+    /** `it` with `knownTxHash` read from the message fixture. */
+    const itTx = (name: string, fn: () => Promise<void>) =>
+      it(name, async () => {
+        ;({
+          log: { transactionHash: knownTxHash },
+        } = await messageFixture())
+        await fn()
+      })
 
-    it('should fetch transaction by composite hash', async () => {
-      const tx = await firstMatch('the transaction by composite hash', () =>
-        chain.getTransaction(knownTxHash),
-      )
+    itTx('should fetch transaction by composite hash', async () => {
+      const tx = await chain.getTransaction(knownTxHash)
 
       assert.equal(tx.hash, knownTxHash)
       assert.ok(tx.blockNumber > 0, 'blockNumber should be positive')
@@ -627,27 +678,23 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
       }
     })
 
-    it('should fetch transaction by raw 64-char hex hash via TonCenter', async () => {
+    itTx('should fetch transaction by raw 64-char hex hash via TonCenter', async () => {
       const parts = knownTxHash.split(':')
       assert.equal(parts.length, 4, 'Should have 4 parts in composite hash')
       const rawHash = parts[3]!
 
-      // The raw hash resolves through the TonCenter V3 index, which lags the v2
-      // tip — a miss right after the send is transient, not a wrong hash.
-      const tx = await firstMatch('the transaction by raw hash', () =>
-        chain.getTransaction(rawHash),
-      )
+      // The raw hash resolves through the TonCenter V3 index — the same index the
+      // fixture was found in, so it is there.
+      const tx = await chain.getTransaction(rawHash)
 
       assert.equal(tx.hash, knownTxHash, 'Should resolve to same composite hash')
       assert.ok(tx.blockNumber > 0, 'blockNumber should be positive')
     })
 
-    it('should fetch transaction by 0x-prefixed raw hash', async () => {
+    itTx('should fetch transaction by 0x-prefixed raw hash', async () => {
       const rawHash = `0x${knownTxHash.split(':')[3]!}`
 
-      const tx = await firstMatch('the transaction by 0x-prefixed raw hash', () =>
-        chain.getTransaction(rawHash),
-      )
+      const tx = await chain.getTransaction(rawHash)
 
       assert.equal(tx.hash, knownTxHash, 'Should resolve to same composite hash')
     })
@@ -661,6 +708,83 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
     })
   })
 
+  describe('getExecutionReceipts', () => {
+    it('finds an execution through its commit and through a scan, with the same result', async () => {
+      const offRamp = await offRampFixture()
+      const { log, receipt } = await receiptFixture()
+      const commit = await commitFixture()
+      const query = {
+        offRamp,
+        messageId: receipt.messageId,
+        sourceChainSelector: SEPOLIA_CHAIN_SELECTOR,
+        sequenceNumber: receipt.sequenceNumber,
+        startTime: commit.log.blockTimestamp,
+      }
+      const collect = async (opts: Parameters<TONChain['getExecutionReceipts']>[0]) => {
+        const out = []
+        for await (const exec of chain.getExecutionReceipts(opts)) out.push(exec)
+        return out
+      }
+      const key = (execs: Awaited<ReturnType<typeof collect>>) =>
+        execs.map((e) => `${e.log.transactionHash}#${e.log.index}:${e.receipt.state}`)
+
+      // With the commit report: read through the report's MerkleRoot contract.
+      const viaCommit = await collect({
+        ...query,
+        verifications: { report: commit.report, log: commit.log },
+      })
+      assert.ok(viaCommit.length > 0, 'the commit leads to the execution')
+      const last = viaCommit[viaCommit.length - 1]!
+      assert.equal(last.receipt.state, ExecutionState.Success)
+      assert.equal(last.receipt.messageId, receipt.messageId)
+      assert.equal(last.log.transactionHash, log.transactionHash, 'the same log as the fixture')
+      assert.equal(last.log.index, log.index)
+      assert.equal(last.log.blockNumber, log.blockNumber, 'stamped with the same block')
+
+      // Without it: a scan from the commit time on, narrowed to the source chain.
+      assert.deepEqual(key(await collect(query)), key(viaCommit), 'both routes agree')
+    })
+  })
+
+  describe('old message (index fallback where v2 no longer keeps it)', () => {
+    it('finds the commit and the Success receipt the CCIP API reports', async () => {
+      const request = await api.getMessageById(OLD_MESSAGE_ID)
+      const offRamp = request.metadata.offRamp
+      assert.ok(offRamp, 'the CCIP API names the OffRamp')
+      assert.ok(request.metadata.receiptTransactionHash, 'the CCIP API has its receipt')
+
+      const verifications = await chain.getVerifications({ offRamp, request })
+      assert.ok('report' in verifications, 'a commit report')
+      const { report, log: commitLog } = verifications
+      assert.ok(
+        report.minSeqNr <= request.message.sequenceNumber &&
+          request.message.sequenceNumber <= report.maxSeqNr,
+        'the commit covers the message',
+      )
+      assert.equal(commitLog.topics[0], COMMIT_REPORT_ACCEPTED_TOPIC)
+
+      const execs = []
+      for await (const exec of chain.getExecutionReceipts({
+        offRamp,
+        messageId: OLD_MESSAGE_ID,
+        sourceChainSelector: SEPOLIA_CHAIN_SELECTOR,
+        sequenceNumber: request.message.sequenceNumber,
+        startTime: request.log.blockTimestamp,
+        verifications,
+      }))
+        execs.push(exec)
+      const last = execs[execs.length - 1]
+      assert.ok(last, 'a receipt')
+      assert.equal(last.receipt.state, ExecutionState.Success)
+      assert.equal(
+        last.log.transactionHash.split(':')[3],
+        request.metadata.receiptTransactionHash.replace(/^0x/, '').toLowerCase(),
+        'the receipt transaction the CCIP API reports',
+      )
+      assert.ok(last.log.blockNumber >= commitLog.blockNumber, 'executed at or after its commit')
+    })
+  })
+
   describe('getBlockTimestamp', () => {
     it('should return timestamp for finalized block', async () => {
       const timestamp = await chain.getBlockTimestamp('finalized')
@@ -668,7 +792,7 @@ describe('TON index integration tests (live testnet)', { skip }, () => {
     })
 
     it('should return cached timestamp after getLogs', async () => {
-      const { log } = await messageFixture()
+      const { log } = await recentFixture()
 
       // The scan cached the masterchain timestamp of each emitted block.
       const timestamp = await chain.getBlockTimestamp(log.blockNumber)

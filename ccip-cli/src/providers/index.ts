@@ -16,6 +16,7 @@ import {
   CCIPRpcNotFoundError,
   CCIPTransactionNotFoundError,
   CantonChain,
+  CantonJsonRpcProvider,
   ChainFamily,
   NetworkType,
   networkInfo,
@@ -28,7 +29,6 @@ import type { GlobalOpts } from '../index.ts'
 import { loadAptosWallet } from './aptos.ts'
 import {
   type CantonWalletWithSigner,
-  JsonRpcProvider,
   loadCantonConfig,
   loadCantonWallet,
   resolveCantonTokenGetter,
@@ -211,7 +211,7 @@ export function fetchChainsFromRpcs(ctx: Ctx, argv: FetchGlobalArgs, txHash?: st
       switch (rawCantonConfig.apiType) {
         case '':
         case 'json':
-          provider = await JsonRpcProvider.fromUrl(
+          provider = await CantonJsonRpcProvider.fromUrl(
             rawCantonConfig.chainId,
             rawCantonConfig.apiUrl,
             jwt,

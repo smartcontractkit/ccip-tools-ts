@@ -21,6 +21,18 @@ export async function resolveTransferPreapprovalCid(
   receiver: string,
   instrumentId: { admin: string; id: string },
 ): Promise<string | undefined> {
+  return (await listTransferPreapprovalCids(chain, receiver, instrumentId))[0]
+}
+
+/**
+ * Every active preapproval of `receiver` covering `instrumentId` (see
+ * {@link resolveTransferPreapprovalCid}), e.g. to check whether a pinned CID is still live.
+ */
+export async function listTransferPreapprovalCids(
+  chain: CantonChain,
+  receiver: string,
+  instrumentId: { admin: string; id: string },
+): Promise<string[]> {
   // Why the symbolic filter: the wallet gateway's ACS proxy accepts ONLY
   // package-name template filters (concrete package-ID lookups are rejected),
   // and the name form matches contracts across all vetted versions of the app
@@ -40,5 +52,5 @@ export async function resolveTransferPreapprovalCid(
       )
     },
   )
-  return contracts[0]?.contractId
+  return contracts.map((c) => c.contractId)
 }

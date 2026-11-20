@@ -47,7 +47,9 @@ export class SetObservers extends PoolChoiceOperation<SetObserversParams> {
       throw new CCTParamsInvalidError(this.name, 'observers', 'at least one observer is required')
     }
     p.observers.forEach((o, i) => parsePartyId(this.name, `observers[${i}]`, o))
-    return p
+    // Detach the caller's array: validation runs here while the choice argument
+    // is encoded after ledger reads — the prepared params must not retain it.
+    return { ...p, observers: [...p.observers] }
   }
 
   /** Builds the `SetObservers` exercise command against the pool. */
@@ -69,6 +71,7 @@ export class SetObservers extends PoolChoiceOperation<SetObserversParams> {
       choiceArgument,
       actAs: [p.sender],
       commandIdPrefix: 'cct-set-observers',
+      commandId: p.commandId,
     })
   }
 }

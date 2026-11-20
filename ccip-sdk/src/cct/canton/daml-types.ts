@@ -174,6 +174,17 @@ export type SetObserversArg = {
   observers: string[]
 }
 
+/** `AddPoolReceiveContextContractValue` choice argument (lock-release pool). */
+export type AddPoolReceiveContextContractValueArg = {
+  contextKey: string
+  referredContract: string
+}
+
+/** `RemovePoolReceiveContextValue` choice argument (lock-release pool). */
+export type RemovePoolReceiveContextValueArg = {
+  contextKey: string
+}
+
 /** `SetDynamicConfig` choice argument (`Optional Party` → string | null). */
 export type SetDynamicConfigArg = {
   rateLimitAdmin: string | null

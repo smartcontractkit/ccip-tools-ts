@@ -2,7 +2,11 @@
  * Retry helpers for the fork tests. An anvil fork relays each uncached read to a
  * public testnet RPC, and that RPC can throttle or drop a request at any time.
  */
+import type { JsonRpcProvider } from 'ethers'
+
 import { CCIPError, CCIPErrorCode, shouldRetry } from '../errors/index.ts'
+import type { WithLogger } from '../types.ts'
+import { EVMChain } from './index.ts'
 
 /**
  * Upstream trouble seen through a fork: SDK transient errors, 429s, the empty
@@ -47,3 +51,17 @@ export const rejectionOf = (promise: Promise<unknown>, message: string): Promise
       return err
     },
   )
+
+/**
+ * A provider for an anvil fork, built as the SDK builds its own: every request goes
+ * through `createRateLimitedFetch`. That fetch retries what the fork relays from its upstream
+ * as an in-band error: rate limits, and connection resets, which anvil itself does not retry
+ * (it retries only HTTP 429/503 answers). A plain `JsonRpcProvider` would fail the test at once.
+ */
+export async function forkProvider(
+  fork: { host: string; port: number },
+  ctx?: WithLogger,
+): Promise<JsonRpcProvider> {
+  const [provider] = await EVMChain._getProvider(`http://${fork.host}:${fork.port}`, ctx)
+  return provider as JsonRpcProvider
+}

@@ -4,12 +4,26 @@ import { PublicKey } from '@solana/web3.js'
 
 import { newProgram } from '../../../solana/coder.ts'
 import { IDL as CCIP_ROUTER_IDL } from '../../../solana/idl/1.6.0/CCIP_ROUTER.ts'
+import { IDL as CCIP_ROUTER_TOKEN_ADMIN_REGISTRY_V2_IDL } from '../../../solana/idl/2.0.0/CCIP_ROUTER_TOKEN_ADMIN_REGISTRY.ts'
 import type { SolanaChain } from '../../../solana/index.ts'
 import { simulationProvider } from '../../../solana/utils.ts'
 
 /** Creates an Anchor Program client for the CCIP Router program. */
 export function createRouterProgram(chain: SolanaChain, router: PublicKey, payer: PublicKey) {
   return newProgram(CCIP_ROUTER_IDL, router, simulationProvider(chain, payer))
+}
+
+/** Creates an Anchor Program client for the CCIP 2.0 Router's TokenAdminRegistry instructions. */
+export function createRouterTokenAdminRegistryV2Program(
+  chain: SolanaChain,
+  router: PublicKey,
+  payer: PublicKey,
+) {
+  return newProgram(
+    CCIP_ROUTER_TOKEN_ADMIN_REGISTRY_V2_IDL,
+    router,
+    simulationProvider(chain, payer),
+  )
 }
 
 /** Derives the Router config PDA. */

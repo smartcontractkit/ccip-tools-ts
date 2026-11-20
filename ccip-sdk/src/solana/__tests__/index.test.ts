@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { beforeEach, describe, it, mock } from 'node:test'
 
 import { BorshAccountsCoder } from '@coral-xyz/anchor'
@@ -6,13 +7,14 @@ import { type Connection, PublicKey } from '@solana/web3.js'
 import BN from 'bn.js'
 
 import { LaneFeature } from '../../chain.ts'
+import '../../evm/index.ts' // registers the EVM family, getTotalFeesEstimate's destination
 import {
   CCIPCommitHistoryPrunedError,
   CCIPCommitNotFoundError,
   CCIPDataFormatUnsupportedError,
   CCIPTokenPoolStateNotFoundError,
 } from '../../errors/index.ts'
-import { type NetworkInfo, ChainFamily, NetworkType } from '../../networks.ts'
+import { type NetworkInfo, ChainFamily, NetworkType, networkInfo } from '../../networks.ts'
 import { CCIPVersion } from '../../types.ts'
 import { parseTypeAndVersion, toLeArray } from '../../utils.ts'
 import { sizedCoder } from '../coder.ts'
@@ -20,6 +22,7 @@ import { IDL as BASE_TOKEN_POOL_V2 } from '../idl/2.0.0/BASE_TOKEN_POOL.ts'
 import { IDL as CCIP_ROUTER_V2 } from '../idl/2.0.0/CCIP_ROUTER.ts'
 import { type SolanaTransaction, SolanaChain } from '../index.ts'
 import {
+  deriveCctpVerifierConfigPda,
   deriveTokenPoolChainConfigOverridePda,
   deriveTokenPoolChainConfigV2Pda,
 } from '../token-pool.ts'
@@ -688,6 +691,8 @@ describe('SolanaChain getRegistryTokenConfig', () => {
       administrator: administrator.toBase58(),
       pendingAdministrator: pendingAdministrator.toBase58(),
       tokenPool: tokenPool.toBase58(),
+      interfaceVersion: 1,
+      accountResolution: 'NoResolution',
     })
   })
 
@@ -699,6 +704,8 @@ describe('SolanaChain getRegistryTokenConfig', () => {
     assert.deepEqual(await chain.getRegistryTokenConfig(router.toBase58(), mint.toBase58()), {
       administrator: administrator.toBase58(),
       pendingAdministrator: pendingAdministrator.toBase58(),
+      interfaceVersion: 1,
+      accountResolution: 'NoResolution',
     })
   })
 })
@@ -717,7 +724,6 @@ describe('SolanaChain token pool readers', () => {
     poolProgram,
   )[0]
   const chainConfigV2Pda = deriveTokenPoolChainConfigV2Pda(poolProgram, remoteSelector, mint)
-  const overridePda = deriveTokenPoolChainConfigOverridePda(poolProgram, remoteSelector, mint)
   const feeOpts = {
     destChainSelector: remoteSelector,
     finality: 'finalized',
@@ -746,23 +752,30 @@ describe('SolanaChain token pool readers', () => {
 
   /**
    * A chain with a 2.0 router and a pool of `poolTypeAndVersion` (`null` for a custom pool without
-   * `typeVersion`) with a ChainConfig to `remoteSelector`, and optionally a ChainConfigV2 and FTF
-   * override; the router has a 2.0 lane to `remoteSelector` unless `laneV2` is false, with its
-   * sender allowlist enabled if `laneV2` is `'allowlisted'`, and a 1.6 lane unless `v16Lane` is
-   * false.
+   * `typeVersion`) with a ChainConfig to `remoteChain` (default: `remoteSelector`), and optionally
+   * a ChainConfigV2 and FTF override; the router has a 2.0 lane to `remoteChain` unless `laneV2` is
+   * false, with its sender allowlist enabled if `laneV2` is `'allowlisted'`, and a 1.6 lane unless
+   * `v16Lane` is false. The token's registry entry has pool interface `interfaceVersion`, and
+   * `extraAccounts` are added to the chain's accounts.
    */
   async function poolChain({
     poolTypeAndVersion,
+    remoteChain = remoteSelector,
     override,
     chainConfigV2,
     laneV2 = true,
     v16Lane = true,
+    interfaceVersion = 2,
+    extraAccounts = [],
   }: {
     poolTypeAndVersion: string | null
+    remoteChain?: bigint
     override?: { enabled: boolean }
     chainConfigV2?: { flags: number; blockDepth: number }
     laneV2?: boolean | 'allowlisted'
     v16Lane?: boolean
+    interfaceVersion?: number
+    extraAccounts?: [PublicKey, { owner: PublicKey; data: Buffer }][]
   }) {
     const state = await encode('state', {
       version: 1,
@@ -795,7 +808,7 @@ describe('SolanaChain token pool readers', () => {
       (await encode('chainConfigV2', {
         bump: 254,
         version: 1,
-        remoteChainSelector: new BN(remoteSelector.toString()),
+        remoteChainSelector: new BN(remoteChain.toString()),
         mint,
         allowedFinalityConfig: chainConfigV2,
         tokenTransferFeeConfig: {
@@ -807,6 +820,13 @@ describe('SolanaChain token pool readers', () => {
           fastFinalityBpsFee: 20,
           isEnabled: true,
         },
+        ccvConfig: {
+          thresholdAmount: new BN(0),
+          outboundCcvs: [],
+          thresholdOutboundCcvs: [],
+          inboundCcvs: [],
+          thresholdInboundCcvs: [],
+        },
       }))
     const overrideData =
       override &&
@@ -814,7 +834,7 @@ describe('SolanaChain token pool readers', () => {
         bump: 254,
         version: 1,
         base: {
-          remoteChainSelector: new BN(remoteSelector.toString()),
+          remoteChainSelector: new BN(remoteChain.toString()),
           mint,
           inboundRateLimit: bucket(override.enabled, 10, 3),
           outboundRateLimit: bucket(override.enabled, 20, 4),
@@ -824,15 +844,28 @@ describe('SolanaChain token pool readers', () => {
 
     const accounts = new Map<string, { owner: PublicKey; data: Buffer }>([
       [tokenPool.toBase58(), { owner: poolProgram, data: state }],
-      [chainConfigPda.toBase58(), { owner: poolProgram, data: chainConfig }],
+      [
+        PublicKey.findProgramAddressSync(
+          [Buffer.from('ccip_tokenpool_chainconfig'), toLeArray(remoteChain, 8), mint.toBuffer()],
+          poolProgram,
+        )[0].toBase58(),
+        { owner: poolProgram, data: chainConfig },
+      ],
     ])
     if (chainConfigV2Data)
-      accounts.set(chainConfigV2Pda.toBase58(), { owner: poolProgram, data: chainConfigV2Data })
+      accounts.set(deriveTokenPoolChainConfigV2Pda(poolProgram, remoteChain, mint).toBase58(), {
+        owner: poolProgram,
+        data: chainConfigV2Data,
+      })
     if (overrideData)
-      accounts.set(overridePda.toBase58(), { owner: poolProgram, data: overrideData })
+      accounts.set(
+        deriveTokenPoolChainConfigOverridePda(poolProgram, remoteChain, mint).toBase58(),
+        { owner: poolProgram, data: overrideData },
+      )
+    for (const [k, account] of extraAccounts) accounts.set(k.toBase58(), account)
     if (v16Lane) {
       const [destChainState] = PublicKey.findProgramAddressSync(
-        [Buffer.from('dest_chain_state'), toLeArray(remoteSelector, 8)],
+        [Buffer.from('dest_chain_state'), toLeArray(remoteChain, 8)],
         router,
       )
       accounts.set(destChainState.toBase58(), { owner: router, data: Buffer.alloc(8) })
@@ -844,9 +877,10 @@ describe('SolanaChain token pool readers', () => {
     const chain = new SolanaChain(
       {
         getAccountInfo,
-        getProgramAccounts: async () => [
-          { pubkey: chainConfigPda, account: accounts.get(chainConfigPda.toBase58()) },
-        ],
+        // pool programs are shared by every token: reads derive the pool's PDAs instead
+        getProgramAccounts: async () => {
+          throw new Error('unexpected getProgramAccounts scan of a pool program')
+        },
         getMultipleAccountsInfo,
         getSignaturesForAddress: async () => [],
         // `observe_dest_chain_v2`, failing with AccountNotInitialized without a 2.0 lane
@@ -884,6 +918,8 @@ describe('SolanaChain token pool readers', () => {
     mock.method(chain, 'getRegistryTokenConfig', async () => ({
       administrator: key(20).toBase58(),
       tokenPool: tokenPool.toBase58(),
+      interfaceVersion,
+      accountResolution: 'WithoutExtendedLookupTable' as const,
     }))
     return { chain, getAccountInfo, getMultipleAccountsInfo }
   }
@@ -970,6 +1006,14 @@ describe('SolanaChain token pool readers', () => {
     ;({ chain } = await poolChain({ poolTypeAndVersion: null, chainConfigV2: v2ChainConfig }))
     config = await chain.getTokenPoolConfig(tokenPool.toBase58(), feeOpts)
     assert.equal(config.finalityDepth, 5)
+  })
+
+  it('reads every remote from derived ChainConfig PDAs, in pages of at most 100', async () => {
+    const { chain, getMultipleAccountsInfo } = await poolChain({ poolTypeAndVersion: v16Pool })
+    const remotes = await chain.getTokenPoolRemotes(tokenPool.toBase58())
+    assert.deepEqual(Object.keys(remotes), ['solana-devnet'])
+    const pages = getMultipleAccountsInfo.mock.calls.map(({ arguments: [keys] }) => keys.length)
+    assert.ok(pages.length > 1 && pages.every((n) => n <= 100), `pages: ${pages.join(', ')}`)
   })
 
   it("returns a 2.0 pool's FTF rate limits from its override", async () => {
@@ -1114,6 +1158,67 @@ describe('SolanaChain token pool readers', () => {
       const features = await laneFeatures(chain)
       assert.equal(features[LaneFeature.FINALITY_FAST], 1)
       assert.equal(features[LaneFeature.FINALITY_SAFE], true)
+    })
+  })
+
+  // The fork tests cover a finalized 2.0 token transfer end to end (quote vs. send); these cover
+  // the branches devnet can't reach.
+  describe('getTotalFeesEstimate', () => {
+    const sepolia = networkInfo('ethereum-testnet-sepolia').chainSelector
+    const ccipFee = 1_000n
+
+    /** {@link poolChain} to Sepolia, whose `getFee` quotes every message at `ccipFee`. */
+    async function feeChain(opts: Parameters<typeof poolChain>[0]) {
+      const ctx = await poolChain({ remoteChain: sepolia, chainConfigV2: v2ChainConfig, ...opts })
+      mock.method(ctx.chain, 'getFee', async () => ccipFee)
+      return ctx
+    }
+    const estimate = (chain: SolanaChain, extraArgs: Record<string, unknown>) =>
+      chain.getTotalFeesEstimate({
+        router: router.toBase58(),
+        destChainSelector: sepolia,
+        message: {
+          receiver: '0x9eC0e4A4c411493773E01e2ABF4D42395788846b',
+          tokenAmounts: [{ token: mint.toBase58(), amount: 1_000_000n }],
+          extraArgs,
+        },
+      })
+
+    it("takes a 2.0 pool's standard or fast bps by finality", async () => {
+      const { chain } = await feeChain({ poolTypeAndVersion: v2Pool })
+      assert.deepEqual(await estimate(chain, { finality: 'finalized' }), {
+        ccipFee,
+        tokenTransferFee: { feeDeducted: 1_000n, bps: 10 },
+      })
+      assert.deepEqual(await estimate(chain, { finality: 5 }), {
+        ccipFee,
+        tokenTransferFee: { feeDeducted: 2_000n, bps: 20 },
+      })
+    })
+
+    it('quotes no pool fee over 1.6 or for pool interface 1', async () => {
+      // legacy args fall back to 1.6 without a 2.0 lane
+      let { chain } = await feeChain({ poolTypeAndVersion: v2Pool, laneV2: false })
+      assert.deepEqual(await estimate(chain, { gasLimit: 0n }), { ccipFee })
+      // the router sends interface-1 pools through the fee-less `lock_or_burn_tokens`
+      ;({ chain } = await feeChain({ poolTypeAndVersion: v2Pool, interfaceVersion: 1 }))
+      assert.deepEqual(await estimate(chain, { finality: 'finalized' }), { ccipFee })
+    })
+
+    it("quotes a fast CCTP transfer at its verifier's bps, and a finalized one at none", async () => {
+      const data = Buffer.alloc(8 + 2 + 6 * 32 + 4 + 2)
+      createHash('sha256').update('account:Config').digest().copy(data, 0, 0, 8)
+      data.writeUInt16LE(2, data.length - 2)
+      const { chain } = await feeChain({
+        poolTypeAndVersion: 'cctp-token-pool 2.0.1',
+        chainConfigV2: { flags: 1, blockDepth: 0 },
+        extraAccounts: [[deriveCctpVerifierConfigPda(poolProgram), { owner: poolProgram, data }]],
+      })
+      assert.deepEqual(await estimate(chain, { finality: 'safe' }), {
+        ccipFee,
+        tokenTransferFee: { feeDeducted: 200n, bps: 2 },
+      })
+      assert.deepEqual(await estimate(chain, { finality: 'finalized' }), { ccipFee })
     })
   })
 })
