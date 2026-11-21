@@ -382,6 +382,27 @@ describe('parseLogRangeError', () => {
     assert.ok(result !== null)
   })
 
+  it('parses mova "maximum [from, to] blocks distance: 1000" wrapped by ethers', () => {
+    // ethers v6 wraps the RPC error it cannot coalesce; the limit is in .error.message
+    const err = Object.assign(new Error('could not coalesce error'), {
+      code: 'UNKNOWN_ERROR',
+      error: { code: -32000, message: 'maximum [from, to] blocks distance: 1000' },
+    })
+    assert.deepEqual(parseLogRangeError(err), { maxRange: 1000 })
+  })
+
+  it('returns null for a depth limit ("fromBlock is too far from the latest block")', () => {
+    // jovay: the RPC serves only the last N blocks; a smaller page does not help
+    const err = {
+      error: {
+        code: -32000,
+        message:
+          'PARAM_VERIFY_ERROR: fromBlock is too far from the latest block, maximum allowed distance is 100000 blocks',
+      },
+    }
+    assert.equal(parseLogRangeError(err), null)
+  })
+
   it('handles JSON-RPC error code -32005', () => {
     const rpcErr = { code: -32005, message: 'block range is too large' }
     const result = parseLogRangeError(rpcErr)
