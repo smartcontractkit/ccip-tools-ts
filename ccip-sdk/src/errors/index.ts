@@ -139,6 +139,7 @@ export {
   CCIPSolanaFeeResultInvalidError,
   CCIPSolanaLookupTableNotFoundError,
   CCIPSolanaOffRampEventsNotFoundError,
+  CCIPSolanaReceiverRegistryInvalidError,
   CCIPSolanaRefAddressesNotFoundError,
   CCIPSolanaRouterConfigNotFoundError,
   CCIPSolanaV2LaneUnavailableError,

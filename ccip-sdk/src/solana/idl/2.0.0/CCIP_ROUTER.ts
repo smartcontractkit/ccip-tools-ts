@@ -3,7 +3,8 @@
  *
  * We deliberately keep this tiny and only describe what the SDK needs beyond the
  * v1.6 IDL: the `DestChainCcipV2` account (stored under the `dest_chain_state_v2`
- * PDA seed), the `CCIPMessageSentV2` event, plus the types they reference. It also
+ * PDA seed), the `ReceiverRegistry` account (a receiver's interface version), the
+ * `CCIPMessageSentV2` event, plus the types they reference. It also
  * carries the `ccip_send_v2` / `get_fee_v2` params and result types, whose accounts
  * come from account resolution (see `resolution.ts`), and the `RouterDestChainV2Observation`
  * returned by `observe_dest_chain_v2`, which tells whether a lane supports CCIP 2.0.
@@ -46,6 +47,22 @@ export type CcipRouterV2 = {
       // `[allowed_offramp, sourceChainSelector.to_le_bytes(), offRamp]`.
       name: 'allowedOfframp'
       type: { kind: 'struct'; fields: [] }
+    },
+    {
+      // A receiver's CCIP interface version, under the PDA seeds `[receiver_registry, receiver]`.
+      // The OffRamp calls `ccip_receive_v2` on a receiver registered with `receiverVersion` 2, and
+      // `ccip_receive` on any other (an absent registry means v1). `version` is this account's
+      // schema version, currently 1.
+      name: 'receiverRegistry'
+      type: {
+        kind: 'struct'
+        fields: [
+          { name: 'bump'; type: 'u8' },
+          { name: 'version'; type: 'u8' },
+          { name: 'receiverProgram'; type: 'publicKey' },
+          { name: 'receiverVersion'; type: 'u8' },
+        ]
+      }
     },
   ]
   events: [
@@ -254,6 +271,18 @@ export const IDL: CcipRouterV2 = {
     {
       name: 'allowedOfframp',
       type: { kind: 'struct', fields: [] },
+    },
+    {
+      name: 'receiverRegistry',
+      type: {
+        kind: 'struct',
+        fields: [
+          { name: 'bump', type: 'u8' },
+          { name: 'version', type: 'u8' },
+          { name: 'receiverProgram', type: 'publicKey' },
+          { name: 'receiverVersion', type: 'u8' },
+        ],
+      },
     },
   ],
   events: [

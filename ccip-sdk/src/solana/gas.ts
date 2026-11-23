@@ -5,15 +5,81 @@ import {
   createMintToCheckedInstruction,
   getMint,
 } from '@solana/spl-token'
-import { type AccountMeta, type TransactionInstruction, PublicKey } from '@solana/web3.js'
+import {
+  type AccountMeta,
+  type Connection,
+  type TransactionInstruction,
+  PublicKey,
+  SystemProgram,
+} from '@solana/web3.js'
 import BN from 'bn.js'
 import type { BytesLike } from 'ethers'
 
+import { CCIPSolanaReceiverRegistryInvalidError } from '../errors/index.ts'
 import type { WithLogger } from '../types.ts'
 import { bytesToBuffer, getAddressBytes, getDataBytes, toLeArray } from '../utils.ts'
-import { newProgram } from './coder.ts'
+import { newProgram, sizedCoder } from './coder.ts'
+import { SVMTokenReceiverUsage } from './extra-args.ts'
 import { IDL as RECEIVER_IDL } from './idl/1.6.0/CCIP_RECEIVER.ts'
+import { IDL as RECEIVER_V2_IDL } from './idl/2.0.0/CCIP_RECEIVER.ts'
+import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
 import { resolveATA, simulateTransaction, simulationProvider } from './utils.ts'
+
+const routerV2Coder = sizedCoder(CCIP_ROUTER_V2_IDL)
+
+// Anchor enum values of the v2 receiver IDL's `SVMTokenReceiverUsage`, by its numeric value
+const TOKEN_RECEIVER_USAGE_VARIANTS = {
+  [SVMTokenReceiverUsage.DeriveAtaAndCreate]: { deriveAtaAndCreate: {} },
+  [SVMTokenReceiverUsage.DeriveAtaDontCreate]: { deriveAtaDontCreate: {} },
+  [SVMTokenReceiverUsage.UseAsIs]: { useAsIs: {} },
+} as const
+
+/**
+ * A Solana receiver's CCIP interface version: 1 is called through `ccip_receive`, 2 through
+ * `ccip_receive_v2`.
+ */
+export type SolanaReceiverVersion = 1 | 2
+
+/**
+ * Reads a receiver's CCIP interface version from the router's `ReceiverRegistry`, the way a 2.0
+ * OffRamp picks which entrypoint to call: an absent (or System-owned) registry means v1, otherwise
+ * its `receiverVersion` decides. 1.6 OffRamps always call `ccip_receive`, so only ask this for a
+ * 2.0 OffRamp.
+ * @param connection - Solana connection
+ * @param router - Router program the registry PDA is derived under
+ * @param receiver - Receiver program
+ * @returns the receiver's interface version
+ * @throws {@link CCIPSolanaReceiverRegistryInvalidError} if the registry account exists but isn't
+ *   a `ReceiverRegistry` of a known schema version (the OffRamp rejects such a message)
+ */
+export async function getReceiverVersion(
+  connection: Pick<Connection, 'getAccountInfo'>,
+  router: string,
+  receiver: string,
+): Promise<SolanaReceiverVersion> {
+  const [registry] = PublicKey.findProgramAddressSync(
+    [Buffer.from('receiver_registry'), new PublicKey(receiver).toBuffer()],
+    new PublicKey(router),
+  )
+  const info = await connection.getAccountInfo(registry)
+  if (!info || info.owner.equals(SystemProgram.programId)) return 1
+  const context = { registry: registry.toBase58(), receiver }
+  let decoded: { version: number; receiverVersion: number }
+  try {
+    decoded = routerV2Coder.accounts.decode('receiverRegistry', info.data)
+  } catch (cause) {
+    throw new CCIPSolanaReceiverRegistryInvalidError(
+      { ...context, reason: cause instanceof Error ? cause.message : String(cause) },
+      { cause: cause instanceof Error ? cause : undefined },
+    )
+  }
+  if (decoded.version !== 1)
+    throw new CCIPSolanaReceiverRegistryInvalidError({
+      ...context,
+      reason: `unknown schema version ${decoded.version}`,
+    })
+  return decoded.receiverVersion === 2 ? 2 : 1
+}
 
 const SIMULATION_PAYER = new PublicKey('11111111111111111111111111111112')
 
@@ -35,6 +101,10 @@ type EstimateExecComputeUnitsOpts = {
     accounts?: readonly string[]
     accountIsWritableBitmap?: bigint
   }
+  /** Receiver interface to call (see {@link getReceiverVersion}); default 1 (`ccip_receive`) */
+  receiverVersion?: SolanaReceiverVersion
+  /** v2 only: how the OffRamp delivers the tokens to `tokenReceiver`; default `DeriveAtaAndCreate` */
+  tokenReceiverUsage?: SVMTokenReceiverUsage
 } & WithLogger
 
 function getReceiverRemainingAccounts(
@@ -106,17 +176,21 @@ async function getTokenSetupInstructions({
 }
 
 /**
- * Estimate compute units consumed by a Solana receiver `ccip_receive` callback.
+ * Estimate compute units consumed by a Solana receiver's `ccip_receive` (v1) or `ccip_receive_v2`
+ * (v2) callback, per `receiverVersion`.
  *
  * This intentionally simulates the receiver callback directly, not full OffRamp execution. The first
- * three accounts follow the standard Solana CCIP receiver convention: OffRamp external execution
- * authority PDA, OffRamp program id, and Router allowed-offramp PDA.
+ * three accounts follow the standard Solana CCIP receiver convention, the same for both interface
+ * versions: OffRamp external execution authority PDA, OffRamp program id, and Router
+ * allowed-offramp PDA.
  */
 export async function estimateExecComputeUnits({
   connection,
   router,
   offRamp,
   message,
+  receiverVersion = 1,
+  tokenReceiverUsage = SVMTokenReceiverUsage.DeriveAtaAndCreate,
   logger = console,
 }: EstimateExecComputeUnitsOpts): Promise<number> {
   const receiver = new PublicKey(message.receiver)
@@ -135,31 +209,48 @@ export async function estimateExecComputeUnits({
     ],
     new PublicKey(router),
   )
-  const program = newProgram(RECEIVER_IDL, receiver, simulationProvider({ connection, logger }))
+  const tokenAmounts = (message.destTokenAmounts ?? []).map((tokenAmount) => ({
+    token: new PublicKey('token' in tokenAmount ? tokenAmount.token : tokenAmount.destTokenAddress),
+    amount: new BN(tokenAmount.amount.toString()),
+  }))
   const receiverMessage = {
     messageId: Array.from(getDataBytes(message.messageId)),
     sourceChainSelector: new BN(message.sourceChainSelector.toString()),
     sender: bytesToBuffer(message.sender ? getAddressBytes(message.sender) : []),
     data: bytesToBuffer(message.data ? getDataBytes(message.data) : []),
-    tokenAmounts: (message.destTokenAmounts ?? []).map((tokenAmount) => ({
-      token: new PublicKey(
-        'token' in tokenAmount ? tokenAmount.token : tokenAmount.destTokenAddress,
-      ),
-      amount: new BN(tokenAmount.amount.toString()),
-    })),
   }
+  const accounts = { authority, offrampProgram: offRampProgram, allowedOfframp }
+  const remainingAccounts = getReceiverRemainingAccounts(
+    message.accounts,
+    message.accountIsWritableBitmap,
+  )
+  const provider = simulationProvider({ connection, logger })
 
-  const receiveIx = await program.methods
-    .ccipReceive(receiverMessage)
-    .accounts({
-      authority,
-      offrampProgram: offRampProgram,
-      allowedOfframp,
-    })
-    .remainingAccounts(
-      getReceiverRemainingAccounts(message.accounts, message.accountIsWritableBitmap),
-    )
-    .instruction()
+  let receiveIx
+  if (receiverVersion === 2) {
+    // a 2.0 message carries at most one token transfer, with where the OffRamp delivered it
+    const tokenAmount = tokenAmounts[0]
+    receiveIx = await newProgram(RECEIVER_V2_IDL, receiver, provider)
+      .methods.ccipReceiveV2({
+        ...receiverMessage,
+        tokenTransfer: tokenAmount
+          ? {
+              tokenAmount,
+              tokenReceiver: new PublicKey(message.tokenReceiver ?? PublicKey.default),
+              tokenReceiverUsage: TOKEN_RECEIVER_USAGE_VARIANTS[tokenReceiverUsage],
+            }
+          : null,
+      })
+      .accounts(accounts)
+      .remainingAccounts(remainingAccounts)
+      .instruction()
+  } else {
+    receiveIx = await newProgram(RECEIVER_IDL, receiver, provider)
+      .methods.ccipReceive({ ...receiverMessage, tokenAmounts })
+      .accounts(accounts)
+      .remainingAccounts(remainingAccounts)
+      .instruction()
+  }
 
   const setupIxs = await getTokenSetupInstructions({
     connection,
