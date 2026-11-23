@@ -1322,8 +1322,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
   override async generateUnsignedSendMessage(
     opts: Parameters<Chain['generateUnsignedSendMessage']>[0],
   ): Promise<UnsignedCantonTx> {
-    const { sender } = opts
+    const { sender, message } = opts
     const { sendArgs, disclosedContracts, ccipSenderCid } = await this.buildSendChoiceArgs(opts)
+
+    const cantonArgs = message.extraArgs as CantonExtraArgsV1 | undefined
 
     const exerciseCommand = {
       ExerciseCommand: {
