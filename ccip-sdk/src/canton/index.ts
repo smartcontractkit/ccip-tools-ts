@@ -51,6 +51,11 @@ import {
 } from '../types.ts'
 import { getDataBytes, normalizeHex } from '../utils.ts'
 import {
+  decodeContract,
+  listActiveContractsByInterfaceId,
+  listActiveContractsByTemplateId,
+} from './acs.ts'
+import {
   type CantonAddress,
   type PartyId,
   CantonInstrumentId,
@@ -65,6 +70,35 @@ import {
   formatCantonDecimalAmountUnits,
   parseCantonDecimalAmountUnits,
 } from './amount.ts'
+import type { ITokenConfig } from './bindings/ccip-api-v2-2.0.0/CCIP/APIV2/TokenAdminRegistry/module.js'
+import {
+  type ExecutorExtraArg,
+  type GenericExtraArgsV3,
+  PerPartyRouter,
+} from './bindings/ccip-client-api-v2-2.0.0/CCIP/ClientV2/module.js'
+import type { FinalityConfig } from './bindings/ccip-codec-v2-2.0.0/CCIP/CodecV2/FinalityConfig/module.js'
+import {
+  CCIPMessageSent,
+  ExecutionStateChanged,
+} from './bindings/ccip-events-v2-2.0.0/CCIP/EventsV2/Events/index.js'
+import type { ICrossChainVerifier } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/CrossChainVerifier/module.js'
+import type { IExecutor } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/Executor/module.js'
+import type { ITokenPool } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/TokenPool/module.js'
+import {
+  type Execute,
+  CCIPReceiver,
+} from './bindings/ccip-receiver-v2-2.1.0/CCIP/CCIPReceiver/module.js'
+import {
+  type CreateRouter,
+  PerPartyRouterFactory,
+} from './bindings/ccip-runtime-v2-2.1.1/CCIP/RuntimeV2/PerPartyRouter/module.js'
+import { type Send, CCIPSender } from './bindings/ccip-sender-v2-2.1.0/CCIP/CCIPSender/module.js'
+import {
+  Holding,
+  HoldingView,
+} from './bindings/splice-api-token-holding-v1-1.0.0/Splice/Api/Token/HoldingV1/module.js'
+import type { ChoiceContext } from './bindings/splice-api-token-metadata-v1-1.0.0/Splice/Api/Token/MetadataV1/module.js'
+import type { TransferFactory } from './bindings/splice-api-token-transfer-instruction-v1-1.0.0/Splice/Api/Token/TransferInstructionV1/module.js'
 import { hashedRawInstanceAddress } from './ccv-addresses.ts'
 import { type Message, EdsClientProvider } from './clients/eds/client.ts'
 import {
@@ -79,6 +113,7 @@ import {
   createLedgerApiClientFromProvider,
 } from './clients/ledger-api/client.ts'
 import { findExerciseResult } from './clients/ledger-api/prepared-transaction.ts'
+import { TokenStandardClientProvider } from './clients/tokenStandard/client.ts'
 import { decodeDamlRecord, extractFieldValue } from './daml-parse.ts'
 import {
   CANTON_FEE_TOKEN_CLI_SYMBOLS,
@@ -137,42 +172,6 @@ export {
   DEFAULT_CANTON_SEND_GAS_LIMIT,
   formatCantonLinkFeeToken,
 } from './defaults.ts'
-
-import {
-  decodeContract,
-  listActiveContractsByInterfaceId,
-  listActiveContractsByTemplateId,
-} from './acs.ts'
-import type { ITokenConfig } from './bindings/ccip-api-v2-2.0.0/CCIP/APIV2/TokenAdminRegistry/module.js'
-import {
-  type ExecutorExtraArg,
-  type GenericExtraArgsV3,
-  PerPartyRouter,
-} from './bindings/ccip-client-api-v2-2.0.0/CCIP/ClientV2/module.js'
-import type { FinalityConfig } from './bindings/ccip-codec-v2-2.0.0/CCIP/CodecV2/FinalityConfig/module.js'
-import {
-  CCIPMessageSent,
-  ExecutionStateChanged,
-} from './bindings/ccip-events-v2-2.0.0/CCIP/EventsV2/Events/index.js'
-import type { ICrossChainVerifier } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/CrossChainVerifier/module.js'
-import type { IExecutor } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/Executor/module.js'
-import type { ITokenPool } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/TokenPool/module.js'
-import {
-  type Execute,
-  CCIPReceiver,
-} from './bindings/ccip-receiver-v2-2.1.0/CCIP/CCIPReceiver/module.js'
-import {
-  type CreateRouter,
-  PerPartyRouterFactory,
-} from './bindings/ccip-runtime-v2-2.1.1/CCIP/RuntimeV2/PerPartyRouter/module.js'
-import { type Send, CCIPSender } from './bindings/ccip-sender-v2-2.1.0/CCIP/CCIPSender/module.js'
-import {
-  Holding,
-  HoldingView,
-} from './bindings/splice-api-token-holding-v1-1.0.0/Splice/Api/Token/HoldingV1/module.js'
-import type { ChoiceContext } from './bindings/splice-api-token-metadata-v1-1.0.0/Splice/Api/Token/MetadataV1/module.js'
-import type { TransferFactory } from './bindings/splice-api-token-transfer-instruction-v1-1.0.0/Splice/Api/Token/TransferInstructionV1/module.js'
-import { TokenStandardClientProvider } from './clients/tokenStandard/client.ts'
 
 // Authentication providers (OAuth 2.0: static, clientCredentials, authorizationCode protocol helpers)
 export {
@@ -795,10 +794,24 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
 
   /**
    * {@inheritDoc Chain.getBalance}
-   * @throws {@link CCIPNotImplementedError} always (not yet implemented for Canton)
    */
-  getBalance(_opts: GetBalanceOpts): Promise<bigint> {
-    throw new CCIPNotImplementedError('CantonChain.getBalance')
+  async getBalance(opts: GetBalanceOpts): Promise<bigint> {
+    let token: CantonInstrumentId
+    if (opts.token) {
+      token = CantonInstrumentId.fromString(opts.token)
+    } else {
+      token = CantonInstrumentId.fromString(this.nativeToken.instrumentId)
+    }
+
+    return (
+      (await this.listTokenHoldings(token))
+        // Filter by holder if specified (empty string = all holders)
+        .filter((holding) => opts.holder === '' || holding.view.owner === opts.holder)
+        // Filter out locked holdings
+        .filter((holding) => holding.view.lock === null)
+        .map((holding) => parseCantonDecimalAmountUnits(holding.view.amount))
+        .reduce((acc, holdingAmount) => acc + holdingAmount, 0n)
+    )
   }
 
   /**
@@ -2513,6 +2526,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       } else {
         // Select holdings from lowest-to-highest amount in order to minimize dust
         const holdings = (await this.listTokenHoldings(tokenTransfer.instrumentId))
+          // filter out holdings not owned by the active party, listTokenHoldings returns all holdings visible to the active party
+          .filter((holding) => holding.view.owner === this.activeParty)
+          // filter out locked holdings
+          .filter((holding) => holding.view.lock === null)
           .map((holding) => ({
             contractId: holding.contractId,
             units: parseCantonDecimalAmountUnits(holding.view.amount),
@@ -2561,6 +2578,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       // Pass all holdings, sorted from lowest-to-highest amount in order to minimize dust
       const transferCids = new Set(tokenTransferHoldingCids)
       feeTokenHoldingCids = (await this.listTokenHoldings(feeTokenInstrumentId))
+        // filter out holdings not owned by the active party, listTokenHoldings returns all holdings visible to the active party
+        .filter((holding) => holding.view.owner === this.activeParty)
+        // filter out locked holdings
+        .filter((holding) => holding.view.lock === null)
         .map((holding) => ({
           contractId: holding.contractId,
           units: parseCantonDecimalAmountUnits(holding.view.amount),
