@@ -13,7 +13,8 @@ import { MessageStatus } from '../types.ts'
 import { CCIPAPIClient } from './index.ts'
 
 // The suite only talks to the staging CCIP API — the selectors below are data, not endpoints.
-await useResource(['api'])
+// Staging has its own tag, so prod-API suites do not queue behind this one.
+await useResource(['api-staging'])
 
 // Test data from CLI E2E tests (show.test.ts)
 const SEPOLIA_SELECTOR = 16015286601757825753n

@@ -13,6 +13,7 @@
  * keyless public endpoints — so CI secrets only need to be set where a keyed
  * or faster endpoint is wanted.
  */
+import { logTestTiming } from './test-timing.ts'
 
 /**
  * Env var names for per-network RPC endpoint configuration. The single source
@@ -252,39 +253,59 @@ export async function raceRpcEndpoint(
     ordered = false,
   }: { timeoutMs?: number; attempts?: number; ordered?: boolean } = {},
 ): Promise<string> {
+  const startedAt = performance.now()
   const candidates = rpcCandidates(envName)
+  const publicDefaults = new Set(parseList(DEFAULT_RPC_ENDPOINTS[envName]))
+  // Never include an arbitrary URL or a probe error in timing output. Private endpoints can
+  // contain credentials in the host, path or query string.
+  const label = (url: string) =>
+    publicDefaults.has(url) ? new URL(url).hostname : `configured-${candidates.indexOf(url) + 1}`
   let finished = false
   const tryCandidate = async (url: string) => {
     for (let attempt = 0; attempt < attempts && !finished; attempt++) {
+      const attemptStartedAt = performance.now()
       let timer: ReturnType<typeof setTimeout> | undefined
-      let ok: boolean
+      let outcome: boolean | 'timeout'
       try {
-        ok = await Promise.race([
+        outcome = await Promise.race([
           Promise.resolve()
             .then(() => probe(url))
             .catch(() => false),
-          new Promise<false>((resolve) => {
-            timer = setTimeout(() => resolve(false), timeoutMs)
+          new Promise<'timeout'>((resolve) => {
+            timer = setTimeout(() => resolve('timeout'), timeoutMs)
           }),
         ])
       } finally {
         clearTimeout(timer)
       }
-      if (ok) return url
+      const result = outcome === true ? 'ok' : outcome === false ? 'unhealthy' : outcome
+      logTestTiming(
+        `rpc-probe network=${envName} endpoint=${label(url)} attempt=${attempt + 1} result=${result}`,
+        attemptStartedAt,
+      )
+      if (outcome === true) return url
       // plain timer: AbortSignal-based sleeps are unref'd and would not hold the run open
       if (attempt + 1 < attempts) await new Promise((r) => setTimeout(r, 1_000 * 2 ** attempt))
     }
     throw new Error(`probe failed for ${url}`)
   }
+  let selected: string | undefined
   try {
-    if (!ordered) return await Promise.any(candidates.map(tryCandidate))
-    for (const url of candidates) {
-      if (await tryCandidate(url).catch(() => false)) return url
+    if (ordered) {
+      for (const url of candidates) {
+        selected = await tryCandidate(url).catch(() => undefined)
+        if (selected) break
+      }
+    } else {
+      selected = await Promise.any(candidates.map(tryCandidate)).catch(() => undefined)
     }
-    return rpcEndpoint(envName)
-  } catch {
-    return rpcEndpoint(envName)
   } finally {
     finished = true
   }
+  const endpoint = selected ?? candidates[0]!
+  logTestTiming(
+    `rpc-select network=${envName} endpoint=${label(endpoint)} result=${selected ? 'selected' : 'fallback'}`,
+    startedAt,
+  )
+  return endpoint
 }

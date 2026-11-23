@@ -121,7 +121,8 @@ describe(
     let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
 
     before(async () => {
-      const forkOpts = { retries: 8, timeout: 60_000, forkRetryBackoff: 1_000 } as const
+      // 15s request timeout: anvil does not retry a hung upstream read (see fork.test.ts)
+      const forkOpts = { retries: 8, timeout: 15_000, forkRetryBackoff: 1_000 } as const
       // ports offset from fork.test.ts so both files can run in the same `node --test` run
       sepoliaInstance = Instance.anvil(
         { forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8656, ...forkOpts },

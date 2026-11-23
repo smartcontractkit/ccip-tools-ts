@@ -4,6 +4,7 @@ import { beforeEach, describe, it } from 'node:test'
 import { ErrorFragment, EventFragment, FunctionFragment, Result } from 'ethers'
 
 import { networkInfo } from '../networks.ts'
+import { defaultAbiCoder } from './const.ts'
 import { getErrorData, parseWithFragment, recursiveParseError } from './errors.ts'
 
 beforeEach(() => {
@@ -65,6 +66,104 @@ describe('parseWithFragment', () => {
     assert.equal(result[2].length, 2)
     assert.equal(result[2].state, 2n)
     assert.equal(result[2].returnData, '0x')
+  })
+
+  it('should get the fragment of the first interface and ignore hex case', () => {
+    const result = parseWithFragment('0x79BA5097')
+    assert.ok(result)
+    assert.ok(result[0] instanceof FunctionFragment)
+    assert.equal(result[0].name, 'acceptOwnership')
+    assert.equal(result[1], 'Router')
+  })
+
+  it('should get builtin errors by name, signature, and selector', () => {
+    for (const key of ['Error', 'Error(string)', 'Panic', 'Panic(uint256)']) {
+      const result = parseWithFragment(key)
+      assert.ok(result)
+      assert.ok(result[0] instanceof ErrorFragment)
+      assert.equal(result[0].name, key.split('(')[0])
+      assert.equal(result[1], 'Router')
+    }
+
+    const stringData = defaultAbiCoder.encode(['string'], ['failure'])
+    const stringResult = parseWithFragment(`0x08C379A0${stringData.slice(2)}`)
+    assert.ok(stringResult)
+    assert.ok(stringResult[0] instanceof ErrorFragment)
+    assert.equal(stringResult[0].name, 'Error')
+    assert.equal(stringResult[1], 'Router')
+    assert.ok(stringResult[2] instanceof Result)
+    assert.equal(stringResult[2][0], 'failure')
+
+    const panicResult = parseWithFragment('0x4e487b71', defaultAbiCoder.encode(['uint256'], [17n]))
+    assert.ok(panicResult)
+    assert.ok(panicResult[0] instanceof ErrorFragment)
+    assert.equal(panicResult[0].name, 'Panic')
+    assert.equal(panicResult[1], 'Router')
+    assert.ok(panicResult[2] instanceof Result)
+    assert.equal(panicResult[2][0], 17n)
+  })
+
+  it('should parse embedded data only without separate data', () => {
+    const selector = '0x728fe07b'
+    const embeddedAddress = '0x0000000000000000000000000000000000000001'
+    const separateAddress = '0x0000000000000000000000000000000000000002'
+    const embeddedData = defaultAbiCoder.encode(['address'], [embeddedAddress])
+    const separateData = defaultAbiCoder.encode(['address'], [separateAddress])
+
+    const embeddedResult = parseWithFragment(`${selector}${embeddedData.slice(2)}`)
+    assert.ok(embeddedResult)
+    assert.ok(embeddedResult[2] instanceof Result)
+    assert.equal(embeddedResult[2].caller, embeddedAddress)
+
+    const separateResult = parseWithFragment(`${selector}${embeddedData.slice(2)}`, separateData)
+    assert.ok(separateResult)
+    assert.ok(separateResult[2] instanceof Result)
+    assert.equal(separateResult[2].caller, separateAddress)
+  })
+
+  it('should prefer a full event topic to an error with the same first 4 bytes', () => {
+    // event AlreadyAttempted(uint64) and error AlreadyAttempted(uint64) have the same hash
+    const topic = '0x67d9ba0f63d427c482c2736300e6d5a34c6691dbcdea8ad35828a1f1ba47e872'
+    const data = defaultAbiCoder.encode(['uint64'], [7n])
+
+    const event = parseWithFragment(`${topic}${data.slice(2)}`)
+    assert.ok(event)
+    assert.ok(event[0] instanceof EventFragment)
+    assert.equal(event[0].name, 'AlreadyAttempted')
+    assert.equal(event[1], 'EVM2EVMOffRamp_v1_5')
+    assert.ok(event[2] instanceof Result)
+    assert.equal(event[2].sequenceNumber, 7n)
+    assert.equal(parseWithFragment(topic)?.[0], event[0])
+
+    const error = parseWithFragment(`${topic.slice(0, 10)}${data.slice(2)}`)
+    assert.ok(error)
+    assert.ok(error[0] instanceof ErrorFragment)
+    assert.equal(error[0].name, 'AlreadyAttempted')
+    assert.equal(error[1], 'EVM2EVMOffRamp_v1_2')
+    assert.ok(error[2] instanceof Result)
+    assert.equal(error[2].sequenceNumber, 7n)
+  })
+
+  it('should get a pool error after a miss in the main interfaces', () => {
+    const result = parseWithFragment('0x1d56c21d')
+    assert.ok(result)
+    assert.ok(result[0] instanceof ErrorFragment)
+    assert.equal(result[0].name, 'MustSpecifyUnderThresholdCCVsForThresholdCCVs')
+    assert.equal(result[1], 'AdvancedPoolHooks_2_0')
+  })
+
+  it('should get an error by signature', () => {
+    const result = parseWithFragment('CallerIsNotARampOnRouter(address)')
+    assert.ok(result)
+    assert.ok(result[0] instanceof ErrorFragment)
+    assert.equal(result[0].name, 'CallerIsNotARampOnRouter')
+    assert.equal(result[1], 'TokenPool_v2_0')
+  })
+
+  it('should ignore truncated and odd-length hex selectors', () => {
+    for (const key of ['0x', '0x08c379', '0x08c379a00']) {
+      assert.equal(parseWithFragment(key), undefined)
+    }
   })
 
   it('should return undefined on unknown selectors', () => {

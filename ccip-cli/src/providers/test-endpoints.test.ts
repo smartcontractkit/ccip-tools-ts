@@ -1,13 +1,20 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it, mock } from 'node:test'
 
-import { DEFAULT_RPC_ENDPOINTS, reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import {
+  DEFAULT_RPC_ENDPOINTS,
+  raceRpcEndpoint,
+  reachableRpcEndpoint,
+} from '../../../scripts/test-endpoints.ts'
 
 describe('reachableRpcEndpoint', () => {
   const original = process.env.RPC_BASE_SEPOLIA
+  const originalTimings = process.env.NETWORK_TEST_TIMINGS
   afterEach(() => {
     if (original === undefined) delete process.env.RPC_BASE_SEPOLIA
     else process.env.RPC_BASE_SEPOLIA = original
+    if (originalTimings === undefined) delete process.env.NETWORK_TEST_TIMINGS
+    else process.env.NETWORK_TEST_TIMINGS = originalTimings
     mock.restoreAll()
   })
 
@@ -41,5 +48,22 @@ describe('reachableRpcEndpoint', () => {
       throw new Error('offline')
     })
     assert.equal(await reachableRpcEndpoint('RPC_BASE_SEPOLIA'), 'https://a.test')
+  })
+
+  it('reports a probe timeout and the public selection without exposing configured URLs', async () => {
+    process.env.NETWORK_TEST_TIMINGS = '1'
+    const privateUrl = 'https://private-key.test/path?token=secret'
+    process.env.RPC_BASE_SEPOLIA = privateUrl
+    const log = mock.method(console, 'error', () => {})
+    const selected = await raceRpcEndpoint(
+      'RPC_BASE_SEPOLIA',
+      (url) => (url === privateUrl ? new Promise<boolean>(() => {}) : Promise.resolve(true)),
+      { ordered: true, attempts: 1, timeoutMs: 10 },
+    )
+    assert.equal(selected, DEFAULT_RPC_ENDPOINTS.RPC_BASE_SEPOLIA.split(',')[0])
+    const output = log.mock.calls.map(({ arguments: args }) => args.join(' ')).join('\n')
+    assert.match(output, /rpc-probe .*endpoint=configured-1 .*result=timeout duration_ms=\d+/)
+    assert.match(output, /rpc-select .*endpoint=gateway\.tenderly\.co result=selected/)
+    assert.doesNotMatch(output, /private-key|token=secret/)
   })
 })

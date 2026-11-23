@@ -337,36 +337,6 @@ describe('e2e command lane EVM <-> Solana (v1.6 and v2.0)', () => {
     )
   })
 
-  it('should show lane config Solana -> Sepolia (v2.0)', { timeout: 120000 }, async () => {
-    const args = buildLaneArgs(
-      'solana-devnet',
-      'ethereum-testnet-sepolia',
-      SOLANA_ONRAMP,
-      LANE_RPCS,
-      '--lane-version',
-      '2.0',
-      '--format',
-      'json',
-    )
-    const result = await spawnCLI(args, 90000)
-
-    assert.equal(result.exitCode, 0, result.stdout + result.stderr)
-
-    const envelope = JSON.parse(result.stdout)
-    assert.match(envelope.onRamp, new RegExp(SOLANA_ONRAMP))
-    assert.equal(envelope.version, '2.0.0')
-    assert.equal(envelope.onRampConfig.laneVersion, '2.0.0')
-    // the 2.0 lane config (`dest_chain_state_v2`) names its offRamp
-    assert.match(envelope.onRampConfig.typeAndVersion, /^ccip-router 2\./)
-    assert.match(envelope.onRampConfig.offramp, new RegExp(EVM_OFFRAMP_V2, 'i'))
-    assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP_V2, 'i'))
-    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\./)
-    assert.ok(
-      envelope.offRampConfig.onRamps.some((r: string) => r === SOLANA_ONRAMP),
-      `offRampConfig.onRamps should include ${SOLANA_ONRAMP}`,
-    )
-  })
-
   it('should show lane config Solana -> Sepolia (the default)', { timeout: 120000 }, async () => {
     const args = buildLaneArgs(
       'solana-devnet',
@@ -382,13 +352,17 @@ describe('e2e command lane EVM <-> Solana (v1.6 and v2.0)', () => {
 
     const envelope = JSON.parse(result.stdout)
     assert.match(envelope.onRamp, new RegExp(SOLANA_ONRAMP))
-    // the default is the lane messages are sent over: the 2.0 lane, since its sender allowlist
-    // was lifted (read 2026-11-14). Same values as the explicit v2.0 test above.
+    // The default is the active 2.0 lane. Its config (`dest_chain_state_v2`) names its offRamp.
     assert.equal(envelope.version, '2.0.0')
     assert.equal(envelope.onRampConfig.laneVersion, '2.0.0')
     assert.match(envelope.onRampConfig.typeAndVersion, /^ccip-router 2\./)
+    assert.match(envelope.onRampConfig.offramp, new RegExp(EVM_OFFRAMP_V2, 'i'))
     assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP_V2, 'i'))
     assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\./)
+    assert.ok(
+      envelope.offRampConfig.onRamps.some((r: string) => r === SOLANA_ONRAMP),
+      `offRampConfig.onRamps should include ${SOLANA_ONRAMP}`,
+    )
   })
 
   it('should show lane config Sepolia -> Solana (v2.0)', { timeout: 120000 }, async () => {
