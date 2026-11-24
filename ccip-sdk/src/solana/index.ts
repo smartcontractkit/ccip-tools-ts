@@ -1758,13 +1758,19 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
    * CCIP 2.0 messages are executed through `execute_v2`, which is permissionless: the wallet only
    * signs and pays for it. Execution inputs too large for a transaction are written to an
    * execution inputs buffer first, which a retry picks up from if the execution fails.
+   *
+   * A successful execution closes its buffer. It doesn't look for leftovers of earlier attempts,
+   * nor close a lookup table it created: see {@link SolanaChain.cleanUpBuffers}.
    * @throws {@link CCIPWalletInvalidError} if wallet is not a valid Solana wallet
    * @throws {@link CCIPPartialTransactionSubmissionError} if a transaction fails after earlier
    *   ones (e.g. buffering) confirmed, and no retry strategy is left
    */
   async execute(
     opts: Parameters<Chain['execute']>[0] & {
-      // when cleaning leftover LookUp Tables, wait deactivation grace period (~513 slots) then close ALT
+      /**
+       * @deprecated No effect: `execute` no longer cleans up lookup tables. Pass it to
+       * {@link SolanaChain.cleanUpBuffers} instead.
+       */
       waitDeactivation?: boolean
       clearLeftoverAccounts?: boolean
     },
@@ -1816,11 +1822,6 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       }
     }
 
-    try {
-      await this.cleanUpBuffers(opts)
-    } catch (err) {
-      this.logger.warn('Error while trying to clean up buffers:', err)
-    }
     const tx = await this.getTransaction(hash)
     return this.getExecutionReceiptInTx(tx)
   }
@@ -1938,7 +1939,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
-   * Clean up and recycle buffers and address lookup tables owned by wallet
+   * Clean up and recycle buffers and address lookup tables owned by wallet, e.g. left by aborted
+   * or failed executions. Scans the wallet's recent history (its last up to 1000 transactions,
+   * fetched one by one), so it can take long on a rate-limited RPC; `execute` doesn't call it.
    * @param opts - cleanUp options
    *   - wallet - wallet instance to sign txs
    *   - waitDeactivation - Whether to wait for lookup table deactivation cool down period

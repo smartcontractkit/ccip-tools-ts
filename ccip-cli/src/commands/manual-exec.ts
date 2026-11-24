@@ -27,6 +27,7 @@ import {
   CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
+  SolanaChain,
   discoverOffRamp,
   estimateReceiveExecution,
   isSupportedTxHash,
@@ -119,7 +120,7 @@ export const builder = (yargs: Argv) =>
       'clear-leftover-accounts': {
         type: 'boolean',
         describe:
-          'Clears buffers (if a previous attempt was aborted) or any ALT owned by this sender.',
+          "Solana: resets a buffer left by an aborted attempt, and after a successful execution scans the wallet's recent transactions (can be slow) to close its leftover buffers and lookup tables.",
       },
       'receiver-object-ids': {
         type: 'array',
@@ -346,6 +347,18 @@ async function manualExec(
     case Format.json:
       output.write(jsonStringify({ request, receipt }, 2))
       break
+  }
+
+  if (argv.clearLeftoverAccounts) {
+    if (dest instanceof SolanaChain) {
+      // after a success only: a failed execution's buffer is picked up by a retry
+      logger.info('Scanning recent transactions for leftover buffers and lookup tables…')
+      await dest
+        .cleanUpBuffers({ wallet })
+        .catch((err: unknown) => logger.warn('Error while cleaning up leftover accounts:', err))
+    } else {
+      logger.warn('--clear-leftover-accounts only applies to Solana destinations; ignored')
+    }
   }
 }
 

@@ -314,9 +314,11 @@ exec callback. Tokens gas limit override estimation is not supported for estimat
 the transaction.
 
 If a solana message fails serialization, it's recommended to try with buffer first, then with lookup
-table. The former gets auto-cleared upon successful execution, while the latter needs a grace period
-to be cleared.
-`--clear-leftover-accounts` can be used to scan and wait for the accounts to be cleared, after exec.
+table. The former gets auto-cleared upon successful execution, while the latter is deactivated, and
+needs a grace period (~513 slots) to be closed.
+`--clear-leftover-accounts` resets a buffer left by an aborted attempt, and after a successful
+execution scans the wallet's recent transactions for leftover buffers and lookup tables to close
+(which can be slow on a rate-limited RPC).
 
 #### Sui Special Cases
 
