@@ -12,6 +12,7 @@ import {
   toBeArray,
   toBigInt,
 } from 'ethers'
+import { type Cache, memoize } from 'micro-memoize'
 import yaml from 'yaml'
 
 // Re-export the codec helpers moved to ./shared/codec.ts (kept here for back-compat;
@@ -501,6 +502,30 @@ export function convertKeysToCamelCase(
     converted[camelKey] = convertKeysToCamelCase(value, mapValues, camelKey)
   }
   return converted
+}
+
+/**
+ * Memoizes a chain's `getBlockInfo`: a positive block number is cached (10 min,
+ * 100 entries); a tag (`latest`, `finalized`, …) or a depth (`<= 0`) always calls `fn`.
+ *
+ * It does not use micro-memoize's `forceUpdate` for the uncached calls: a forced call
+ * caches a wrapper of the new promise that nothing reads (forced keys are never read
+ * from the cache) and returns the unwrapped promise. The wrapper rethrows a rejection,
+ * so every failed `getBlockInfo('latest')` was also an unhandled rejection.
+ *
+ * @param fn - The chain's own (unmemoized, bound) `getBlockInfo`.
+ * @returns `fn` with the cache in front of the positive block numbers; `.cache` is the
+ *   cache of those, so a caller can seed it.
+ */
+export function memoizeBlockInfo<B extends number | bigint | string, R>(
+  fn: (block: B) => Promise<R>,
+): ((block: B) => Promise<R>) & { cache: Cache<(block: B) => Promise<R>> } {
+  const cached = memoize(fn, { async: true, maxArgs: 1, maxSize: 100, expires: 600e3 })
+  const memoized = (block: B): Promise<R> =>
+    (typeof block === 'number' || typeof block === 'bigint') && block > 0
+      ? cached(block)
+      : fn(block)
+  return Object.assign(memoized, { cache: cached.cache })
 }
 
 /**

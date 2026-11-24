@@ -1188,6 +1188,10 @@ export function parseLogRangeError(err: unknown): LogRangeErrorInfo | null {
     /limit exceeded/i,
     // some providers: "Cannot request logs over more than 100 blocks"
     /\bmore than (\d+) blocks?\b/i,
+    // mova (-32000): "maximum [from, to] blocks distance: 1000". It must not match a
+    // depth limit such as "fromBlock is too far from the latest block, maximum allowed
+    // distance is 100000 blocks": a smaller page does not fix that error.
+    /\bblocks?\s+distance\b\D*(\d+)/i,
     /too many (?:results|logs|blocks)/i,
     /response size exceeded/i,
   ]
