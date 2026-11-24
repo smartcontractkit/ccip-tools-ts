@@ -7,7 +7,7 @@ import {
   TransactionResponseType,
   getAptosFullNode,
 } from '@aptos-labs/ts-sdk'
-import { getBytes, hexlify, isHexString } from 'ethers'
+import { getBytes, hexlify, isHexString, keccak256 } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
@@ -20,6 +20,7 @@ import {
   CCIPNotImplementedError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
+import { decodeMessageV1Raw } from '../messages.ts'
 import { type ChainLog, type LeanNumbers, type WithLogger, ExecutionState } from '../types.ts'
 import { passesTypeAndVersion, signalToPromise } from '../utils.ts'
 import { ExecutionReportCodec } from './types.ts'
@@ -177,6 +178,13 @@ function parseExecutionReport(value: unknown): AptosExecutionReport | undefined 
   const bytes = toAptosBytes(value)
   if (bytes) {
     try {
+      // a 2.0 `execute` takes the message as it was emitted (MessageV1), whose hash is its id
+      const message = decodeMessageV1Raw(bytes)
+      return { ...message, sequenceNumber: message.messageNumber, messageId: keccak256(bytes) }
+    } catch {
+      // Not a 2.0 message.
+    }
+    try {
       const report = ExecutionReportCodec.parse(bytes)
       if (isExecutionReport(report)) return report
     } catch {
@@ -256,8 +264,8 @@ function aptosInteger(value: unknown): string | undefined {
 
 /**
  * Turns Aptos's VM status into stable, useful return data. Move aborts expose
- * their module and numeric code in the status string; no ABI is required for
- * this decoding.
+ * their module and code (numeric, or named: `<NAME>(0x<code>)`) in the status
+ * string; no ABI is required for this decoding.
  */
 function getAptosFailureData(
   tx: UserTransactionResponse,
@@ -270,13 +278,14 @@ function getAptosFailureData(
     function: functionName,
     gas_used: tx.gas_used,
   }
-  const abort = vmStatus.match(/Move abort in (.+?): code (\d+)/i)
+  const abort = vmStatus.match(/Move abort in (.+?): (?:code (\d+)|(\w+)\((0x[0-9a-f]+)\))/i)
   if (abort) {
     // the VM renders the module's address padded; surface it short, like the
     // rest of the SDK's Aptos addresses
     const [locPkg, ...locRest] = abort[1]!.split('::')
     data.location = [toAptosShortAddress(locPkg!), ...locRest].join('::')
-    data.abort_code = abort[2]!
+    data.abort_code = abort[2] ?? BigInt(abort[4]!).toString()
+    if (abort[3]) data.abort_name = abort[3]
   }
   const status = vmStatus.match(/Execution failed with status:\s*(.+)$/i)
   if (status) data.status = status[1]!.trim()
