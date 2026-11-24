@@ -51,16 +51,13 @@ export const APTOS_TESTNET_RPCS = rpcEndpoints('RPC_APTOS_TESTNET')
 export const SOLANA_DEVNET_RPCS = rpcEndpoints('RPC_SOLANA_DEVNET')
 export const TON_TESTNET_RPCS = rpcEndpoints('RPC_TON_TESTNET')
 
-/** Skip reason for the Aptos suites until CCIP is redeployed on aptos-testnet. */
-export const APTOS_SKIP = 'aptos-testnet CCIP not redeployed since the ~2026-10-08 testnet restart'
 // base -> polygon lane for the EVM->EVM show pretty-format test. Polygon's public
 // endpoints vary wildly in eth_getLogs width — 1rpc caps at 50 blocks and then serves a
 // Cloudflare challenge under the resulting request burst — so this one is
 // chosen for serving the scan's full ~10k-block range in a single call.
 export const BASE_MAINNET_RPCS = rpcEndpoints('RPC_BASE_MAINNET')
 export const POLYGON_MAINNET_RPCS = rpcEndpoints('RPC_POLYGON_MAINNET')
-// bsc-testnet: source of the EVM->Aptos show fixture (and of its lane) and of the
-// show format variants' quiet lane (bsc -> base-sepolia).
+// bsc-testnet: source of the show format variants' quiet lane (bsc -> base-sepolia).
 export const BSC_TESTNET_RPCS = rpcEndpoints('RPC_BSC_TESTNET')
 // base-sepolia: source of the EVM->Solana show fixture, dest of the quiet lane
 // (bsc -> base-sepolia) and of the v2.0 lane fixture. Both serve a full
