@@ -10,6 +10,7 @@ import { AbiCoder, dataLength } from 'ethers'
 import { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
 import { networkInfo } from './networks.ts'
+import { CCIPVersion } from './types.ts'
 import {
   blockRangeGenerator,
   convertKeysToCamelCase,
@@ -588,7 +589,9 @@ describe('snakeToCamel', () => {
 
   it('should handle leading underscores', () => {
     assert.equal(snakeToCamel('_private'), 'Private')
-    assert.equal(snakeToCamel('__dunder'), '_Dunder')
+    // a `__` meta key (e.g. the Move enum tag `__variant__`) passes through unchanged
+    assert.equal(snakeToCamel('__dunder'), '__dunder')
+    assert.equal(snakeToCamel('__variant__'), '__variant__')
   })
 
   it('should handle trailing underscores', () => {
@@ -784,6 +787,15 @@ describe('decodeOnRampAddress', () => {
     const aptosAddress = '0x0000000000000000000000000000000000000000000000000000000000000001'
     const decoded = decodeOnRampAddress(aptosAddress, ChainFamily.Aptos)
     assert.equal(decoded, '0x1::onramp')
+    assert.equal(
+      decodeOnRampAddress(aptosAddress, ChainFamily.Aptos, CCIPVersion.V1_6),
+      '0x1::onramp',
+    )
+  })
+
+  it('should keep a 2.0 Aptos OnRamp (state address) without a module', () => {
+    const aptosAddress = '0x0000000000000000000000000000000000000000000000000000000000000001'
+    assert.equal(decodeOnRampAddress(aptosAddress, ChainFamily.Aptos, CCIPVersion.V2_0), '0x1')
   })
 
   it('should decode Solana addresses without ::onramp', () => {

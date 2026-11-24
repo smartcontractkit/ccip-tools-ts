@@ -30,7 +30,8 @@ void describe('AptosChain.typeAndVersion', () => {
     const { chain, functions } = chainWithViewSpy()
 
     assert.deepEqual(await chain.typeAndVersion(PACKAGE), ['Router', '1.6.0', 'Router 1.6.0'])
-    assert.deepEqual(functions, [`${PACKAGE}::router::type_and_version`])
+    // the module probe and the read are the same view
+    assert.deepEqual([...new Set(functions)], [`${PACKAGE}::router::type_and_version`])
   })
 
   void it('leaves an address that already carries a ::<module> suffix untouched', async () => {

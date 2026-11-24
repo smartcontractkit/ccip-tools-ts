@@ -38,7 +38,7 @@ class MockChain extends Chain {
   // 2.0 lane config `offRamp` per onRamp (a 2.0 OnRamp keeps its lane's OffRamp)
   private mockV2OffRampForOnRamp: Map<string, string> = new Map()
 
-  constructor(chainId: number, typeAndVersion: string = 'EVM2EVMOffRamp 1.5.0') {
+  constructor(chainId: number | string, typeAndVersion: string = 'EVM2EVMOffRamp 1.5.0') {
     super(networkInfo(chainId))
     this.mockTypeAndVersion = typeAndVersion
   }
@@ -638,6 +638,29 @@ describe('discoverOffRamp', () => {
     await assert.rejects(
       discoverOffRamp(sourceChain, destChain, { onRamp, version: CCIPVersion.V1_6 }),
       /No matching offRamp found/,
+    )
+  })
+
+  it('should return the bare 2.0 OffRamp state address of an Aptos dest from offRampAddress', async () => {
+    const offRamp = `0x${'c2'.repeat(32)}`
+    // an Aptos 2.0 OnRamp config names the dest OffRamp `offRampAddress`
+    class AptosNamingSource extends MockChain {
+      override async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
+        return {
+          ...(await super.getOnRampConfig(onRamp, destChainSelector)),
+          offRampAddress: offRamp,
+        }
+      }
+    }
+    class AptosMockChain extends MockChain {
+      static override family: ChainFamily = ChainFamily.Aptos
+    }
+    assert.equal(
+      await discoverOffRamp(new AptosNamingSource(11155111), new AptosMockChain('aptos-testnet'), {
+        onRamp: '0xAptosDestOnRamp',
+        version: CCIPVersion.V2_0,
+      }),
+      offRamp,
     )
   })
 })
