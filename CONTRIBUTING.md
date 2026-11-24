@@ -62,6 +62,12 @@ carries an audit fix. Record the reason for each exception.
 - **Line swap** — `tinypool` forces the 2.x line over `@docusaurus/core`'s `^1`. The
   advisory covers all of 1.x, and the fix landed in `2.1.2`. The docs build exercises the
   swap.
+- **OpenZeppelin line** — a nested override under `@arbitrum/nitro-contracts` moves its
+  plain `@openzeppelin/contracts` and `@openzeppelin/contracts-upgradeable` to `4.9.6`.
+  This also covers the nested upgrade executor. The version-named OZ packages stay fixed;
+  do not bump those.
+- **TON validation** — `@ton/ton` uses `zod@4.6.7`. Zod 4.6.6 fixes the unbounded-collection
+  advisory, and TON 16.3.0 accepts the updated schema behavior. Unit tests cover the TON paths.
 - **Fork swap** — `bigint-buffer` maps to `@trufflesuite/bigint-buffer@1.1.10`. The
   original `<=1.1.5` has a buffer overflow, and its native build no longer compiles.
 - **The faker stub** — `postman-collection` pins `@faker-js/faker@5.5.3` and reads the
@@ -76,36 +82,33 @@ carries an audit fix. Record the reason for each exception.
 - `braces`: GHSA-vfj7-8cjw-p6xm was withdrawn on 2026-10-23. Upstream `3.0.3` replaces
   the vendored guard. The root `fill-range` devDependency is no longer necessary.
 - `image-size`: Docusaurus accepts patched upstream releases without an override.
-  The lockfile selects `2.0.4`, which provides the CJS `./fromFile` entry.
+  The lockfile selects `2.1.0`, which provides the CJS `./fromFile` entry.
   Release `2.0.3` and later fix the parser DoS. The fork is no longer necessary.
 
 The old `stream-json` acceptance is also gone; that advisory is not in the current audit.
 
 **Accepted advisories**
 
-A clean install on 2026-11-10 reports 37 audit findings: 23 low, 10 moderate, and 4 high.
-The baseline reports 41 findings, including four additional Zod peer-dependency findings.
-The regenerated dependency graph no longer reports those four findings. Zod itself remains vulnerable.
+After the 2026-11-20 dependency bump, `npm audit` reports 27 findings:
+18 low, 8 moderate, and 1 high. The earlier audit reported 32 findings.
 
 - `elliptic` (low, GHSA-848j-6mx2-7j84) — `6.6.1` is the newest release, so no patched
   version exists. It reaches the CLI through `ethers` v5
   (`@ethers-ext/signer-ledger` → `@ledgerhq/hw-app-eth` → `@ethersproject/*`).
-- `@openzeppelin/contracts` and `@openzeppelin/contracts-upgradeable`
-  (GHSA-93hq-5wgc-jc82 and related) — no fix exists inside the version-named OZ packages
-  that `@chainlink/contracts-ccip` → `@chainlink/contracts` use. Do not bump those
-  packages. This repo consumes only vendored ABIs and never compiles or deploys the
-  affected Solidity.
-- `zod@3.25.76` under `@ton/ton@16.3.0` — the fix is `>=4.6.6`. Zod 4 requires two
-  arguments for `z.record`, and `@ton/ton@16.3.0` uses the one-argument form. A forced
-  Zod 4 breaks TON support.
+  The remaining low findings follow this chain.
+- The version-named `@openzeppelin/contracts-4.7.3`, `-4.8.3`, and `-5.3.0` packages remain
+  vulnerable. Policy keeps these names and versions unchanged. They are the only high finding.
+  `@chainlink/contracts` and `@chainlink/contracts-ccip` stay moderate through those aliases.
+  This repo consumes only vendored ABIs and never compiles or deploys the affected Solidity.
 - `typedoc@0.28.20` → `minimatch@10.2.6` (GHSA-g3hv-75wg-m249) — the fix is `11.0.1`, but
-  it removes the public `Minimatch#matchOne` API. Wait for a compatible upstream release.
-- `deepmerge@4.3.1` — no fix is available.
+  it removes the public `Minimatch#matchOne` API and breaks the docs build. Keep the
+  compatible 10.x line until TypeDoc supports minimatch 11.
 
 `npm ls --all` still reports the intentional faker stub as `invalid`.
 It also reports two optional-peer mismatches: Solana codecs expect TypeScript 5, and `ws@7` expects `utf-8-validate@5`.
 The root provides TypeScript 6 and `utf-8-validate@6`. No required dependency is missing.
 Typechecks, unit tests, and the documentation build pass with this tree.
+The TON override and the documentation build are the checks for the two compatibility overrides.
 
 ## Test Suite Layout
 
@@ -119,6 +122,13 @@ Test files are classified by filename suffix:
 | `*.fork.test.ts`        | Fork — anvil/surfpool forking live state       | ❌                      |
 
 A bare `integration.test.ts` (e.g. `src/evm/integration.test.ts`) is recognized as integration exactly like `logs.integration.test.ts` — the suffix is what matters, and `fork.test.data.ts` is a data helper, not a test.
+
+### CCIP version fixtures
+
+- Use an operational lane for live fee quotes and forked sends. Check the [CCIP Directory](https://docs.chain.link/ccip/directory) or [CCIP API](https://api.ccip.chain.link/v2/lanes) before you select one.
+- Check the OnRamp version, not the router version. Keep pre-v2 quote tests for routes that still use them.
+- Pin the original message or ramp for historical reads and manual execution. Do not use the current lane version to interpret an old message.
+- Test the TokenPool version separately. A v2 lane can use a legacy TokenPool.
 
 ### Networked tests and the `useResource` lock
 
@@ -143,19 +153,21 @@ describe("EVM to Solana", () => {
 });
 ```
 
-Keep the two rules of the lock system in mind when moving fixtures or adding suites:
+Follow these rules when moving fixtures or adding suites:
 
 - **Lock exactly what you touch.** An e2e CLI invocation races every `--rpc` endpoint of its fixture's chains, so pass only those chains' endpoints and lock only those networks. Overshooting (locking a network you never reach) serializes other suites for nothing; undershooting (reaching a network you never locked) reintroduces the rate-limit contention the locks exist to prevent.
+- **Acquire related locks together.** Take one lock set per block. Do not wait for another lock while holding part of the set. Use `api` for the production CCIP API and `api-staging` for the staging CCIP API.
 - **Prefer uncontended chains for new fixtures.** sepolia/fuji are held by several suites; quieter lanes (see `e2e-helpers.test.ts` endpoint groups and the fixtures in the existing suites) keep a suite parallel with everything else. Verify reachability from CI, not just locally — some public gateways answer residential IPs but hang from datacenter egress.
 
 Each network tag is a directory in a well-known lock root (`<tmpdir>/ccip-tools-ts-network-locks`), created atomically with `fs.mkdir`, so exactly one test process holds a tag at a time. The filesystem is the queue: when a suite finishes, its tags release and the next suite waiting on them starts immediately — there is no batch/round scheduling. Locks auto-release on process exit; crashed holders are detected by pid liveness (or owner-file age) and self-heal on the next acquisition.
 
 Locks are per-machine, so all networked suites must run inside a single CI job/runner. The whole tree runs from one root-level `node --test` invocation over both workspaces' globs (see the `test` script in the root `package.json`) — the locks arbitrate across workspaces exactly as they do within one. That script also raises `--test-concurrency` above the default (`availableParallelism - 1`): on CI's 4-vCPU runners the default would be 3 file slots for the entire tree, and a suite waiting on a lock occupies its slot while it waits, so the extra slots are what let lock-queued suites overlap. Configure via env:
 
-| Variable                  | Effect                                                                     |
-| ------------------------- | -------------------------------------------------------------------------- |
-| `NETWORK_LOCK_DIR`        | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`) |
-| `NETWORK_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min)                    |
+| Variable                  | Effect                                                                                   |
+| ------------------------- | ---------------------------------------------------------------------------------------- |
+| `NETWORK_LOCK_DIR`        | Lock root directory (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`)               |
+| `NETWORK_LOCK_TIMEOUT_MS` | Max wait for all locks before failing (default: 60 min)                                  |
+| `NETWORK_TEST_TIMINGS=1`  | Log lock wait and hold times, plus RPC probe and selection times. CI sets this variable. |
 
 ### RPC endpoint env vars
 
@@ -434,7 +446,7 @@ export type ChainFamily = (typeof ChainFamily)[keyof typeof ChainFamily];
 ```typescript
 // Return type includes _tag for type narrowing at runtime
 function decodeExtraArgs(
-  data: BytesLike,
+  data: BytesLike
 ):
   | (EVMExtraArgsV1 & { _tag: "EVMExtraArgsV1" })
   | (EVMExtraArgsV2 & { _tag: "EVMExtraArgsV2" })
@@ -496,7 +508,7 @@ export type LogFilter = {
 // Continuous polling until cancelled
 const controller = new AbortController();
 const cancel$ = new Promise((resolve) =>
-  controller.signal.addEventListener("abort", resolve),
+  controller.signal.addEventListener("abort", resolve)
 );
 
 for await (const log of chain.getLogs({ watch: cancel$ })) {
@@ -514,7 +526,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   constructor(
     provider: JsonRpcApiProvider,
     network: NetworkInfo,
-    ctx?: ChainContext,
+    ctx?: ChainContext
   ) {
     super(network, ctx);
     this.provider = provider;
@@ -528,12 +540,12 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
   // Secondary factory: from existing provider
   static async fromProvider(
     provider: JsonRpcApiProvider,
-    ctx?: ChainContext,
+    ctx?: ChainContext
   ): Promise<EVMChain> {
     return new EVMChain(
       provider,
       networkInfo(Number((await provider.getNetwork()).chainId)),
-      ctx,
+      ctx
     );
   }
 }
@@ -832,8 +844,27 @@ Use `.check()` for custom validation with helpful error messages:
 
 1. Run quality gates locally
 1. Write tests for new functionality
-1. Update CHANGELOG.md
+1. Update `CHANGELOG.md` when the change needs it (see [Changelog entries](#changelog-entries))
 1. Keep commits focused and atomic
+
+### Changelog entries
+
+Add a `CHANGELOG.md` entry only for important features and API changes that affect the main use cases of users. Do not add an entry for smaller methods or functions, even when the package exports them.
+
+Add an entry for:
+
+- A new feature or a new chain family.
+- A change to the behavior, signature, or output of an existing public API.
+- A breaking change or a deprecation that users must act on.
+- A user-visible bug fix.
+
+Skip the entry for:
+
+- New helper methods, functions, or types that support an existing feature.
+- Internal refactors with no behavior change.
+- Changes to tests, docs, comments, or build tooling.
+
+Put the entry under `[Unreleased]` at the top of the file. Follow the format of the existing entries.
 
 ## Signed commits
 

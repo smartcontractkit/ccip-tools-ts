@@ -8,8 +8,11 @@
  * external-signer (Squads) path, where `generateUnsigned*` output is serialized with
  * `serializeUnsignedTx` and signed by a separate vault key.
  *
- * `onboardToken` then chains those steps behind one call, for both pool types and both signers,
- * and a transfer over the 2.0 lane checks the pool it leaves on the 2.0 interface.
+ * `onboardToken` then chains those steps behind one call, once per signer path (burn-mint through
+ * the external signer, lock-release through the wallet), and a transfer over the 2.0 lane checks
+ * the pool each leaves on the 2.0 interface. The other two permutations repeat a signer path and
+ * a pool kind those runs already cover, and their planner output is covered offline by
+ * `onboarding/onboard-token.test.ts`.
  *
  * Run: `cd ccip-sdk && node --test src/cct/solana/onboarding.fork.test.ts` (needs `surfpool`;
  * `VERBOSE=1` mirrors the fork's logs).
@@ -32,6 +35,7 @@ import {
 
 import { rpcEndpoint } from '../../../../scripts/test-endpoints.ts'
 import { useResourceForDescribe } from '../../../../scripts/useResource.ts'
+import { CCIPTokenPoolChainConfigNotFoundError } from '../../errors/index.ts'
 import { networkInfo } from '../../index.ts'
 import {
   type SurfpoolInstance,
@@ -84,16 +88,39 @@ const skip = !!process.env.SKIP_INTEGRATION_TESTS || !isSurfpoolAvailable()
 /** Whether a failed send names a program error or log, wherever the SDK or web3.js put the logs. */
 const failsWith = (name: string) => (err: unknown) => inspect(err, { depth: 6 }).includes(name)
 
+/** Loader that owns the data account of an upgradeable program, which holds its code. */
+const BPF_LOADER_UPGRADEABLE = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111')
+
+/** Address of the account derived from `seed` under `program`. */
+const pda = (seed: string | Buffer, program: PublicKey): PublicKey =>
+  PublicKey.findProgramAddressSync(
+    [typeof seed === 'string' ? Buffer.from(seed) : seed],
+    program,
+  )[0]
+
+/** Seed of a lane state account, with the remote chain selector appended little-endian. */
+const laneSeed = (name: string, selector: bigint): Buffer => {
+  const selectorLe = Buffer.alloc(8)
+  selectorLe.writeBigUInt64LE(selector)
+  return Buffer.concat([Buffer.from(name), selectorLe])
+}
+
 const testLogger = new Console(process.stdout, process.stderr)
 if (!VERBOSE) testLogger.debug = () => {}
 
-describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600_000 }, () => {
+// The fork fetches devnet accounts lazily, so a throttled upstream read stalls whichever step
+// first touches its account (see `warmDeploymentAccounts`).
+describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 1_200_000 }, () => {
   useResourceForDescribe(['solana-devnet'])
 
   const fork: { surfpool?: SurfpoolInstance; connection?: Connection } = {}
   let chain: SolanaChain
   let cct: SolanaTokenManager
   const issuer = Keypair.generate()
+  // Funded once for both onboarding modes and both pools: a fresh key per mode would only add
+  // an airdrop to each block's setup.
+  const newOwner = Keypair.generate()
+  const rateLimitAdmin = Keypair.generate()
 
   const conn = () => fork.connection!
 
@@ -102,6 +129,43 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
       const sig = await conn().requestAirdrop(key.publicKey, 10 * LAMPORTS_PER_SOL)
       await conn().confirmTransaction(sig)
     }
+  }
+
+  /**
+   * Reads the deployment accounts the suite's transactions touch in one batch, so the fork clones
+   * them from the upstream RPC once instead of stalling whichever step first reads one.
+   *
+   * Surfpool clones accounts lazily, and the public RPC throttles a burst of clones by holding the
+   * request for ~10s. The programs' data accounts hold their code, so a transaction cannot run
+   * until the fork has them.
+   */
+  async function warmDeploymentAccounts() {
+    const router = new PublicKey(PROD_TESTNET.router)
+    const pools = [PROD_TESTNET.burnMintPool, PROD_TESTNET.lockReleasePool].map(
+      (address) => new PublicKey(address),
+    )
+    const selector = PROD_TESTNET.remoteSelector
+    // the lane config also carries the fee quoter the fee paths read
+    const { feeQuoter } = await chain.getOnRampConfig(PROD_TESTNET.router, selector)
+    const feeQuoterProgram = new PublicKey(feeQuoter)
+    const programData = (program: PublicKey) => pda(program.toBuffer(), BPF_LOADER_UPGRADEABLE)
+    await conn().getMultipleAccountsInfo([
+      router,
+      programData(router),
+      pda('config', router),
+      pda(laneSeed('dest_chain_state_v2', selector), router),
+      pda(laneSeed('dest_chain_state', selector), router),
+      // the router's fixed ccip_send v2 lookup table (CCIP_SEND_V2_LOOKUP_TABLES in send-v2.ts)
+      new PublicKey('43j7AWfB2STvzwKxik64fD12Swdz56rNTA5VQnCWwEXL'),
+      feeQuoterProgram,
+      programData(feeQuoterProgram),
+      pda('config', feeQuoterProgram),
+      pda(laneSeed('dest_chain', selector), feeQuoterProgram),
+      ...pools.flatMap((pool) => [pool, programData(pool), pda('config', pool)]),
+      new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'),
+      new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
+      new PublicKey('ComputeBudget111111111111111111111111111111'),
+    ])
   }
 
   /**
@@ -185,7 +249,8 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
       logger: testLogger,
     })
     cct = SolanaTokenManager.fromChain(chain)
-    await fund(issuer)
+    // one batch of clones (and one airdrop) instead of one stall per first read
+    await Promise.all([fund(issuer, newOwner, rateLimitAdmin), warmDeploymentAccounts()])
     await allowlistSender(issuer.publicKey)
   })
 
@@ -197,7 +262,6 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
     describe(`burn-mint onboarding, ${mode === 'wallet' ? 'wallet-signed' : 'external signer (Squads path)'}`, () => {
       // The pool owner and token admin: the issuer itself, or a vault the issuer hands over to
       const admin = mode === 'wallet' ? issuer : Keypair.generate()
-      const newOwner = Keypair.generate()
       let tokenAddress: string
       let poolSigner: string
       let lookupTable: string
@@ -219,7 +283,6 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
 
       before(async () => {
         if (admin !== issuer) await fund(admin)
-        await fund(newOwner)
         tokenAddress = await deployToken()
         if (admin !== issuer) {
           // Self-served pool initialization and registration both authorize the mint authority
@@ -304,7 +367,12 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
           (payer) => cct.generateUnsignedApplyChainUpdates({ ...params, payer }),
         )
 
-        const remotes = await cct.getTokenPoolRemotes({ tokenAddress })
+        // one lane: without a selector this reads a chain-config PDA for every known network
+        const remotes = await cct.getTokenPoolRemotes({
+          tokenAddress,
+          remoteChainSelector: PROD_TESTNET.remoteSelector,
+        })
+        assert.deepEqual(Object.keys(remotes), [networkInfo(PROD_TESTNET.remoteSelector).name])
         const remote = remotes[networkInfo(PROD_TESTNET.remoteSelector).name]
         assert.ok(remote, 'the remote chain should be configured')
         assert.equal(remote.remoteToken.toLowerCase(), REMOTE_TOKEN)
@@ -388,8 +456,6 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
       })
 
       it('sets the rate limit admin, who then sets the chain rate limit', async () => {
-        const rateLimitAdmin = Keypair.generate()
-        await fund(rateLimitAdmin)
         const params = { tokenAddress, newRateLimitAdmin: rateLimitAdmin.publicKey.toBase58() }
         await run(
           (wallet) => cct.setRateLimitAdmin({ ...params, wallet }),
@@ -417,10 +483,10 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
       it('appends, edits, deletes and re-inits the remote chain config', async () => {
         const remoteChainSelector = PROD_TESTNET.remoteSelector
         const remoteName = networkInfo(remoteChainSelector).name
-        const remotePools = async () =>
-          (await cct.getTokenPoolRemotes({ tokenAddress }))[remoteName]?.remotePools.map((p) =>
-            p.toLowerCase(),
-          )
+        const remotePools = async () => {
+          const remotes = await cct.getTokenPoolRemotes({ tokenAddress, remoteChainSelector })
+          return remotes[remoteName]?.remotePools.map((p) => p.toLowerCase())
+        }
 
         const append = { tokenAddress, remoteChainSelector, remotePoolAddresses: [REMOTE_POOL_2] }
         await run(
@@ -447,7 +513,8 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
           (wallet) => cct.deleteChainRemoteConfig({ ...del, wallet }),
           (payer) => cct.generateUnsignedDeleteChainRemoteConfig({ ...del, payer }),
         )
-        assert.equal(await remotePools(), undefined)
+        // a selected lane without a chain config reads as absent, not as an empty one
+        await assert.rejects(remotePools(), CCIPTokenPoolChainConfigNotFoundError)
 
         const init = {
           tokenAddress,
@@ -665,155 +732,165 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 600
     assert.equal(config.poolSigner, poolSignerAddress)
   })
 
-  for (const poolType of ['burn-mint', 'lock-release'] as const) {
-    for (const mode of ['wallet', 'external'] as const) {
-      describe(`onboardToken, ${poolType}, ${mode === 'wallet' ? 'wallet-signed' : 'external signer (Squads path)'}`, () => {
-        // The mint authority, who becomes pool owner and token admin: the issuer, or a vault
-        const admin = mode === 'wallet' ? issuer : Keypair.generate()
-        // A slow vault has the issuer, as a hot wallet, create the pool lookup table
-        const hotLookupTable = mode === 'external' && poolType === 'burn-mint'
-        let tokenAddress: string
-        let onboarding: Parameters<SolanaTokenManager['generateUnsignedOnboardToken']>[0]
+  // A full onboarding run per signer path, on a pool kind of its own: burn-mint through the
+  // external signer, which is also the only permutation with a hot lookup table payer, and
+  // lock-release through the wallet. The opposite two permutations repeat a signer path and a
+  // pool kind these runs already cover; `planTokenOnboarding`'s offline tests cover the plan
+  // matrix they would add.
+  const ONBOARDING_RUNS = [
+    // a hot wallet creates the pool lookup table, in a step it signs alone
+    { poolType: 'burn-mint', mode: 'external', hotLookupTable: true },
+    // no lookup table payer: the signer creates and pays for the pool lookup table itself
+    { poolType: 'lock-release', mode: 'wallet', hotLookupTable: false },
+  ] as const
 
-        before(async () => {
-          if (admin !== issuer) await fund(admin)
-          tokenAddress = await deployToken()
-          // The precondition: the onboarding authority holds the mint authority
-          if (admin !== issuer)
-            await cct.setTokenAuthority({
-              tokenAddress,
-              newAuthority: admin.publicKey.toBase58(),
-              authorityTypes: ['mint'],
-              wallet: new AnchorWallet(issuer),
-            })
-          onboarding = {
+  for (const { poolType, mode, hotLookupTable } of ONBOARDING_RUNS) {
+    describe(`onboardToken, ${poolType}, ${mode === 'wallet' ? 'wallet-signed' : 'external signer (Squads path)'}`, () => {
+      // The mint authority, who becomes pool owner and token admin: the issuer, or a vault
+      const admin = mode === 'wallet' ? issuer : Keypair.generate()
+      let tokenAddress: string
+      let onboarding: Parameters<SolanaTokenManager['generateUnsignedOnboardToken']>[0]
+
+      before(async () => {
+        if (admin !== issuer) await fund(admin)
+        tokenAddress = await deployToken()
+        // The precondition: the onboarding authority holds the mint authority
+        if (admin !== issuer)
+          await cct.setTokenAuthority({
             tokenAddress,
-            poolType,
-            remoteChains: [
-              {
-                remoteChainSelector: PROD_TESTNET.remoteSelector,
-                remoteTokenAddress: REMOTE_TOKEN,
-                remotePoolAddresses: [REMOTE_POOL],
-                remoteTokenDecimals: 18,
-                inboundRateLimiterConfig: RATE_LIMIT,
-                outboundRateLimiterConfig: RATE_LIMIT,
-                allowedFinality: { finalityDepth: 5 },
-                fastFinalityRateLimits: { inbound: RATE_LIMIT, outbound: RATE_LIMIT },
-              },
-            ],
-            payer: admin.publicKey.toBase58(),
-            ...(hotLookupTable && { lookupTablePayer: issuer.publicKey.toBase58() }),
-          }
-        })
-
-        it('runs every step, then plans none', async () => {
-          const expected = [
-            'deployTokenPool',
-            'registerAdmin',
-            'acceptAdmin',
-            'applyChainUpdates',
-            'initChainConfigV2',
-            'initFastFinalityRateLimit',
-            ...(poolType === 'burn-mint' ? ['createTokenMultisig', 'setTokenAuthority'] : []),
-            ...(hotLookupTable ? ['createLookupTable'] : []),
-            'setPool',
-            'setPoolInterfaceImplementation',
-          ]
-          const planned = await cct.getTokenOnboardingPlan(onboarding)
-          assert.deepEqual(
-            planned.steps.map(({ name }) => name),
-            expected,
-          )
-
-          const executed: string[] = []
-          if (mode === 'wallet') {
-            const { payer: _, ...params } = onboarding
-            const result = await cct.onboardToken({ ...params, wallet: new AnchorWallet(admin) })
-            executed.push(...result.steps.map(({ name }) => name))
-            assert.ok(result.steps.every(({ hashes }) => hashes.length > 0))
-          } else {
-            for (;;) {
-              const { step, transactions, payer, lookupTableAddress } =
-                await cct.generateUnsignedOnboardToken(onboarding)
-              if (!step) break
-              executed.push(step.name)
-              // createLookupTable is the hot wallet's alone; the vault signs the rest
-              const signer = payer === issuer.publicKey.toBase58() ? issuer : admin
-              assert.equal(signer === issuer, step.name === 'createLookupTable')
-              for (const tx of transactions) await signAndSend(tx, signer)
-              if (lookupTableAddress) onboarding.poolLookupTableAddress = lookupTableAddress
-            }
-          }
-          assert.deepEqual(executed, expected)
-          assert.deepEqual((await cct.getTokenOnboardingPlan(onboarding)).steps, [])
-        })
-
-        it('leaves the pool registered on the 2.0 interface and connected', async () => {
-          const admin58 = admin.publicKey.toBase58()
-          const registry = await cct.getTokenAdminRegistry({
-            tokenAddress,
-            address: PROD_TESTNET.router,
-          })
-          assert.equal(registry.administrator, admin58)
-          assert.ok(registry.lookupTable, 'the pool lookup table should be set')
-          assert.equal(registry.interfaceVersion, 2)
-          assert.equal(registry.accountResolution, 'WithoutExtendedLookupTable')
-
-          const { config } = await cct.getTokenPoolState({ tokenAddress })
-          assert.equal(config.owner, admin58)
-          const remotes = await cct.getTokenPoolRemotes({ tokenAddress })
-          assert.ok(remotes[networkInfo(PROD_TESTNET.remoteSelector).name])
-
-          refreshAccountState(chain)
-          const lane = await chain.getTokenPoolConfig(
-            deriveTokenPoolConfigPda(
-              new PublicKey(
-                poolType === 'burn-mint' ? PROD_TESTNET.burnMintPool : PROD_TESTNET.lockReleasePool,
-              ),
-              new PublicKey(tokenAddress),
-            ).toBase58(),
-            { destChainSelector: PROD_TESTNET.remoteSelector },
-          )
-          assert.equal(lane.finalityDepth, 5)
-
-          const { mintAuthority } = await readMint(new PublicKey(tokenAddress))
-          if (poolType === 'lock-release') assert.equal(mintAuthority?.toBase58(), admin58)
-          else {
-            // a 1-of-2 multisig: the pool mints alone, and the admin keeps its own path
-            const { mintMultisigAddress } = await cct.getTokenOnboardingPlan(onboarding)
-            assert.equal(mintAuthority?.toBase58(), mintMultisigAddress)
-            const multisig = await getMultisig(conn(), mintAuthority!)
-            assert.equal(multisig.m, 1)
-            assert.deepEqual(
-              [multisig.signer1, multisig.signer2].slice(0, multisig.n).map((k) => k.toBase58()),
-              [config.poolSigner, admin58],
-            )
-          }
-        })
-
-        it('transfers the onboarded token over the 2.0 lane', async () => {
-          const amount = 10n ** BigInt(DECIMALS)
-          const ata = getAssociatedTokenAddressSync(new PublicKey(tokenAddress), issuer.publicKey)
-          const balance = async () =>
-            BigInt((await conn().getTokenAccountBalance(ata)).value.amount)
-          const balanceBefore = await balance()
-
-          const request = await chain.sendMessage({
-            router: PROD_TESTNET.router,
-            destChainSelector: PROD_TESTNET.remoteSelector,
-            message: {
-              receiver: RECEIVER,
-              tokenAmounts: [{ token: tokenAddress, amount }],
-              extraArgs: { finality: 'finalized' },
-            },
+            newAuthority: admin.publicKey.toBase58(),
+            authorityTypes: ['mint'],
             wallet: new AnchorWallet(issuer),
-            sendV2OnAllowlistedLanes: true,
           })
-          assert.equal(request.lane.version, CCIPVersion.V2_0, 'the send should take the 2.0 lane')
-          assert.equal(balanceBefore - (await balance()), amount, 'tokens should leave the sender')
-        })
+        onboarding = {
+          tokenAddress,
+          poolType,
+          remoteChains: [
+            {
+              remoteChainSelector: PROD_TESTNET.remoteSelector,
+              remoteTokenAddress: REMOTE_TOKEN,
+              remotePoolAddresses: [REMOTE_POOL],
+              remoteTokenDecimals: 18,
+              inboundRateLimiterConfig: RATE_LIMIT,
+              outboundRateLimiterConfig: RATE_LIMIT,
+              allowedFinality: { finalityDepth: 5 },
+              fastFinalityRateLimits: { inbound: RATE_LIMIT, outbound: RATE_LIMIT },
+            },
+          ],
+          payer: admin.publicKey.toBase58(),
+          ...(hotLookupTable && { lookupTablePayer: issuer.publicKey.toBase58() }),
+        }
       })
-    }
+
+      it('runs every step, then plans none', async () => {
+        const expected = [
+          'deployTokenPool',
+          'registerAdmin',
+          'acceptAdmin',
+          'applyChainUpdates',
+          'initChainConfigV2',
+          'initFastFinalityRateLimit',
+          ...(poolType === 'burn-mint' ? ['createTokenMultisig', 'setTokenAuthority'] : []),
+          ...(hotLookupTable ? ['createLookupTable'] : []),
+          'setPool',
+          'setPoolInterfaceImplementation',
+        ]
+        const planned = await cct.getTokenOnboardingPlan(onboarding)
+        assert.deepEqual(
+          planned.steps.map(({ name }) => name),
+          expected,
+        )
+
+        const executed: string[] = []
+        if (mode === 'wallet') {
+          const { payer: _, ...params } = onboarding
+          const result = await cct.onboardToken({ ...params, wallet: new AnchorWallet(admin) })
+          executed.push(...result.steps.map(({ name }) => name))
+          assert.ok(result.steps.every(({ hashes }) => hashes.length > 0))
+        } else {
+          for (;;) {
+            const { step, transactions, payer, lookupTableAddress } =
+              await cct.generateUnsignedOnboardToken(onboarding)
+            if (!step) break
+            executed.push(step.name)
+            // createLookupTable is the hot wallet's alone; the vault signs the rest
+            const signer = payer === issuer.publicKey.toBase58() ? issuer : admin
+            assert.equal(signer === issuer, step.name === 'createLookupTable')
+            for (const tx of transactions) await signAndSend(tx, signer)
+            if (lookupTableAddress) onboarding.poolLookupTableAddress = lookupTableAddress
+          }
+        }
+        assert.deepEqual(executed, expected)
+        assert.deepEqual((await cct.getTokenOnboardingPlan(onboarding)).steps, [])
+      })
+
+      it('leaves the pool registered on the 2.0 interface and connected', async () => {
+        const admin58 = admin.publicKey.toBase58()
+        const registry = await cct.getTokenAdminRegistry({
+          tokenAddress,
+          address: PROD_TESTNET.router,
+        })
+        assert.equal(registry.administrator, admin58)
+        assert.ok(registry.lookupTable, 'the pool lookup table should be set')
+        assert.equal(registry.interfaceVersion, 2)
+        assert.equal(registry.accountResolution, 'WithoutExtendedLookupTable')
+
+        const { config } = await cct.getTokenPoolState({ tokenAddress })
+        assert.equal(config.owner, admin58)
+        const remotes = await cct.getTokenPoolRemotes({
+          tokenAddress,
+          remoteChainSelector: PROD_TESTNET.remoteSelector,
+        })
+        assert.ok(remotes[networkInfo(PROD_TESTNET.remoteSelector).name])
+
+        refreshAccountState(chain)
+        const lane = await chain.getTokenPoolConfig(
+          deriveTokenPoolConfigPda(
+            new PublicKey(
+              poolType === 'burn-mint' ? PROD_TESTNET.burnMintPool : PROD_TESTNET.lockReleasePool,
+            ),
+            new PublicKey(tokenAddress),
+          ).toBase58(),
+          { destChainSelector: PROD_TESTNET.remoteSelector },
+        )
+        assert.equal(lane.finalityDepth, 5)
+
+        const { mintAuthority } = await readMint(new PublicKey(tokenAddress))
+        if (poolType === 'lock-release') assert.equal(mintAuthority?.toBase58(), admin58)
+        else {
+          // a 1-of-2 multisig: the pool mints alone, and the admin keeps its own path
+          const { mintMultisigAddress } = await cct.getTokenOnboardingPlan(onboarding)
+          assert.equal(mintAuthority?.toBase58(), mintMultisigAddress)
+          const multisig = await getMultisig(conn(), mintAuthority!)
+          assert.equal(multisig.m, 1)
+          assert.deepEqual(
+            [multisig.signer1, multisig.signer2].slice(0, multisig.n).map((k) => k.toBase58()),
+            [config.poolSigner, admin58],
+          )
+        }
+      })
+
+      it('transfers the onboarded token over the 2.0 lane', async () => {
+        const amount = 10n ** BigInt(DECIMALS)
+        const ata = getAssociatedTokenAddressSync(new PublicKey(tokenAddress), issuer.publicKey)
+        const balance = async () => BigInt((await conn().getTokenAccountBalance(ata)).value.amount)
+        const balanceBefore = await balance()
+
+        const request = await chain.sendMessage({
+          router: PROD_TESTNET.router,
+          destChainSelector: PROD_TESTNET.remoteSelector,
+          message: {
+            receiver: RECEIVER,
+            tokenAmounts: [{ token: tokenAddress, amount }],
+            extraArgs: { finality: 'finalized' },
+          },
+          wallet: new AnchorWallet(issuer),
+          sendV2OnAllowlistedLanes: true,
+        })
+        assert.equal(request.lane.version, CCIPVersion.V2_0, 'the send should take the 2.0 lane')
+        assert.equal(balanceBefore - (await balance()), amount, 'tokens should leave the sender')
+      })
+    })
   }
 
   it('onboardToken points a registry set to another pool at the onboarded pool', async () => {

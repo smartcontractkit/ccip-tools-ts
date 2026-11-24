@@ -37,6 +37,7 @@ import {
   type TokenPoolRemote,
   type TokenPoolRemotesOpts,
   type TokenPrice,
+  type TotalFeesEstimate,
   Chain,
 } from '../chain.ts'
 import {
@@ -67,12 +68,14 @@ import {
   type EVMExtraArgsV2,
   type ExtraArgs,
   type FinalityAllowed,
+  type FinalityRequested,
   type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
   EVMExtraArgsV2Tag,
   GenericExtraArgsV3Tag,
   SuiExtraArgsV1Tag,
+  encodeFinality,
 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl } from '../fetch.ts'
 import { getDestTokenAmount } from '../gas.ts'
@@ -108,6 +111,7 @@ import {
   getAddressBytes,
   getDataBytes,
   leToBigInt,
+  memoizeBlockInfo,
   parseTypeAndVersion,
   passesTypeAndVersion,
   toLeArray,
@@ -135,6 +139,7 @@ import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
 import { IDL as FEE_QUOTER_IDL } from './idl/1.6.0/FEE_QUOTER.ts'
 import { IDL as CCIP_OFFRAMP_V2_IDL } from './idl/2.0.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
+import { simulateLockOrBurn as simulateLockOrBurnSolana } from './lock-or-burn.ts'
 import { getTransactionsForAddress } from './logs.ts'
 import {
   type SolanaSendLane,
@@ -147,15 +152,18 @@ import {
 import { generateUnsignedCcipSend, getFee } from './send.ts'
 import { cacheGetSignaturesForAddress } from './signatures-cache.ts'
 import {
+  type TokenAccountResolution,
   decodeTokenAdminRegistryConfig,
   getTokenAdminRegistryConfig,
 } from './token-admin-registry.ts'
 import {
+  decodeCctpVerifierFastFinalityBps,
   decodeTokenPoolChainConfig,
   decodeTokenPoolChainConfigOverride,
   decodeTokenPoolChainConfigV2,
   decodeTokenPoolFinality,
   decodeTokenPoolStateConfig,
+  deriveCctpVerifierConfigPda,
   deriveTokenPoolChainConfigOverridePda,
   deriveTokenPoolChainConfigV2Pda,
 } from './token-pool.ts'
@@ -271,12 +279,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     // cache whole signature lists per address (up to 30min), to speed up consecutive
     // paginations over the same address
     this.connection.getSignaturesForAddress = cacheGetSignaturesForAddress(this.connection)
-    this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
-      async: true,
-      maxSize: 100,
-      expires: 600e3,
-      forceUpdate: ([k]) => typeof k !== 'number' || k <= 0,
-    })
+    this.getBlockInfo = memoizeBlockInfo(this.getBlockInfo.bind(this))
     this.getTransaction = memoize(this.getTransaction.bind(this), {
       async: true,
       maxArgs: 1,
@@ -787,13 +790,17 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     // v1 exposes a single `onRamp`; v2 exposes a `onRamps` Vec. Normalize both to `onRamps`.
     const sourceFamily = networkInfo(sourceChainSelector).family
-    const decodeOnRampField = (onRampField: { bytes: readonly number[]; len: number }) =>
+    const decodeOnRampField = (
+      onRampField: { bytes: readonly number[]; len: number },
+      version?: CCIPVersion,
+    ) =>
       decodeOnRampAddress(
         getAddressBytes(onRampField.bytes).subarray(0, onRampField.len),
         sourceFamily,
+        version,
       )
     const onRamps = Array.isArray(sourceChain.config.onRamps)
-      ? sourceChain.config.onRamps.map(decodeOnRampField)
+      ? sourceChain.config.onRamps.map((onRamp) => decodeOnRampField(onRamp, CCIPVersion.V2_0))
       : [decodeOnRampField(sourceChain.config.onRamp)]
     const { onRamp: _onRamp, onRamps: _onRamps, ...sourceConfig } = sourceChain.config
 
@@ -1507,6 +1514,68 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
   }
 
   /**
+   * {@inheritDoc Chain.getTotalFeesEstimate}
+   */
+  override async getTotalFeesEstimate(
+    opts: Parameters<Chain['getTotalFeesEstimate']>[0] & SolanaSendMessageOpts,
+  ): Promise<TotalFeesEstimate> {
+    const ccipFee = await this.getFee(opts)
+    const tokenAmounts = opts.message.tokenAmounts
+    if (!tokenAmounts?.length) return { ccipFee }
+    const { token, amount } = tokenAmounts[0]!
+
+    const { router, destChainSelector } = opts
+    // the lane `getFee` quoted: the observation it read is reused, so both see the lane alike
+    const lane = await selectSendLane(this, {
+      router: new PublicKey(router),
+      destChainSelector,
+      message: buildMessageForDest(opts.message, networkInfo(destChainSelector).family),
+      sendV2OnAllowlistedLanes: opts.sendV2OnAllowlistedLanes,
+      observe: () => this._observeDestChainV2(router, destChainSelector),
+    })
+    if (lane.version !== CCIPVersion.V2_0) return { ccipFee }
+
+    const { tokenPool, interfaceVersion } = await this.getRegistryTokenConfig(router, token)
+    if (!tokenPool || interfaceVersion < 2) return { ccipFee }
+
+    const { finality, tokenArgs } = lane.message.extraArgs
+    const { tokenPoolProgram, typeAndVersion, tokenTransferFeeConfig } =
+      await this.getTokenPoolConfig(tokenPool, {
+        token,
+        destChainSelector,
+        finality,
+        tokenArgs: hexlify(tokenArgs),
+      })
+    // 'finalized' encodes to 0 like a 0 depth: only a depth or 'safe' takes the fast-finality fee
+    const fast = encodeFinality(finality) !== 0
+
+    let bps
+    if (typeAndVersion && /cctp/i.test(typeAndVersion)) {
+      // Solana's CCTP pool and verifier only allow full finality, since Solana finalizes fast
+      // already, so `getFee` rejects a fast request before we get here. The branch below only
+      // keeps the quote right if a deployment ever enables it: it reads the verifier's onchain
+      // cap rather than Circle's live rate, and, like EVM when it can't find a CCTP verifier,
+      // falls back to no token fee if the verifier config is missing or unreadable.
+      if (!fast) return { ccipFee }
+      const config = await this.connection.getAccountInfo(
+        deriveCctpVerifierConfigPda(new PublicKey(tokenPoolProgram)),
+      )
+      bps = config && decodeCctpVerifierFastFinalityBps(config.data)
+      if (!bps) return { ccipFee }
+    } else {
+      if (!tokenTransferFeeConfig?.isEnabled) return { ccipFee }
+      bps = fast
+        ? tokenTransferFeeConfig.fastFinalityTransferFeeBps
+        : tokenTransferFeeConfig.finalityTransferFeeBps
+    }
+
+    return {
+      ccipFee,
+      tokenTransferFee: { feeDeducted: (BigInt(amount) * BigInt(bps)) / 10_000n, bps },
+    }
+  }
+
+  /**
    * {@inheritDoc Chain.generateUnsignedSendMessage}
    *
    * Sends through the router's CCIP 2.0 entrypoint (`ccip_send_v2`) when possible, and its 1.6 one
@@ -1758,6 +1827,63 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
     const tx = await this.getTransaction(hash)
     return this.getExecutionReceiptInTx(tx)
+  }
+
+  /**
+   * {@inheritDoc Chain.simulateLockOrBurn}
+   *
+   * Simulates the pool instruction the router would call: `lock_or_burn_tokens_v2` for a 2.0 pool
+   * on a lane that takes CCIP 2.0 messages (see {@link SolanaChain.getFee}), `lock_or_burn_tokens`
+   * otherwise. See {@link simulateLockOrBurnSolana} for how the router's signer and transfer are
+   * stood in for. Without `originalSender`, a pool revert isn't a verdict and is thrown raw.
+   * @throws {@link CCIPSourcePoolRevertError} if the pool itself rejects the transfer
+   */
+  override async simulateLockOrBurn(opts: {
+    onRamp: string
+    destChainSelector: bigint
+    token: string
+    amount: bigint
+    originalSender?: string
+    receiver?: string
+    tokenReceiver?: string
+    tokenArgs?: string
+    finality?: FinalityRequested
+  }): Promise<{
+    sourcePoolAddress: string
+    destTokenAddress: string
+    destPoolData: string
+    destTokenAmount: bigint
+  }> {
+    const { onRamp, destChainSelector } = opts
+    const [, version] = await this.typeAndVersion(onRamp)
+    const laneV2 =
+      version >= CCIPVersion.V2_0 &&
+      !v2LaneUnavailableReason(await this._observeDestChainV2(onRamp, destChainSelector))
+    const tokenReceiver = opts.tokenReceiver?.match(/^(0x)?0*$/) ? undefined : opts.tokenReceiver
+    const receiverBytes = getAddressBytes(tokenReceiver ?? opts.receiver ?? new Uint8Array(32))
+    const receiver = new Uint8Array(Math.max(32, receiverBytes.length))
+    receiver.set(receiverBytes, receiver.length - receiverBytes.length)
+    const result = await simulateLockOrBurnSolana(this, {
+      router: new PublicKey(onRamp),
+      laneV2,
+      rmnRemote: (await this._getRouterConfig(onRamp)).rmnRemote,
+      destChainSelector,
+      mint: new PublicKey(opts.token),
+      amount: opts.amount,
+      ...(opts.originalSender && { originalSender: new PublicKey(opts.originalSender) }),
+      receiver,
+      finality: opts.finality,
+      tokenArgs: getDataBytes(opts.tokenArgs ?? '0x'),
+    })
+    return {
+      sourcePoolAddress: result.sourcePoolAddress.toBase58(),
+      destTokenAddress: decodeAddress(
+        result.destTokenAddress,
+        networkInfo(destChainSelector).family,
+      ),
+      destPoolData: hexlify(result.destPoolData),
+      destTokenAmount: result.destTokenAmount,
+    }
   }
 
   /** {@inheritDoc Chain.estimateReceiveExecution} */
@@ -2063,6 +2189,10 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     administrator: string
     pendingAdministrator?: string
     tokenPool?: string
+    /** Pool interface the Router uses for the token: 1 (CCIP 1.6-compatible, legacy) or 2 (CCIP 2.0). */
+    interfaceVersion: number
+    /** How the Router resolves the pool's accounts. */
+    accountResolution: TokenAccountResolution
   }> {
     const router = new PublicKey(registry)
     const config = await getTokenAdminRegistryConfig(this.connection, router, new PublicKey(token))
@@ -2072,6 +2202,8 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         pendingAdministrator: config.pendingAdministrator.toBase58(),
       }),
       ...(config.tokenPool && { tokenPool: config.tokenPool.toBase58() }),
+      interfaceVersion: config.interfaceVersion,
+      accountResolution: config.accountResolution,
     }
   }
 

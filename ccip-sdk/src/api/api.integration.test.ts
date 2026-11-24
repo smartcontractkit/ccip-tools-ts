@@ -13,7 +13,8 @@ import { MessageStatus } from '../types.ts'
 import { CCIPAPIClient } from './index.ts'
 
 // The suite only talks to the staging CCIP API — the selectors below are data, not endpoints.
-await useResource(['api'])
+// Staging has its own tag, so prod-API suites do not queue behind this one.
+await useResource(['api-staging'])
 
 // Test data from CLI E2E tests (show.test.ts)
 const SEPOLIA_SELECTOR = 16015286601757825753n
@@ -257,9 +258,13 @@ describe(
           { limit: 5 },
         )
 
-        // May have 0 results if no messages are currently ready for manual exec
+        // A verified message can be ready before its first execution attempt.
         for (const msg of page.data) {
-          assert.equal(msg.status, 'FAILED', 'Manual exec messages should have FAILED status')
+          assert.partialDeepStrictEqual(
+            msg,
+            { readyForManualExecution: true },
+            `Message ${msg.messageId} should be ready for manual execution`,
+          )
         }
       })
 

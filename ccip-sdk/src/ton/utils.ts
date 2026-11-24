@@ -1,12 +1,13 @@
 import { type Builder, type Slice, Cell, Dictionary, beginCell } from '@ton/core'
 import { hexlify, toBeHex } from 'ethers'
 
-import { CCIPError, CCIPErrorCode } from '../errors/index.ts'
+import { CCIPError, CCIPErrorCode, CCIPLogsStreamInconsistentError } from '../errors/index.ts'
 import { CCIPTransactionNotFoundError } from '../errors/specialized.ts'
 import { type RateLimitOpts, fetchProfileForUrl } from '../fetch.ts'
 import { NetworkType } from '../networks.ts'
 import type { WithLogger } from '../types.ts'
 import { bytesToBuffer } from '../utils.ts'
+import type { TonV3TransactionWithMessages } from './indexed-tx.ts'
 
 /**
  * Rate-limit options for every TON fetch: the limiter is keyed by ORIGIN, so all
@@ -19,7 +20,70 @@ export function tonRateLimitProfile(
   url: string,
   over: Partial<RateLimitOpts> = {},
 ): Partial<RateLimitOpts> {
-  return { ...fetchProfileForUrl(url), keyBy: 'origin', ...over }
+  return {
+    ...fetchProfileForUrl(url),
+    keyBy: 'origin',
+    // A v2 read of data the liteservers no longer keep is a definite answer: the
+    // index fallback (see indexed-tx.ts) serves it; a retry would only throttle the host.
+    isFinalResponse: async (res) =>
+      res.status >= 500 && TON_RETENTION_ERROR_RE.test(await res.text().catch(() => '')),
+    ...over,
+  }
+}
+
+/** The v2 API's answer to a read of a block or transaction its liteserver no longer
+ * keeps (`LITE_SERVER_UNKNOWN ... lt not in db`, `LITE_SERVER_NOTREADY: cannot find
+ * block`). */
+export const TON_RETENTION_ERROR_RE =
+  /LITE_SERVER_(UNKNOWN|NOTREADY)[^"]*(not in db|cannot compute block|cannot locate transaction|cannot find block)/i
+
+/** The message and response body of an HTTP client error, as one searchable text. */
+function errorText(err: unknown): string {
+  const data = (err as { response?: { data?: unknown } } | null)?.response?.data
+  return `${(err as Error | null)?.message ?? ''} ${typeof data === 'string' ? data : JSON.stringify(data ?? '')}`
+}
+
+/**
+ * Whether `err` is the v2 endpoint's answer that its liteserver no longer keeps the
+ * block or transaction read (`LITE_SERVER_UNKNOWN ... lt not in db`,
+ * `LITE_SERVER_NOTREADY: cannot find block`). Only the data's age causes it.
+ */
+export function isRetentionError(err: unknown): boolean {
+  return TON_RETENTION_ERROR_RE.test(errorText(err))
+}
+
+/** Whether `err` is an HTTP client timeout (axios `ECONNABORTED`). */
+export function isTimeoutError(err: unknown): boolean {
+  return (
+    (err as { code?: unknown } | null)?.code === 'ECONNABORTED' ||
+    /\btimeout of \d+ms exceeded\b/.test(errorText(err))
+  )
+}
+
+/**
+ * Data younger than this (in seconds) is on the public v2 endpoint for certain: it
+ * keeps about two days. A timeout on a read of such data is a slow answer, not a
+ * retention limit.
+ */
+export const TON_V2_SURE_RETENTION_S = 24 * 3600
+
+/**
+ * Whether `err`, from a v2 read of data from `utime` (unix seconds), means v2 cannot
+ * serve that data, so the index fallback (see indexed-tx.ts) may answer:
+ * - a retention answer ({@link isRetentionError}), at any age;
+ * - a timeout ({@link isTimeoutError}), only for data older than
+ *   {@link TON_V2_SURE_RETENTION_S}: an old read often hangs instead of failing
+ *   (seen on `shards`), while a recent one is only slow.
+ *
+ * An index scan that a v2 read truncated carries that read's error as its `cause`
+ * (a {@link CCIPLogsStreamInconsistentError}), which is checked the same way. Any
+ * other failure (a bad request, throttling, an index fault) is not about the data's
+ * age.
+ */
+export function v2CannotServe(err: unknown, utime?: number): boolean {
+  const old = utime != null && Date.now() / 1e3 - utime > TON_V2_SURE_RETENTION_S
+  const check = (e: unknown) => isRetentionError(e) || (old && isTimeoutError(e))
+  return check(err) || (err instanceof CCIPLogsStreamInconsistentError && check(err.cause))
 }
 
 /**
@@ -415,6 +479,12 @@ export async function parseJettonContent(
   return { symbol, decimals }
 }
 
+/** The index row {@link lookupTxByRawHash} returns: the identifier, and the rest of the
+ * row when the index serves it (the public one does). */
+export type RawHashLookup = { account: string; lt: string; hash: string } & Partial<
+  Omit<TonV3TransactionWithMessages, 'account' | 'lt' | 'hash'>
+>
+
 /**
  * Looks up a transaction by raw hash using the TonCenter V3 API.
  *
@@ -430,18 +500,15 @@ export async function parseJettonContent(
  *   default with (e.g. one derived from the chain's endpoint via `tonV3BaseUrl`, so
  *   a private endpoint and its `?api_key=` are honored). Any query on it is carried
  *   over to the lookup, as in the index paths in `logs.ts`.
- * @returns Transaction identifier components needed for V4 API lookup
+ * @returns Transaction identifier components needed for V4 API lookup, and the rest of
+ *   the index's row as served (see {@link TonV3TransactionWithMessages}).
  */
 export async function lookupTxByRawHash(
   hash: string,
   networkType: NetworkType,
   fetch = globalThis.fetch,
   { logger = console, baseUrl: v3BaseUrl }: WithLogger & { baseUrl?: string } = {},
-): Promise<{
-  account: string
-  lt: string
-  hash: string
-}> {
+): Promise<RawHashLookup> {
   // TonCenter V3 accepts hex directly
   const cleanHash = bytesToBuffer(hash).toString('hex')
 
@@ -465,7 +532,7 @@ export async function lookupTxByRawHash(
     throw new CCIPTransactionNotFoundError(hash, { cause: error as Error })
   }
 
-  let data: { transactions?: Array<{ account: string; lt: string; hash: string }> } | undefined
+  let data: { transactions?: RawHashLookup[] } | undefined
   try {
     data = (await response.json()) as typeof data
   } catch (error) {

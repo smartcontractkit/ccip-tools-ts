@@ -19,7 +19,13 @@ import { Console } from 'node:console'
 import { after, before, describe, it } from 'node:test'
 import { inspect } from 'node:util'
 
-import { Contract, JsonRpcProvider, solidityPackedKeccak256, toBeHex, zeroPadValue } from 'ethers'
+import {
+  type JsonRpcProvider,
+  Contract,
+  solidityPackedKeccak256,
+  toBeHex,
+  zeroPadValue,
+} from 'ethers'
 import { Instance } from 'prool'
 
 import '../aptos/index.ts' // register chain families for cross-family message decoding
@@ -30,7 +36,7 @@ import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPDestExecutionRevertError } from '../errors/index.ts'
 import { interfaces } from './const.ts'
 import { getErrorData, parseWithFragment } from './errors.ts'
-import { rejectionOf, withForkRetry } from './fork-retry.test.helpers.ts'
+import { forkProvider, rejectionOf, withForkRetry } from './fork-retry.test.helpers.ts'
 import { findBalancesSlot } from './gas.ts'
 import { isTransientReleaseOrMintRevert, simulateReleaseOrMint } from './simulate.ts'
 import { EVMChain } from './index.ts'
@@ -115,7 +121,8 @@ describe(
     let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
 
     before(async () => {
-      const forkOpts = { retries: 8, timeout: 60_000, forkRetryBackoff: 1_000 } as const
+      // 15s request timeout: anvil does not retry a hung upstream read (see fork.test.ts)
+      const forkOpts = { retries: 8, timeout: 15_000, forkRetryBackoff: 1_000 } as const
       // ports offset from fork.test.ts so both files can run in the same `node --test` run
       sepoliaInstance = Instance.anvil(
         { forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8656, ...forkOpts },
@@ -127,10 +134,8 @@ describe(
       )
       await Promise.all([startForkWithRetries(sepoliaInstance), startForkWithRetries(fujiInstance)])
 
-      const sepoliaProvider = new JsonRpcProvider(
-        `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-      )
-      const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
+      const sepoliaProvider = await forkProvider(sepoliaInstance, { logger: testLogger })
+      const fujiProvider = await forkProvider(fujiInstance, { logger: testLogger })
       sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, {
         apiClient: null,
         logger: testLogger,

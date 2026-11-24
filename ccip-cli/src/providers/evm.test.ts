@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, beforeEach, describe, it } from 'node:test'
 
-import { Wallet } from 'ethers'
+import { encryptKeystoreJsonSync } from 'ethers'
 
 import { loadEvmWallet } from './evm.ts'
 
@@ -30,8 +30,15 @@ before(() => {
   foundryDir = join(tmp, 'foundry')
   mkdirSync(join(foundryDir, 'keystores'), { recursive: true })
 
-  // Encrypted with "" once and reused by every case: scrypt makes each encrypt/decrypt costly.
-  const keystoreJson = new Wallet(TEST_KEY).encryptSync('')
+  // These cases test password handling, not scrypt strength. Keep a real encrypted fixture,
+  // but use a test-only work factor to avoid repeatedly running the expensive default KDF.
+  const keystoreJson = encryptKeystoreJsonSync(
+    { address: TEST_ADDRESS, privateKey: TEST_KEY },
+    '',
+    {
+      scrypt: { N: 1_024 },
+    },
+  )
   writeFileSync(join(foundryDir, 'keystores', 'passwordless'), keystoreJson)
   jsonWalletPath = join(tmp, 'wallet.json')
   writeFileSync(jsonWalletPath, keystoreJson)

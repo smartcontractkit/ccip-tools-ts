@@ -3,10 +3,8 @@ import { describe, it } from 'node:test'
 
 import { useResourceForDescribe } from '../../../scripts/useResource.ts'
 import {
-  APTOS_SKIP,
   APTOS_TESTNET_RPCS,
   BASE_SEPOLIA_RPCS,
-  BSC_TESTNET_RPCS,
   ETHEREUM_MAINNET_RPCS,
   GNOSIS_MAINNET_RPCS,
   ROBINHOOD_TESTNET_RPCS,
@@ -54,9 +52,8 @@ function buildLaneArgs(
   ]
 }
 
-// Moved off sepolia -> fuji: a lane lookup is call-only, so it does not need a
-// testnet hub at all — this v1.5 lane is live on gnosis -> ethereum and leaves
-// both hub locks to the suites that must scan them.
+// Pin the historical v1.5 OnRamp, not the active Gnosis → Ethereum v2.0 route.
+// A config lookup still needs to pair this OnRamp with its historical OffRamp.
 describe('e2e command lane EVM v1.5', () => {
   useResourceForDescribe(['gnosis-mainnet', 'ethereum-mainnet'])
   const LANE_RPCS = [...GNOSIS_MAINNET_RPCS, ...ETHEREUM_MAINNET_RPCS]
@@ -163,23 +160,22 @@ describe('e2e command lane EVM v2.0', () => {
   )
 })
 
-// TODO: restore once CCIP is redeployed on aptos-testnet. The testnet restarted ~2026-10-08
-// and the old package 0xc748…ee45 has no modules; as of 2026-10-23 the CCIP API and DB
-// list no aptos-testnet ramp created, or message sent, after the restart.
-describe('e2e command lane EVM <-> Aptos (v1.6)', { skip: APTOS_SKIP }, () => {
-  useResourceForDescribe(['bsc-testnet', 'aptos-testnet', 'sepolia'])
-  const LANE_RPCS = [...BSC_TESTNET_RPCS, ...APTOS_TESTNET_RPCS, ...SEPOLIA_RPCS]
-  // EVM -> Aptos rides the same bsc-testnet lane as the show fixture; the
-  // reverse direction has no live counterpart other than sepolia, so it stays.
-  const BSC_ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
-  const APTOS_PACKAGE = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
-  const EVM_OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
+// Aptos testnet CCIP 2.0.0 development deployment: refresh these fixtures after a redeploy.
+// The SDK and remote chains name an Aptos 2.0 ramp by its state address.
+describe('e2e command lane EVM <-> Aptos (v2.0)', () => {
+  useResourceForDescribe(['aptos-testnet', 'sepolia'])
+  const LANE_RPCS = [...APTOS_TESTNET_RPCS, ...SEPOLIA_RPCS]
+  const SEPOLIA_ONRAMP = '0x82c5bace65956959076ee14074c7551b345e4835'
+  const SEPOLIA_OFFRAMP = '0x6D817BB162b36be1Cf33b55977a9Fc8BD18a342c'
+  const APTOS_ROUTER = '0x4408fcf09ba8aba2569958fe32ae7227d96a5ecba0c6dfe978d268a929ed5ee7'
+  const APTOS_ONRAMP = '0x21cb562592180cdf573cd142dd96321bd47d78f32e34ea277725cee9a23b97a1'
+  const APTOS_OFFRAMP = '0x62f92b897b1bd2351a59a229ac895f95909d621ab22e12ac71a7b62792dd7d86'
 
-  it('should show lane config BSC -> Aptos (v1.6)', { timeout: 120000 }, async () => {
+  it('should show lane config Sepolia -> Aptos (v2.0)', { timeout: 120000 }, async () => {
     const args = buildLaneArgs(
-      'binance_smart_chain-testnet',
+      'ethereum-testnet-sepolia',
       'aptos-testnet',
-      BSC_ONRAMP,
+      SEPOLIA_ONRAMP,
       LANE_RPCS,
       '--format',
       'json',
@@ -189,34 +185,31 @@ describe('e2e command lane EVM <-> Aptos (v1.6)', { skip: APTOS_SKIP }, () => {
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
     const envelope = JSON.parse(result.stdout)
-    assert.match(envelope.onRamp, new RegExp(BSC_ONRAMP, 'i'))
-    assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 1\.6\.0/)
+    assert.match(envelope.onRamp, new RegExp(SEPOLIA_ONRAMP, 'i'))
+    assert.equal(envelope.version, '2.0.0')
+    assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 2\.0\.0/)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
     assert.ok(envelope.onRampConfig.feeQuoterConfig, 'onRampConfig should have feeQuoterConfig')
     assert.ok(
       envelope.onRampConfig.feeQuoterConfig.typeAndVersion,
       'feeQuoterConfig should have typeAndVersion',
     )
-    assert.match(envelope.offRamp, new RegExp(APTOS_PACKAGE, 'i'))
-    assert.match(envelope.offRampConfig.typeAndVersion, /1\.6\.0/)
-    assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
-    assert.ok(
-      Array.isArray(envelope.offRampConfig.onRamps),
-      'offRampConfig.onRamps should be an array',
-    )
+    assert.equal(envelope.offRamp, APTOS_OFFRAMP)
+    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\.0/)
+    assert.equal(envelope.offRampConfig.router, `${APTOS_ROUTER}::router`)
     assert.ok(
       envelope.offRampConfig.onRamps.some(
-        (r: string) => r.toLowerCase() === BSC_ONRAMP.toLowerCase(),
+        (r: string) => r.toLowerCase() === SEPOLIA_ONRAMP.toLowerCase(),
       ),
-      `offRampConfig.onRamps should include ${BSC_ONRAMP}`,
+      `offRampConfig.onRamps should include ${SEPOLIA_ONRAMP}`,
     )
   })
 
-  it('should show lane config Aptos -> Sepolia (v1.6)', { timeout: 120000 }, async () => {
+  it('should show lane config Aptos -> Sepolia (v2.0)', { timeout: 120000 }, async () => {
     const args = buildLaneArgs(
       'aptos-testnet',
       'ethereum-testnet-sepolia',
-      APTOS_PACKAGE,
+      APTOS_ROUTER,
       LANE_RPCS,
       '--format',
       'json',
@@ -226,25 +219,21 @@ describe('e2e command lane EVM <-> Aptos (v1.6)', { skip: APTOS_SKIP }, () => {
     assert.equal(result.exitCode, 0, result.stdout + result.stderr)
 
     const envelope = JSON.parse(result.stdout)
-    assert.match(envelope.onRamp, new RegExp(APTOS_PACKAGE, 'i'))
-    assert.match(envelope.onRampConfig.typeAndVersion, /1\.6\.0/)
-    assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
+    // the Router resolves the OnRamp state address
+    assert.equal(envelope.onRamp, APTOS_ONRAMP)
+    assert.equal(envelope.version, '2.0.0')
+    assert.match(envelope.onRampConfig.typeAndVersion, /OnRamp 2\.0\.0/)
+    assert.equal(envelope.onRampConfig.router, `${APTOS_ROUTER}::router`)
     assert.ok(
       envelope.onRampConfig.feeQuoterConfig,
       'onRampConfig (Aptos) should have feeQuoterConfig',
     )
-    assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP, 'i'))
-    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 1\.6\.0/)
+    assert.match(envelope.offRamp, new RegExp(SEPOLIA_OFFRAMP, 'i'))
+    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\.0/)
     assert.ok(envelope.offRampConfig.router, 'offRampConfig should have router')
     assert.ok(
-      Array.isArray(envelope.offRampConfig.onRamps),
-      'offRampConfig.onRamps should be an array',
-    )
-    assert.ok(
-      envelope.offRampConfig.onRamps.some((r: string) =>
-        r.toLowerCase().startsWith(APTOS_PACKAGE.toLowerCase()),
-      ),
-      `offRampConfig.onRamps should include ${APTOS_PACKAGE}`,
+      envelope.offRampConfig.onRamps.some((r: string) => r.toLowerCase() === APTOS_ONRAMP),
+      `offRampConfig.onRamps should include ${APTOS_ONRAMP}`,
     )
   })
 })
@@ -338,36 +327,6 @@ describe('e2e command lane EVM <-> Solana (v1.6 and v2.0)', () => {
     )
   })
 
-  it('should show lane config Solana -> Sepolia (v2.0)', { timeout: 120000 }, async () => {
-    const args = buildLaneArgs(
-      'solana-devnet',
-      'ethereum-testnet-sepolia',
-      SOLANA_ONRAMP,
-      LANE_RPCS,
-      '--lane-version',
-      '2.0',
-      '--format',
-      'json',
-    )
-    const result = await spawnCLI(args, 90000)
-
-    assert.equal(result.exitCode, 0, result.stdout + result.stderr)
-
-    const envelope = JSON.parse(result.stdout)
-    assert.match(envelope.onRamp, new RegExp(SOLANA_ONRAMP))
-    assert.equal(envelope.version, '2.0.0')
-    assert.equal(envelope.onRampConfig.laneVersion, '2.0.0')
-    // the 2.0 lane config (`dest_chain_state_v2`) names its offRamp
-    assert.match(envelope.onRampConfig.typeAndVersion, /^ccip-router 2\./)
-    assert.match(envelope.onRampConfig.offramp, new RegExp(EVM_OFFRAMP_V2, 'i'))
-    assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP_V2, 'i'))
-    assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\./)
-    assert.ok(
-      envelope.offRampConfig.onRamps.some((r: string) => r === SOLANA_ONRAMP),
-      `offRampConfig.onRamps should include ${SOLANA_ONRAMP}`,
-    )
-  })
-
   it('should show lane config Solana -> Sepolia (the default)', { timeout: 120000 }, async () => {
     const args = buildLaneArgs(
       'solana-devnet',
@@ -383,13 +342,17 @@ describe('e2e command lane EVM <-> Solana (v1.6 and v2.0)', () => {
 
     const envelope = JSON.parse(result.stdout)
     assert.match(envelope.onRamp, new RegExp(SOLANA_ONRAMP))
-    // the default is the lane messages are sent over: the 2.0 lane, since its sender allowlist
-    // was lifted (read 2026-11-14). Same values as the explicit v2.0 test above.
+    // The default is the active 2.0 lane. Its config (`dest_chain_state_v2`) names its offRamp.
     assert.equal(envelope.version, '2.0.0')
     assert.equal(envelope.onRampConfig.laneVersion, '2.0.0')
     assert.match(envelope.onRampConfig.typeAndVersion, /^ccip-router 2\./)
+    assert.match(envelope.onRampConfig.offramp, new RegExp(EVM_OFFRAMP_V2, 'i'))
     assert.match(envelope.offRamp, new RegExp(EVM_OFFRAMP_V2, 'i'))
     assert.match(envelope.offRampConfig.typeAndVersion, /OffRamp 2\.0\./)
+    assert.ok(
+      envelope.offRampConfig.onRamps.some((r: string) => r === SOLANA_ONRAMP),
+      `offRampConfig.onRamps should include ${SOLANA_ONRAMP}`,
+    )
   })
 
   it('should show lane config Sepolia -> Solana (v2.0)', { timeout: 120000 }, async () => {

@@ -35,6 +35,7 @@
  *   NETWORK_LOCK_DIR         lock root (default: `<os.tmpdir()>/ccip-tools-ts-network-locks`)
  *   NETWORK_LOCK_TIMEOUT_MS  max total wait for all requested locks (default: 60 min)
  *   NETWORK_LOCK_VERBOSE     force lock diagnostics on in CI (default: local only)
+ *   NETWORK_TEST_TIMINGS=1   emit one duration per wait and hold
  */
 import {
   lstatSync,
@@ -49,6 +50,8 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before } from 'node:test'
+
+import { logTestTiming } from './test-timing.ts'
 
 const LOCK_ROOT = process.env['NETWORK_LOCK_DIR'] || join(tmpdir(), 'ccip-tools-ts-network-locks')
 const TIMEOUT_MS = Number(process.env['NETWORK_LOCK_TIMEOUT_MS']) || 3_600_000
@@ -69,6 +72,7 @@ const RESOURCE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/
 
 /** resource tag → number of times this process has acquired it (refcounted). */
 const held = new Map<string, number>()
+const activeHoldReports = new Set<() => void>()
 
 export interface ResourceHandle {
   /** Releases the requested locks (idempotent). */
@@ -226,6 +230,7 @@ function tryAcquire(resource: string): boolean {
  * processes each holding one lock the other wants can never wedge).
  */
 export async function useResource(resources: string[]): Promise<ResourceHandle> {
+  const requestedAt = performance.now()
   // The root may live under an env-overridden or sandboxed tmpdir that does not exist yet.
   ensureLockRoot()
   const wanted = [...new Set(resources)].sort()
@@ -253,11 +258,18 @@ export async function useResource(resources: string[]): Promise<ResourceHandle> 
       // and pre-held ones alike — so each handle's release withdraws exactly its
       // own share and the lock survives while any handle is still active.
       for (const resource of wanted) held.set(resource, (held.get(resource) ?? 0) + 1)
+      const acquiredAt = performance.now()
+      const resourceSet = wanted.join(',')
+      logTestTiming(`lock-wait resources=${resourceSet}`, requestedAt)
+      const reportHold = () => logTestTiming(`lock-hold resources=${resourceSet}`, acquiredAt)
+      activeHoldReports.add(reportHold)
       let released = false
       return {
         release: async () => {
           if (released) return // idempotent: a second release must not touch shared state
           released = true
+          activeHoldReports.delete(reportHold)
+          reportHold()
           for (const resource of [...wanted].reverse()) {
             const remaining = (held.get(resource) ?? 0) - 1
             if (remaining <= 0) {
@@ -294,6 +306,8 @@ export async function useResource(resources: string[]): Promise<ResourceHandle> 
 
 /** Best-effort cleanup so crashed children self-heal on the next acquirer. */
 process.on('exit', () => {
+  // Whole-file handles release at process exit rather than through release().
+  for (const report of activeHoldReports) report()
   for (const resource of held.keys()) {
     try {
       rmSync(lockDir(resource), { recursive: true, force: true })

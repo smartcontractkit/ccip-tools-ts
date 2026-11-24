@@ -1,17 +1,29 @@
 import assert from 'node:assert/strict'
 import { execSync } from 'node:child_process'
 import { Console } from 'node:console'
-import { after, before, describe, it } from 'node:test'
+import { after, before, beforeEach, describe, it } from 'node:test'
 
 import { Connection } from '@solana/web3.js'
-import { AbiCoder, Contract, JsonRpcProvider, Wallet, keccak256, parseUnits, toBeHex } from 'ethers'
+import {
+  type JsonRpcApiProvider,
+  type JsonRpcProvider,
+  AbiCoder,
+  Contract,
+  Wallet,
+  keccak256,
+  toBeHex,
+} from 'ethers'
 import { Instance } from 'prool'
 import { createPublicClient, http } from 'viem'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
-import { raceRpcEndpoint, rpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { raceRpcEndpoint, reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
-import { useResource } from '../../../scripts/useResource.ts'
+import {
+  type ResourceHandle,
+  useResource,
+  useResourceForDescribe,
+} from '../../../scripts/useResource.ts'
 import { CCIPAPIClient } from '../api/index.ts'
 import { type Chain, LaneFeature } from '../chain.ts'
 import { calculateManualExecProof, discoverOffRamp } from '../execution.ts'
@@ -24,6 +36,7 @@ import {
   rankExecFixtures,
   tryExecFixtures,
 } from './exec-fixtures.test.helpers.ts'
+import { forkProvider } from './fork-retry.test.helpers.ts'
 import {
   SOLANA_DEVNET_EXEC_INPUT_TEST_MSG,
   SOLANA_DEVNET_EXEC_TEST_MSG,
@@ -33,80 +46,33 @@ import {
 import { ViemTransportProvider } from './viem/client-adapter.ts'
 import { EVMChain } from './index.ts'
 
-// Forks fetch live state from the Sepolia and Fuji upstreams; several execution
-// paths also hit the staging CCIP API.
-await useResource(['sepolia', 'fuji', 'solana-devnet', 'api'])
+// Forks fetch live state from the Sepolia and Fuji upstreams, and the execution block
+// also reads Solana devnet and the staging CCIP API. Each describe block below acquires
+// its whole network set in one atomic call (see `useResource`), so no block ever holds
+// one lock while waiting for another.
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
-const SEPOLIA_ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
 
 const FUJI_CHAIN_ID = 43113
 
-// Official HashIO JSON-RPC relay (Hedera testnet EVM), and the official CCIP
-// Router 1.2.0 from the CCIP Directory (https://docs.chain.link/ccip/directory/testnet)
 const ANVIL_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
 
-// ── sendMessage constants ──
-
-// v1.5 lanes: the Sep-2026 2.0 migration wave replaced every hub lane on the Sepolia
-// router (Fuji went EVM2EVMOnRamp 1.5.0 → OnRamp 2.0.0), so the surviving 1.5.x lanes
-// are the long-tail L2/bitcoin testnets below. They migrate too, eventually, so the
-// send test resolves one at runtime from a candidate list instead of pinning a dest
-// (same pattern as LEGACY_V1_5_CANDIDATES in integration.test.ts). All candidates
-// below were verified EVM2EVMOnRamp 1.5.0 on SEPOLIA_ROUTER on 2026-09-23.
-const CRONOS_ZKEVM_SELECTOR = 16487132492576884721n // sepolia → cronos-zkevm-testnet-sepolia
-const LISK_SELECTOR = 5298399861320400553n // sepolia → sepolia-lisk-1
-const METAL_SELECTOR = 6286293440461807648n // sepolia → metal-testnet
-const ZORA_SELECTOR = 16244020411108056671n // sepolia → zora-testnet
-const TRON_NILE_SELECTOR = 2052925811360307749n // sepolia → tron-testnet-nile-evm
-const V1_5_SEPOLIA_CANDIDATES = [
-  { dest: CRONOS_ZKEVM_SELECTOR, label: 'sepolia → cronos-zkevm' },
-  { dest: LISK_SELECTOR, label: 'sepolia → lisk' },
-  { dest: METAL_SELECTOR, label: 'sepolia → metal' },
-  { dest: ZORA_SELECTOR, label: 'sepolia → zora' },
-  { dest: TRON_NILE_SELECTOR, label: 'sepolia → tron-nile' },
-] as const
-// keccak256 of the CCIPSendRequested(tuple) event signature from the v1.5 OnRamp ABI
-const CCIP_SEND_REQUESTED_TOPIC =
-  interfaces.EVM2EVMOnRamp_v1_5.getEvent('CCIPSendRequested')!.topicHash
-
-// v1.6 lane: Sepolia -> Aptos testnet (multi-lane OnRamp 0x23a5…9DeE, still 1.6.0)
-const APTOS_TESTNET_SELECTOR = 743186221051783445n
-// keccak256 of the CCIPMessageSent(uint64,uint64,tuple) event signature from the v1.6 OnRamp ABI
-const CCIP_MESSAGE_SENT_TOPIC = interfaces.OnRamp_v1_6.getEvent('CCIPMessageSent')!.topicHash
-
-// Tokens whose pools on the Sepolia -> Aptos lane still carry the aptos-testnet
-// remote. The old fixture (CCIP-BnM 0xFd57…2a05) lost its remote when its pool was
-// migrated to a 2.0 pool without the remote re-added (2026-09), so keep a candidate
-// list and probe each with getFee — the same checkSendMessage path sendMessage runs —
-// before sending (all three verified sendable 2026-09-23).
-const APTOS_TOKEN_CANDIDATES = [
-  '0xa42ba090720aee0602ad4381fadcc9380ad3d888', // CCTEST — BurnMintTokenPool 1.6.1
-  '0xc1ecdf50c7235d9ca08ba2a65548f8431fba5f1b', // CCTEST — BurnMintTokenPool 1.6.1
-  '0x227f0db66e9bf42a28e1e38438c5f19d0adb2df0', // CCTDENC — BurnMintTokenPool 2.0.0
-] as const
-
-// ── getLaneFeatures / ViemTransportProvider constants ──
-
-// v2.0 router for Sepolia -> Fuji lane (the 1.2.0 router's Fuji lane migrated to
-// OnRamp 2.0.0 in Sep 2026; this router is the dedicated 2.0 deployment)
+// Sepolia → Fuji uses a v2.0 OnRamp. The router contract version is independent.
 const SEPOLIA_V2_0_ROUTER = '0x784d49a71BB4C48eB7dA4cD7e6Ecb424f9b5EAB1'
 const FUJI_SELECTOR = 14767482510784806043n
-// The active v1.6 lane the manual-path execute tests target
+const CCIP_MESSAGE_SENT_V2_TOPIC = interfaces.OnRamp_v2_0.getEvent('CCIPMessageSent')!.topicHash
+// The source of the historical v1.6 messages in the manual-execution tests.
 const SOLANA_DEVNET_SELECTOR = 16423721717087811551n
 // Token served by FTF_ENABLED_POOL_SEPOLIA — works with V3 extra args on Sepolia→Fuji v2.0 lane
 const FTF_TOKEN_SEPOLIA = '0xa41a773a7b68e80d4760a176cfec8f50e80d65a7'
 
 // ── execute constants ──
 
-// Use the active Solana-devnet → Sepolia v1.6 lane instead of retired EVM lanes.
-// Public devnet endpoints can prune history, so rank recent messages before these pins.
-const SOURCE_TX_HASH = SOLANA_DEVNET_EXEC_TEST_MSG.txHash
-const MESSAGE_ID = SOLANA_DEVNET_EXEC_TEST_MSG.messageId
+// Solana devnet → Sepolia v1.6 message fixtures. The current route is v2.0.
+// Public devnet endpoints can prune history, so rank alternative fixtures too.
 // Arb-Sep → Fuji v2.0.0 message that FAILED on-chain due to intentional OOG
 // (ccipReceive gasLimit=100). CCV verification is COMPLETED so the message is
 // readyForManualExecution — re-executing it on a Fuji fork with a higher
@@ -132,24 +98,37 @@ const STAGING_API_URL = 'https://api.ccip.cldev.cloud'
 
 // ── Helpers ──
 
-async function solanaDevnetHealthy(url: string): Promise<boolean> {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'getTransaction',
-      params: [SOURCE_TX_HASH, { maxSupportedTransactionVersion: 1, commitment: 'confirmed' }],
-    }),
-    signal: AbortSignal.timeout(20_000),
-  })
-  const json = (await response.json()) as { result?: unknown }
-  return response.ok && json.result != null
+/**
+ * An endpoint is healthy for this suite when it still serves at least one of the
+ * ranked source transactions. Fixtures are ranked before the probe, so a pinned
+ * transaction that a public endpoint has already pruned does not exclude it.
+ */
+async function solanaDevnetHealthy(url: string, txHashes: readonly string[]): Promise<boolean> {
+  const signal = AbortSignal.timeout(20_000)
+  for (const txHash of txHashes) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getTransaction',
+        params: [txHash, { maxSupportedTransactionVersion: 1, commitment: 'confirmed' }],
+      }),
+      signal,
+    })
+    if (!response.ok) {
+      await response.body?.cancel()
+      return false
+    }
+    const json = (await response.json()) as { result?: unknown }
+    if (json.result != null) return true
+  }
+  return false
 }
 
 async function setERC20Balance(
-  provider: JsonRpcProvider,
+  provider: JsonRpcApiProvider,
   token: string,
   address: string,
   amount: bigint,
@@ -214,307 +193,370 @@ async function startForkWithRetries(instance: ReturnType<typeof Instance.anvil>)
 // dest-liquidity.fork.test.ts.
 describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
   let sepoliaChain: EVMChain | undefined
-  let solanaSourceChain: SolanaChain | undefined
   let wallet: Wallet
   let sepoliaInstance: ReturnType<typeof Instance.anvil> | undefined
-  let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
+  let sepoliaFork: Promise<void> | undefined
 
-  before(async () => {
-    // Fork-resilience options: anvil fetches historical blocks/state from the upstream
-    // RPC lazily, and public endpoints intermittently return 408/timeout under that load.
-    // Wait longer per request and retry timed-out ones with backoff, so a transient
-    // upstream error doesn't fail a fork mid-test. (Leave anvil's rate limiter on —
-    // disabling it floods the upstream and gets the fork throttled at startup.)
-    const forkOpts = {
-      retries: 8,
-      timeout: 60_000,
-      forkRetryBackoff: 1_000,
-    } as const
-    // The official Fuji RPC fallback (api.avax-test.network) sits behind Cloudflare, which answers
-    // bursty fork traffic with hard 1015 bans that outlast anvil's retries — reproduced
-    // locally as fork transport errors and empty-revert "missing revert data" call
-    // failures (the same signatures as CI run 39058311489). Bound the fork's upstream
-    // request rate: CUPS paces by per-request compute-unit weights (common reads cost
-    // ~17-42 CU, so 100 CUPS ≈ low single-digit requests/s), only the API-driven execute
-    // tests hit this fork now, and the retained retry opts ride out the occasional blip.
-    const fujiForkOpts = { ...forkOpts, computeUnitsPerSecond: 100 } as const
-    // Pass {} as prool options so no startup timer is set on the Instance.
-    // Without the second arg, prool extracts timeout from the first arg (Anvil CLI params),
-    // sets a 60s timer, and after stop() resets startResolver, the timer fires on the new
-    // unlistened resolver → unhandled rejection → test file fails even when tests pass.
-    // Two forks (sepolia + fuji) cover every test in this file; the former Arb-Sepolia
-    // fork was started but used by no test, and its genesis/state fetches only added
-    // public-RPC load (and a flaky startup dependency) to CI runs.
-    sepoliaInstance = Instance.anvil(
-      { forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8646, ...forkOpts },
-      {},
-    )
-    // A fork reads state lazily for the whole suite: probe an OffRamp 1000 blocks
-    // back, which covers the 600s budget (~410 blocks) plus 256 blockhash ancestors.
-    const fujiRpc = await raceRpcEndpoint(
-      'RPC_FUJI',
-      async (url) => {
-        const chain = await EVMChain.fromUrl(url, {
-          apiClient: null,
-          abort: AbortSignal.timeout(10_000),
-        })
-        try {
-          return (
-            (await chain.provider.getCode(
-              V1_5_API_EXEC_MSG.offRamp,
-              (await chain.provider.getBlockNumber()) - 1000,
-            )) !== '0x'
-          )
-        } finally {
-          chain.destroy()
-        }
-      },
-      { ordered: true },
-    )
-    fujiInstance = Instance.anvil(
-      { forkUrl: fujiRpc, chainId: FUJI_CHAIN_ID, port: 8645, ...fujiForkOpts },
-      {},
-    )
-    await Promise.all([startForkWithRetries(sepoliaInstance), startForkWithRetries(fujiInstance)])
+  // Fork-resilience options: anvil fetches historical blocks/state from the upstream
+  // RPC lazily, and that upstream can stop answering a request. Anvil does not retry a
+  // timed-out request: it returns a fork error after `timeout`, and the fork provider or
+  // `withForkRetry` sends the request again. A 60s timeout made each hung read cost 60s
+  // and timed out tests in CI. 15s is well above a normal fork read. `retries` and
+  // `forkRetryBackoff` apply to rate-limit answers. (Leave anvil's rate limiter on —
+  // disabling it floods the upstream and gets the fork throttled at startup.)
+  const forkOpts = {
+    retries: 8,
+    timeout: 15_000,
+    forkRetryBackoff: 1_000,
+  } as const
 
-    const sepoliaProvider = new JsonRpcProvider(
-      `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-    )
+  // The Sepolia fork serves the sendMessage, execute and Viem blocks, so the first block
+  // to run starts it and the file-level `after` stops it. Each block holds the Sepolia
+  // lock only while it reads the fork, and reuses the same process instead of paying a
+  // second genesis fetch. (The former Arb-Sepolia fork was started but used by no test;
+  // its genesis/state fetches only added public-RPC load and a flaky startup dependency.)
+  function ensureSepoliaFork(): Promise<void> {
+    sepoliaFork ??= (async () => {
+      // Pass {} as prool options so no startup timer is set on the Instance.
+      // Without the second arg, prool extracts timeout from the first arg (Anvil CLI params),
+      // sets a 60s timer, and after stop() resets startResolver, the timer fires on the new
+      // unlistened resolver → unhandled rejection → test file fails even when tests pass.
+      // Bind the first configured endpoint that answers: a dead configured endpoint
+      // would otherwise stall every fork read until the request timeout.
+      const sepoliaRpc = await reachableRpcEndpoint('RPC_SEPOLIA')
+      sepoliaInstance = Instance.anvil(
+        { forkUrl: sepoliaRpc, chainId: SEPOLIA_CHAIN_ID, port: 8646, ...forkOpts },
+        {},
+      )
+      await startForkWithRetries(sepoliaInstance)
 
-    sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, {
-      apiClient: null,
-      logger: testLogger,
-    })
-    // Select a source RPC that still serves the pinned transaction when possible.
-    const solanaRpc = await raceRpcEndpoint('RPC_SOLANA_DEVNET', solanaDevnetHealthy)
-    solanaSourceChain = new SolanaChain(
-      new Connection(solanaRpc, { commitment: 'confirmed' }),
-      networkInfo('solana-devnet'),
-      { apiClient: null, logger: testLogger },
-    )
-    wallet = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
-  })
+      const sepoliaProvider = await forkProvider(sepoliaInstance, { logger: testLogger })
+      sepoliaChain = await EVMChain.fromProvider(sepoliaProvider, {
+        apiClient: null,
+        logger: testLogger,
+      })
+      wallet = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+    })()
+    return sepoliaFork
+  }
 
   after(async () => {
     sepoliaChain?.provider.destroy()
-    await Promise.all([sepoliaInstance?.stop(), fujiInstance?.stop()])
+    await sepoliaInstance?.stop()
   })
 
   // ── State-mutating tests (sendMessage / execute / ViemTransportProvider) ──
 
   describe('sendMessage', () => {
-    // Resolve a surviving v1.5 lane at runtime (see V1_5_SEPOLIA_CANDIDATES): the
-    // router maps each dest to whatever OnRamp generation currently serves it, so
-    // query each candidate dest's OnRamp + typeAndVersion and take the first 1.5.x.
-    let v1_5Lane: { dest: bigint; label: string } | undefined
-    async function findV1_5SepoliaLane() {
-      if (v1_5Lane) return v1_5Lane
-      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
-      for (const candidate of V1_5_SEPOLIA_CANDIDATES) {
-        const onRamp = await sepoliaChain.getOnRampForRouter(SEPOLIA_ROUTER, candidate.dest)
-        const [type, version] = await sepoliaChain.typeAndVersion(onRamp)
-        if (type === 'EVM2EVMOnRamp' && version.startsWith('1.5')) {
-          v1_5Lane = candidate
-          return candidate
-        }
-        testLogger.debug(`  v1.5 candidate ${candidate.label} migrated: ${type} ${version}`)
-      }
-      assert.fail(
-        'no EVM2EVMOnRamp 1.5.x lane remains on the sepolia router; ' +
-          'update V1_5_SEPOLIA_CANDIDATES (query each router getOnRamp + typeAndVersion)',
-      )
-    }
+    useResourceForDescribe(['sepolia'])
+    before(ensureSepoliaFork)
 
-    // First token on the Sepolia→Aptos lane whose pool still carries the aptos
-    // remote (see APTOS_TOKEN_CANDIDATES). The probe runs the exact checkSendMessage
-    // path the send will run (via getFee), so a token that quotes is a token that sends.
-    async function firstSendableAptosToken(
-      walletAddress: string,
-      amount: bigint,
-    ): Promise<(typeof APTOS_TOKEN_CANDIDATES)[number]> {
-      assert.ok(sepoliaChain, 'sepolia chain should be initialized')
-      for (const token of APTOS_TOKEN_CANDIDATES) {
-        try {
-          await sepoliaChain.getFee({
-            router: SEPOLIA_ROUTER,
-            destChainSelector: APTOS_TESTNET_SELECTOR,
-            message: {
-              receiver: walletAddress,
-              data: '0xcafe',
-              tokenAmounts: [{ token, amount }],
-              extraArgs: { gasLimit: 0n, allowOutOfOrderExecution: true },
-            },
-          })
-          return token
-        } catch (err) {
-          testLogger.debug(
-            `  aptos token candidate ${token} not sendable: ${(err as Error).message}`,
-          )
-        }
-      }
-      assert.fail(
-        'no token on the sepolia→aptos lane has a pool with the aptos remote configured; ' +
-          'update APTOS_TOKEN_CANDIDATES',
-      )
-    }
+    it(
+      'sends via a v2.0 lane and returns the decoded CCIPMessageSent',
+      { timeout: 120_000 },
+      async () => {
+        assert.ok(sepoliaChain, 'chain should be initialized')
+        const receiver = await wallet.getAddress()
+        const onRamp = await sepoliaChain.getOnRampForRouter(SEPOLIA_V2_0_ROUTER, FUJI_SELECTOR)
+        assert.equal((await sepoliaChain.typeAndVersion(onRamp))[1], CCIPVersion.V2_0)
 
-    it('should send via a v1.5 lane and emit CCIPSendRequested', { timeout: 60_000 }, async () => {
+        const request = await sepoliaChain.sendMessage({
+          router: SEPOLIA_V2_0_ROUTER,
+          destChainSelector: FUJI_SELECTOR,
+          message: { receiver, data: '0x1337' },
+          wallet,
+        })
+
+        assert.equal(request.lane.version, CCIPVersion.V2_0)
+        assert.equal(request.lane.sourceChainSelector, SEPOLIA_SELECTOR)
+        assert.equal(request.lane.destChainSelector, FUJI_SELECTOR)
+        assert.equal(request.lane.onRamp, onRamp)
+        assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
+        assert.equal(request.message.receiver, receiver)
+        assert.equal(request.message.data, '0x1337')
+        assert.equal(request.log.topics[0], CCIP_MESSAGE_SENT_V2_TOPIC)
+        assert.equal(request.log.transactionHash, request.tx.hash)
+      },
+    )
+
+    it('approves and sends a token on a v2.0 lane', { timeout: 120_000 }, async () => {
       assert.ok(sepoliaChain, 'chain should be initialized')
-      const walletAddress = await wallet.getAddress()
-      const lane = await findV1_5SepoliaLane()
+      const receiver = await wallet.getAddress()
+      const token = FTF_TOKEN_SEPOLIA
+      const amount = 10n ** 17n
+      const provider = sepoliaChain.provider
+      await setERC20Balance(provider, token, receiver, amount)
+      const erc20 = new Contract(token, interfaces.Token, provider)
+      assert.equal(await erc20.getFunction('allowance')(receiver, SEPOLIA_V2_0_ROUTER), 0n)
 
       const request = await sepoliaChain.sendMessage({
-        router: SEPOLIA_ROUTER,
-        destChainSelector: lane.dest,
-        message: { receiver: walletAddress, data: '0x1337' },
+        router: SEPOLIA_V2_0_ROUTER,
+        destChainSelector: FUJI_SELECTOR,
+        message: { receiver, tokenAmounts: [{ token, amount }], extraArgs: { gasLimit: 0n } },
         wallet,
       })
 
-      assert.ok(request.message.messageId, 'messageId should be defined')
-      assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
-      assert.equal(request.lane.sourceChainSelector, SEPOLIA_SELECTOR)
-      assert.equal(request.lane.destChainSelector, lane.dest)
-      assert.ok(request.tx.hash, 'tx hash should be defined')
-
-      // Verify the v1.5 CCIPSendRequested event was emitted
-      assert.ok(request.log, 'request should contain the event log')
-      assert.equal(request.log.topics[0], CCIP_SEND_REQUESTED_TOPIC, 'should be CCIPSendRequested')
-      assert.ok(request.log.address, 'log should have the onRamp address')
-      assert.equal(request.log.transactionHash, request.tx.hash, 'log tx hash should match')
-      assert.ok(
-        String(request.message.data).includes('1337'),
-        'message data should contain sent payload',
-      )
+      assert.equal(request.lane.version, CCIPVersion.V2_0)
+      assert.equal(request.log.topics[0], CCIP_MESSAGE_SENT_V2_TOPIC)
+      assert.equal(await erc20.getFunction('balanceOf')(receiver), 0n)
+      assert.equal(request.message.tokenAmounts.length, 1)
+      const [transfer] = request.message.tokenAmounts
+      assert.ok(transfer && 'sourceTokenAddress' in transfer)
+      assert.equal(transfer.sourceTokenAddress.toLowerCase(), token)
+      assert.ok(transfer.amount > 0n && transfer.amount <= amount, 'amount net of pool fee')
     })
-
-    it(
-      'should send via v1.6 lane (Sepolia -> Aptos) and emit CCIPMessageSent',
-      { timeout: 60_000 },
-      async () => {
-        assert.ok(sepoliaChain, 'chain should be initialized')
-        const walletAddress = await wallet.getAddress()
-
-        const request = await sepoliaChain.sendMessage({
-          router: SEPOLIA_ROUTER,
-          destChainSelector: APTOS_TESTNET_SELECTOR,
-          message: { receiver: walletAddress, data: '0xdead', extraArgs: { gasLimit: 0n } },
-          wallet,
-        })
-
-        assert.ok(request.message.messageId, 'messageId should be defined')
-        assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
-        assert.equal(request.lane.sourceChainSelector, SEPOLIA_SELECTOR)
-        assert.equal(request.lane.destChainSelector, APTOS_TESTNET_SELECTOR)
-        assert.ok(request.tx.hash, 'tx hash should be defined')
-
-        // Verify the v1.6 CCIPMessageSent event was emitted
-        assert.ok(request.log, 'request should contain the event log')
-        assert.equal(request.log.topics[0], CCIP_MESSAGE_SENT_TOPIC, 'should be CCIPMessageSent')
-        assert.ok(request.log.address, 'log should have the onRamp address')
-        assert.equal(request.log.transactionHash, request.tx.hash, 'log tx hash should match')
-        assert.ok(
-          String(request.message.data).includes('dead'),
-          'message data should contain sent payload',
-        )
-      },
-    )
-
-    it(
-      'should send v1.6 token transfer with extraArgs (Sepolia -> Aptos)',
-      { timeout: 60_000 },
-      async () => {
-        assert.ok(sepoliaChain, 'chain should be initialized')
-        const provider = wallet.provider as JsonRpcProvider
-        const walletAddress = await wallet.getAddress()
-
-        const amount = parseUnits('0.1', 18)
-        const token = await firstSendableAptosToken(walletAddress, amount)
-        await setERC20Balance(provider, token, walletAddress, amount)
-
-        const request = await sepoliaChain.sendMessage({
-          router: SEPOLIA_ROUTER,
-          destChainSelector: APTOS_TESTNET_SELECTOR,
-          message: {
-            receiver: walletAddress,
-            data: '0xcafe',
-            tokenAmounts: [{ token, amount }],
-            extraArgs: { gasLimit: 0n, allowOutOfOrderExecution: true },
-          },
-          wallet,
-        })
-
-        // Event log assertions
-        assert.ok(request.log, 'request should contain the event log')
-        assert.equal(request.log.topics[0], CCIP_MESSAGE_SENT_TOPIC, 'should be CCIPMessageSent')
-        assert.equal(request.log.transactionHash, request.tx.hash, 'log tx hash should match')
-
-        // Message assertions
-        assert.ok(request.message.messageId, 'messageId should be defined')
-        assert.match(request.message.messageId, /^0x[0-9a-f]{64}$/i)
-        assert.ok(
-          String(request.message.data).includes('cafe'),
-          'message data should contain sent payload',
-        )
-        assert.ok(request.message.feeToken, 'feeToken should be defined')
-
-        // ExtraArgs assertions (decoded from extraArgs bytes in v1.6 event)
-        const msg = request.message as Record<string, unknown>
-        assert.equal(msg.gasLimit, 0n, 'gasLimit should round-trip as 0')
-        assert.equal(
-          msg.allowOutOfOrderExecution,
-          true,
-          'allowOutOfOrderExecution should round-trip as true',
-        )
-
-        // Token transfer assertions
-        const tokenAmounts = request.message.tokenAmounts as unknown as Record<string, unknown>[]
-        assert.equal(tokenAmounts.length, 1, 'should have one token transfer')
-        assert.equal(
-          (tokenAmounts[0] as { amount: bigint }).amount,
-          amount,
-          'token amount should round-trip',
-        )
-        assert.ok(tokenAmounts[0]!.sourcePoolAddress, 'v1.6 should have sourcePoolAddress')
-        assert.ok(tokenAmounts[0]!.destTokenAddress, 'v1.6 should have destTokenAddress')
-      },
-    )
   })
 
   describe('execute', () => {
     const stagingApi = new CCIPAPIClient(STAGING_API_URL, { logger: testLogger })
 
     // Fixture candidates: each pin first, then the lane's newest failed messages to
-    // the same receiver (see exec-fixtures.test.helpers.ts). Every test tries them in
-    // order; the shared `usedIds` keeps a message one test executed (or found
-    // unusable) away from the next.
-    let execFixtures: ExecFixture[] // Solana-devnet -> Sepolia v1.6, manual path
-    let execInputFixtures: ExecFixture[] // second Solana-devnet -> Sepolia v1.6
-    let v2ApiFixtures: ExecFixture[] // Arb-Sep -> Fuji v2.0, API-driven
-    let v1_5ApiFixtures: ExecFixture[] // Sepolia -> Fuji v1.5, API-driven
-    let solanaApiFixtures: ExecFixture[] // Solana-devnet -> Sepolia v1.6, API-driven
+    // the same receiver (see exec-fixtures.test.helpers.ts). Keep the historical
+    // versions for execution: a lane upgrade does not change the OffRamp or the
+    // execution input of an existing message. `usedIds` is shared by the three groups
+    // below, so a message one test executed (or found unusable) is not tried again.
     const usedIds = new Set<string>()
+    // Every API client in this block is the explicit staging client; the SDK's default
+    // prod client is never used, so none of these groups needs the `api` lock.
 
-    before(async () => {
-      // The manual-path tests target the ACTIVE solana-devnet → sepolia v1.6 lane:
-      // every EVM→EVM pre-2.0 lane is retired (months-old failed traffic, mostly
-      // poison on re-execution, needs archive RPCs). The API-driven tests keep
-      // their lanes.
-      ;[execFixtures, execInputFixtures, v2ApiFixtures, v1_5ApiFixtures, solanaApiFixtures] =
-        await Promise.all([
-          rankExecFixtures({
-            api: stagingApi,
-            pinned: { messageId: MESSAGE_ID, txHash: SOURCE_TX_HASH },
-            version: CCIPVersion.V1_6,
-            sourceSelector: SOLANA_DEVNET_SELECTOR,
-            destSelector: SEPOLIA_SELECTOR,
-          }),
-          rankExecFixtures({
-            api: stagingApi,
-            pinned: SOLANA_DEVNET_EXEC_INPUT_TEST_MSG,
-            version: CCIPVersion.V1_6,
-            sourceSelector: SOLANA_DEVNET_SELECTOR,
-            destSelector: SEPOLIA_SELECTOR,
-          }),
+    describe('direct Solana proofs (Solana devnet -> Sepolia)', () => {
+      // Acquire the complete source/destination set atomically. Release it before
+      // execution, then take only Sepolia: no lock is held while waiting for another.
+      let directResources: ResourceHandle | undefined
+      const acquireDirectResources = async () => {
+        directResources ??= await useResource(['sepolia', 'solana-devnet', 'api-staging'])
+      }
+      const releaseDirectResources = async () => {
+        const resources = directResources
+        directResources = undefined
+        await resources?.release()
+      }
+      const executeOnSepolia = async (
+        opts: Parameters<EVMChain['execute']>[0],
+      ): ReturnType<EVMChain['execute']> => {
+        await releaseDirectResources()
+        const sepoliaResource = await useResource(['sepolia'])
+        try {
+          assert.ok(sepoliaChain, 'dest chain should be initialized')
+          return await sepoliaChain.execute(opts)
+        } finally {
+          await sepoliaResource.release()
+        }
+      }
+
+      let execFixtures: ExecFixture[] // Solana-devnet -> Sepolia v1.6, manual path
+      let execInputFixtures: ExecFixture[] // second Solana-devnet -> Sepolia v1.6
+      let solanaSourceChain: SolanaChain | undefined
+
+      before(async () => {
+        await acquireDirectResources()
+        // Rank first: the devnet probe below uses the ranked transactions, not only the
+        // pin, whose tx a public endpoint may already have pruned.
+        const [ranked] = await Promise.all([
+          Promise.all([
+            rankExecFixtures({
+              api: stagingApi,
+              pinned: SOLANA_DEVNET_EXEC_TEST_MSG,
+              version: CCIPVersion.V1_6,
+              sourceSelector: SOLANA_DEVNET_SELECTOR,
+              destSelector: SEPOLIA_SELECTOR,
+            }),
+            rankExecFixtures({
+              api: stagingApi,
+              pinned: SOLANA_DEVNET_EXEC_INPUT_TEST_MSG,
+              version: CCIPVersion.V1_6,
+              sourceSelector: SOLANA_DEVNET_SELECTOR,
+              destSelector: SEPOLIA_SELECTOR,
+            }),
+          ]),
+          ensureSepoliaFork(),
+        ])
+        ;[execFixtures, execInputFixtures] = ranked
+
+        // Probe the first few distinct ranked txs; keep the pin as a fallback.
+        const probeTxHashes = [
+          ...new Set(
+            [...execFixtures, ...execInputFixtures]
+              .map((fixture) => fixture.txHash)
+              .filter((txHash): txHash is string => !!txHash),
+          ),
+        ].slice(0, 3)
+        const solanaRpc = await raceRpcEndpoint(
+          'RPC_SOLANA_DEVNET',
+          (url) =>
+            solanaDevnetHealthy(
+              url,
+              probeTxHashes.length > 0 ? probeTxHashes : [SOLANA_DEVNET_EXEC_TEST_MSG.txHash],
+            ),
+          { ordered: true },
+        )
+        solanaSourceChain = new SolanaChain(
+          new Connection(solanaRpc, { commitment: 'confirmed' }),
+          networkInfo('solana-devnet'),
+          { apiClient: null, logger: testLogger },
+        )
+      })
+      beforeEach(acquireDirectResources)
+      after(releaseDirectResources)
+
+      it(
+        'should manually execute a failed v1.6 message (Solana -> Sepolia)',
+        { timeout: 120_000 },
+        async () => {
+          await tryExecFixtures(execFixtures, usedIds, async (fixture) => {
+            // A transient execution retry has released the source locks; reacquire them.
+            await acquireDirectResources()
+            assert.ok(solanaSourceChain, 'source chain should be initialized')
+            assert.ok(sepoliaChain, 'dest chain should be initialized')
+            assert.ok(fixture.txHash, 'fixture should include the source transaction')
+            // 1. Get source transaction and extract CCIPRequest (direct solana
+            // devnet reads — no fork relay, full history)
+            const tx = await solanaSourceChain.getTransaction(fixture.txHash)
+            const requests: CCIPRequest[] = await solanaSourceChain.getMessagesInTx(tx)
+            const request = requests.find((r) => r.message.messageId === fixture.messageId)
+            assert.ok(request, 'should find the expected message')
+
+            // 2. Use the API's OffRamp hint; discover it live if the API omits it.
+            const offRamp: string =
+              fixture.offRamp ??
+              (await discoverOffRamp(
+                solanaSourceChain,
+                sepoliaChain,
+                request.lane,
+                solanaSourceChain,
+              ))
+            assert.ok(offRamp, 'offRamp should be resolved')
+
+            // 3. Get commit store and commit report
+            const verifications: Awaited<ReturnType<Chain['getVerifications']>> =
+              await sepoliaChain.getVerifications({ offRamp, request })
+            assert.ok('report' in verifications, 'commit should have a merkle root')
+            assert.ok(verifications.report.merkleRoot, 'commit should have a merkle root')
+
+            // 4. Get all messages in the commit batch from source
+            const messagesInBatch = await solanaSourceChain.getMessagesInBatch(
+              request,
+              verifications.report,
+            )
+
+            // 5. Calculate manual execution proof
+            const execReportProof = calculateManualExecProof(
+              messagesInBatch,
+              request.lane,
+              request.message.messageId,
+              verifications.report.merkleRoot,
+              solanaSourceChain,
+            )
+
+            // 6. Get offchain token data
+            const offchainTokenData = await solanaSourceChain.getOffchainTokenData(request)
+
+            // 7. Build execution report and execute
+            const input = {
+              ...execReportProof,
+              message: request.message,
+              offchainTokenData,
+            } as ExecutionInput
+            const execution = await executeOnSepolia({
+              offRamp,
+              input,
+              wallet,
+              gasLimit: 500_000,
+            })
+
+            assert.equal(
+              execution.receipt.messageId,
+              fixture.messageId,
+              'receipt messageId should match',
+            )
+            assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
+            assert.ok(
+              execution.log.blockTimestamp > 0,
+              'execution should have a positive timestamp',
+            )
+            assert.ok(
+              execution.receipt.state === ExecutionState.Success,
+              'execution state should be Success',
+            )
+          })
+        },
+      )
+
+      it(
+        'should execute via getExecutionInput (Solana -> Sepolia)',
+        { timeout: 120_000 },
+        async () => {
+          await tryExecFixtures(execInputFixtures, usedIds, async (fixture) => {
+            await acquireDirectResources()
+            assert.ok(solanaSourceChain, 'source chain should be initialized')
+            assert.ok(sepoliaChain, 'dest chain should be initialized')
+            assert.ok(fixture.txHash, 'fixture should include the source transaction')
+            // 1. Get source transaction and extract CCIPRequest (direct solana devnet
+            // reads — no fork relay, full history)
+            const tx = await solanaSourceChain.getTransaction(fixture.txHash)
+            const requests: CCIPRequest[] = await solanaSourceChain.getMessagesInTx(tx)
+            const request = requests.find((r) => r.message.messageId === fixture.messageId)
+            assert.ok(request, 'should find the expected message')
+
+            // 2. Use the API's OffRamp hint; discover it live if the API omits it.
+            const offRamp: string =
+              fixture.offRamp ??
+              (await discoverOffRamp(
+                solanaSourceChain,
+                sepoliaChain,
+                request.lane,
+                solanaSourceChain,
+              ))
+            assert.ok(offRamp, 'offRamp should be resolved')
+
+            // 3. Get verifications from destination chain
+            const verifications: Awaited<ReturnType<Chain['getVerifications']>> =
+              await sepoliaChain.getVerifications({ offRamp, request })
+
+            // 4. Build execution input via getExecutionInput (replaces manual proof +
+            // offchain steps)
+            const input = await solanaSourceChain.getExecutionInput({ request, verifications })
+
+            // 5. Execute on destination
+            const execution = await executeOnSepolia({
+              offRamp,
+              input,
+              wallet,
+              gasLimit: 500_000,
+            })
+
+            console.log(
+              `  executed ${fixture.messageId.slice(0, 10)}… → state=${execution.receipt.state}`,
+            )
+            assert.equal(
+              execution.receipt.messageId,
+              fixture.messageId,
+              'receipt messageId should match',
+            )
+            assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
+            assert.ok(
+              execution.log.blockTimestamp > 0,
+              'execution should have a positive timestamp',
+            )
+            assert.ok(
+              execution.receipt.state === ExecutionState.Success,
+              'execution state should be Success',
+            )
+          })
+        },
+      )
+    })
+
+    describe('API-driven execution on Fuji (Arb-Sep / Sepolia sources)', () => {
+      // Fuji fork and staging API. No Sepolia lock: this group only executes on Fuji.
+      useResourceForDescribe(['fuji', 'api-staging'])
+
+      let v2ApiFixtures: ExecFixture[] // Arb-Sep -> Fuji v2.0, API-driven
+      let v1_5ApiFixtures: ExecFixture[] // Sepolia -> Fuji v1.5, API-driven
+      let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
+
+      before(async () => {
+        ;[v2ApiFixtures, v1_5ApiFixtures] = await Promise.all([
           rankExecFixtures({
             api: stagingApi,
             pinned: V2_API_EXEC_MSG,
@@ -529,6 +571,139 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
             sourceSelector: SEPOLIA_SELECTOR,
             destSelector: FUJI_SELECTOR,
           }),
+        ])
+
+        // The official Fuji RPC fallback (api.avax-test.network) sits behind Cloudflare, which answers
+        // bursty fork traffic with hard 1015 bans that outlast anvil's retries — reproduced
+        // locally as fork transport errors and empty-revert "missing revert data" call
+        // failures (the same signatures as CI run 39058311489). Bound the fork's upstream
+        // request rate: CUPS paces by per-request compute-unit weights (common reads cost
+        // ~17-42 CU, so 100 CUPS ≈ low single-digit requests/s), only the API-driven execute
+        // tests hit this fork, and the retained retry opts ride out the occasional blip.
+        const fujiForkOpts = { ...forkOpts, computeUnitsPerSecond: 100 } as const
+        // A fork reads state lazily for the whole suite: probe an OffRamp 1000 blocks
+        // back, which covers the 600s budget (~410 blocks) plus 256 blockhash ancestors.
+        const fujiRpc = await raceRpcEndpoint(
+          'RPC_FUJI',
+          async (url) => {
+            const chain = await EVMChain.fromUrl(url, {
+              apiClient: null,
+              abort: AbortSignal.timeout(10_000),
+            })
+            try {
+              return (
+                (await chain.provider.getCode(
+                  V1_5_API_EXEC_MSG.offRamp,
+                  (await chain.provider.getBlockNumber()) - 1000,
+                )) !== '0x'
+              )
+            } finally {
+              chain.destroy()
+            }
+          },
+          { ordered: true },
+        )
+        fujiInstance = Instance.anvil(
+          { forkUrl: fujiRpc, chainId: FUJI_CHAIN_ID, port: 8645, ...fujiForkOpts },
+          {},
+        )
+        await startForkWithRetries(fujiInstance)
+      })
+
+      after(async () => {
+        await fujiInstance?.stop()
+      })
+
+      it(
+        'should execute a v2.0 message via API-driven path (Arb-Sep -> Fuji)',
+        { timeout: 120_000 },
+        async () => {
+          assert.ok(fujiInstance, 'fuji anvil should be running')
+
+          // Create a fuji chain with staging API client (execution-inputs endpoint)
+          const fujiProvider = await forkProvider(fujiInstance, { logger: testLogger })
+          const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
+            apiClient: stagingApi,
+            logger: testLogger,
+          })
+          const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
+
+          try {
+            await tryExecFixtures(v2ApiFixtures, usedIds, async (fixture) => {
+              // Execute via messageId only — triggers API-driven path
+              const execution = await fujiWithApi.execute({
+                messageId: fixture.messageId,
+                wallet: w,
+                gasLimit: 500_000,
+              })
+
+              console.log(
+                `  executed ${fixture.messageId.slice(0, 10)}… via API → state=${execution.receipt.state}`,
+              )
+              assert.equal(
+                execution.receipt.messageId,
+                fixture.messageId,
+                'receipt messageId should match',
+              )
+              assert.ok(execution.log.transactionHash, 'should have tx hash')
+              assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+              assert.equal(execution.receipt.state, ExecutionState.Success)
+            })
+          } finally {
+            fujiWithApi.provider.destroy()
+          }
+        },
+      )
+
+      it(
+        'should execute a v1.5 message via API-driven path (Sepolia -> Fuji)',
+        { timeout: 120_000 },
+        async () => {
+          assert.ok(fujiInstance, 'fuji anvil should be running')
+
+          const fujiProvider = await forkProvider(fujiInstance, { logger: testLogger })
+          const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
+            apiClient: stagingApi,
+            logger: testLogger,
+          })
+          const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
+
+          try {
+            await tryExecFixtures(v1_5ApiFixtures, usedIds, async (fixture) => {
+              const execution = await fujiWithApi.execute({
+                messageId: fixture.messageId,
+                wallet: w,
+                gasLimit: 500_000,
+              })
+
+              console.log(
+                `  executed ${fixture.messageId.slice(0, 10)}… via API (v1.5 Sepolia→Fuji) → state=${execution.receipt.state}`,
+              )
+              assert.equal(
+                execution.receipt.messageId,
+                fixture.messageId,
+                'receipt messageId should match',
+              )
+              assert.ok(execution.log.transactionHash, 'should have tx hash')
+              assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+              assert.equal(execution.receipt.state, ExecutionState.Success)
+            })
+          } finally {
+            fujiWithApi.provider.destroy()
+          }
+        },
+      )
+    })
+
+    describe('API-driven execution on Sepolia (TON / Solana sources)', () => {
+      // Sepolia fork and staging API. The source data comes from the API, so this group
+      // does not need the Solana devnet lock.
+      useResourceForDescribe(['sepolia', 'api-staging'])
+
+      let solanaApiFixtures: ExecFixture[] // Solana-devnet -> Sepolia v1.6, API-driven
+
+      before(async () => {
+        const [ranked] = await Promise.all([
           rankExecFixtures({
             api: stagingApi,
             pinned: SOLANA_DEVNET_TO_SEPOLIA[0]!,
@@ -536,351 +711,137 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
             sourceSelector: SOLANA_DEVNET_SELECTOR,
             destSelector: SEPOLIA_SELECTOR,
           }),
+          ensureSepoliaFork(),
         ])
-    })
+        solanaApiFixtures = ranked
+      })
 
-    it(
-      'should manually execute a failed v1.6 message (Solana -> Sepolia)',
-      { timeout: 120_000 },
-      async () => {
-        await tryExecFixtures(execFixtures, usedIds, async (fixture) => {
-          assert.ok(solanaSourceChain, 'source chain should be initialized')
-          assert.ok(sepoliaChain, 'dest chain should be initialized')
-          assert.ok(fixture.txHash, 'fixture should include the source transaction')
-          // 1. Get source transaction and extract CCIPRequest (direct solana
-          // devnet reads — no fork relay, full history)
-          const tx = await solanaSourceChain.getTransaction(fixture.txHash)
-          const requests: CCIPRequest[] = await solanaSourceChain.getMessagesInTx(tx)
-          const request = requests.find((r) => r.message.messageId === fixture.messageId)
-          assert.ok(request, 'should find the expected message')
+      // TON-source messages were historically problematic due to data quality issues
+      // on AtlasDB. This test verifies the API workaround that resolves the issue.
+      it(
+        'should execute a TON-source message via API-driven path (TON -> Sepolia)',
+        { timeout: 120_000 },
+        async () => {
+          assert.ok(sepoliaInstance, 'sepolia anvil should be running')
 
-          // 2. Discover OffRamp on destination chain
-          const offRamp: string = await discoverOffRamp(
-            solanaSourceChain,
-            sepoliaChain,
-            request.lane,
-            solanaSourceChain,
-          )
-          assert.ok(offRamp, 'offRamp should be discovered')
+          const messageId = '0xe913d21d8bc14316286646539db34bc7dd14b11c6ae3b0c307e7e52f6af02805'
 
-          // 3. Get commit store and commit report
-          const verifications: Awaited<ReturnType<Chain['getVerifications']>> =
-            await sepoliaChain.getVerifications({ offRamp, request })
-          assert.ok('report' in verifications, 'commit should have a merkle root')
-          assert.ok(verifications.report.merkleRoot, 'commit should have a merkle root')
-
-          // 4. Get all messages in the commit batch from source
-          const messagesInBatch = await solanaSourceChain.getMessagesInBatch(
-            request,
-            verifications.report,
-          )
-
-          // 5. Calculate manual execution proof
-          const execReportProof = calculateManualExecProof(
-            messagesInBatch,
-            request.lane,
-            request.message.messageId,
-            verifications.report.merkleRoot,
-            solanaSourceChain,
-          )
-
-          // 6. Get offchain token data
-          const offchainTokenData = await solanaSourceChain.getOffchainTokenData(request)
-
-          // 7. Build execution report and execute
-          const input = {
-            ...execReportProof,
-            message: request.message,
-            offchainTokenData,
-          } as ExecutionInput
-          const execution = await sepoliaChain.execute({
-            offRamp,
-            input,
-            wallet,
-            gasLimit: 500_000,
+          const sepoliaProvider = await forkProvider(sepoliaInstance, { logger: testLogger })
+          const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+            apiClient: stagingApi,
+            logger: testLogger,
           })
+          const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
 
-          assert.equal(
-            execution.receipt.messageId,
-            fixture.messageId,
-            'receipt messageId should match',
-          )
-          assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
-          assert.ok(execution.log.blockTimestamp > 0, 'execution should have a positive timestamp')
-          assert.ok(
-            execution.receipt.state === ExecutionState.Success,
-            'execution state should be Success',
-          )
-        })
-      },
-    )
-
-    it(
-      'should execute via getExecutionInput (Solana -> Sepolia)',
-      { timeout: 120_000 },
-      async () => {
-        await tryExecFixtures(execInputFixtures, usedIds, async (fixture) => {
-          assert.ok(solanaSourceChain, 'source chain should be initialized')
-          assert.ok(sepoliaChain, 'dest chain should be initialized')
-          assert.ok(fixture.txHash, 'fixture should include the source transaction')
-          // 1. Get source transaction and extract CCIPRequest (direct solana devnet
-          // reads — no fork relay, full history)
-          const tx = await solanaSourceChain.getTransaction(fixture.txHash)
-          const requests: CCIPRequest[] = await solanaSourceChain.getMessagesInTx(tx)
-          const request = requests.find((r) => r.message.messageId === fixture.messageId)
-          assert.ok(request, 'should find the expected message')
-
-          // 2. Discover OffRamp on destination chain
-          const offRamp: string = await discoverOffRamp(
-            solanaSourceChain,
-            sepoliaChain,
-            request.lane,
-            solanaSourceChain,
-          )
-          assert.ok(offRamp, 'offRamp should be discovered')
-
-          // 3. Get verifications from destination chain
-          const verifications: Awaited<ReturnType<Chain['getVerifications']>> =
-            await sepoliaChain.getVerifications({ offRamp, request })
-
-          // 4. Build execution input via getExecutionInput (replaces manual proof +
-          // offchain steps)
-          const input = await solanaSourceChain.getExecutionInput({ request, verifications })
-
-          // 5. Execute on destination
-          const execution = await sepoliaChain.execute({
-            offRamp,
-            input,
-            wallet,
+          // Execute via messageId only — triggers API-driven path
+          const execution = await sepoliaWithApi.execute({
+            messageId,
+            wallet: w,
             gasLimit: 500_000,
           })
 
           console.log(
-            `  executed ${fixture.messageId.slice(0, 10)}… → state=${execution.receipt.state}`,
+            `  executed ${messageId.slice(0, 10)}… via API (TON source) → state=${execution.receipt.state}`,
           )
-          assert.equal(
-            execution.receipt.messageId,
-            fixture.messageId,
-            'receipt messageId should match',
-          )
-          assert.ok(execution.log.transactionHash, 'execution log should have a transaction hash')
-          assert.ok(execution.log.blockTimestamp > 0, 'execution should have a positive timestamp')
-          assert.ok(
-            execution.receipt.state === ExecutionState.Success,
-            'execution state should be Success',
-          )
-        })
-      },
-    )
+          assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
+          assert.ok(execution.log.transactionHash, 'should have tx hash')
+          assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+          assert.equal(execution.receipt.state, ExecutionState.Success)
 
-    it(
-      'should execute a v2.0 message via API-driven path (Arb-Sep -> Fuji)',
-      { timeout: 120_000 },
-      async () => {
-        assert.ok(fujiInstance, 'fuji anvil should be running')
-
-        // Create a fuji chain with staging API client (execution-inputs endpoint)
-        const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
-        const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
-          apiClient: stagingApi,
-          logger: testLogger,
-        })
-        const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
-
-        try {
-          await tryExecFixtures(v2ApiFixtures, usedIds, async (fixture) => {
-            // Execute via messageId only — triggers API-driven path
-            const execution = await fujiWithApi.execute({
-              messageId: fixture.messageId,
-              wallet: w,
-              gasLimit: 500_000,
-            })
-
-            console.log(
-              `  executed ${fixture.messageId.slice(0, 10)}… via API → state=${execution.receipt.state}`,
-            )
-            assert.equal(
-              execution.receipt.messageId,
-              fixture.messageId,
-              'receipt messageId should match',
-            )
-            assert.ok(execution.log.transactionHash, 'should have tx hash')
-            assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-            assert.equal(execution.receipt.state, ExecutionState.Success)
-          })
-        } finally {
-          fujiWithApi.provider.destroy()
-        }
-      },
-    )
-
-    it(
-      'should execute a v1.5 message via API-driven path (Sepolia -> Fuji)',
-      { timeout: 120_000 },
-      async () => {
-        assert.ok(fujiInstance, 'fuji anvil should be running')
-
-        const fujiProvider = new JsonRpcProvider(`http://${fujiInstance.host}:${fujiInstance.port}`)
-        const fujiWithApi = await EVMChain.fromProvider(fujiProvider, {
-          apiClient: stagingApi,
-          logger: testLogger,
-        })
-        const w = new Wallet(ANVIL_PRIVATE_KEY, fujiProvider)
-
-        try {
-          await tryExecFixtures(v1_5ApiFixtures, usedIds, async (fixture) => {
-            const execution = await fujiWithApi.execute({
-              messageId: fixture.messageId,
-              wallet: w,
-              gasLimit: 500_000,
-            })
-
-            console.log(
-              `  executed ${fixture.messageId.slice(0, 10)}… via API (v1.5 Sepolia→Fuji) → state=${execution.receipt.state}`,
-            )
-            assert.equal(
-              execution.receipt.messageId,
-              fixture.messageId,
-              'receipt messageId should match',
-            )
-            assert.ok(execution.log.transactionHash, 'should have tx hash')
-            assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-            assert.equal(execution.receipt.state, ExecutionState.Success)
-          })
-        } finally {
-          fujiWithApi.provider.destroy()
-        }
-      },
-    )
-
-    // TON-source messages were historically problematic due to data quality issues
-    // on AtlasDB. This test verifies the API workaround that resolves the issue.
-    it(
-      'should execute a TON-source message via API-driven path (TON -> Sepolia)',
-      { timeout: 120_000 },
-      async () => {
-        assert.ok(sepoliaInstance, 'sepolia anvil should be running')
-
-        const messageId = '0xe913d21d8bc14316286646539db34bc7dd14b11c6ae3b0c307e7e52f6af02805'
-
-        const sepoliaProvider = new JsonRpcProvider(
-          `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-        )
-        const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
-          apiClient: stagingApi,
-          logger: testLogger,
-        })
-        const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
-
-        // Execute via messageId only — triggers API-driven path
-        const execution = await sepoliaWithApi.execute({
-          messageId,
-          wallet: w,
-          gasLimit: 500_000,
-        })
-
-        console.log(
-          `  executed ${messageId.slice(0, 10)}… via API (TON source) → state=${execution.receipt.state}`,
-        )
-        assert.equal(execution.receipt.messageId, messageId, 'receipt messageId should match')
-        assert.ok(execution.log.transactionHash, 'should have tx hash')
-        assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-        assert.equal(execution.receipt.state, ExecutionState.Success)
-
-        sepoliaWithApi.provider.destroy()
-      },
-    )
-
-    // Another problematic TON-source message with gasLimit=1 and data payload.
-    // Validates the API-driven manual execution path for TON → Sepolia.
-    it(
-      'should execute a problematic TON-source message via API-driven path (TON -> Sepolia, gasLimit=1)',
-      { timeout: 120_000 },
-      async () => {
-        assert.ok(sepoliaInstance, 'sepolia anvil should be running')
-
-        const msg = TON_TO_SEPOLIA[0]!
-
-        const sepoliaProvider = new JsonRpcProvider(
-          `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-        )
-        const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
-          apiClient: stagingApi,
-          logger: testLogger,
-        })
-        const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
-
-        const execution = await sepoliaWithApi.execute({
-          messageId: msg.messageId,
-          wallet: w,
-          gasLimit: 500_000,
-        })
-
-        console.log(
-          `  executed ${msg.messageId.slice(0, 10)}… via API (TON source, gasLimit=1) → state=${execution.receipt.state}`,
-        )
-        assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
-        assert.ok(execution.log.transactionHash, 'should have tx hash')
-        assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-        assert.equal(execution.receipt.state, ExecutionState.Success)
-
-        sepoliaWithApi.provider.destroy()
-      },
-    )
-
-    // Solana Devnet → Sepolia messages through the API-driven manual-exec path.
-    // - The pin's lane.version was once reported as "1.6.2"; the CCIPVersion enum only
-    //   knows "1.6.0", so the SDK must normalize patch-level versions (e.g. for the leaf
-    //   hasher in calculateManualExecProof).
-    // - Its router (Ccip842…, also the pin's onRamp) is a ccip-router 2.0.0 that keeps
-    //   serving 1.6 lanes. From 2026-11-05 to 2026-11-09 the API reported "2.0.0" for
-    //   these 1.6 messages and answered HTTP 500 on execution-inputs. rankExecFixtures
-    //   keeps only messages the API reports as v1.6, so a repeat of that regression
-    //   shows as "0 ranked", not as an HTTP 500.
-    // The pin goes first, then the lane's newest failed messages (shared `usedIds`).
-    it(
-      'should execute a Solana-source message via API-driven path (Solana Devnet -> Sepolia)',
-      { timeout: 120_000 },
-      async () => {
-        assert.ok(sepoliaInstance, 'sepolia anvil should be running')
-
-        const sepoliaProvider = new JsonRpcProvider(
-          `http://${sepoliaInstance.host}:${sepoliaInstance.port}`,
-        )
-        const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
-          apiClient: stagingApi,
-          logger: testLogger,
-        })
-        const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
-
-        try {
-          await tryExecFixtures(solanaApiFixtures, usedIds, async (fixture) => {
-            const execution = await sepoliaWithApi.execute({
-              messageId: fixture.messageId,
-              wallet: w,
-              gasLimit: 500_000,
-            })
-
-            console.log(
-              `  executed ${fixture.messageId.slice(0, 10)}… via API (Solana source) → state=${execution.receipt.state}`,
-            )
-            assert.equal(
-              execution.receipt.messageId,
-              fixture.messageId,
-              'receipt messageId should match',
-            )
-            assert.ok(execution.log.transactionHash, 'should have tx hash')
-            assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
-            assert.equal(execution.receipt.state, ExecutionState.Success)
-          })
-        } finally {
           sepoliaWithApi.provider.destroy()
-        }
-      },
-    )
+        },
+      )
+
+      // Another problematic TON-source message with gasLimit=1 and data payload.
+      // Validates the API-driven manual execution path for TON → Sepolia.
+      it(
+        'should execute a problematic TON-source message via API-driven path (TON -> Sepolia, gasLimit=1)',
+        { timeout: 120_000 },
+        async () => {
+          assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+
+          const msg = TON_TO_SEPOLIA[0]!
+
+          const sepoliaProvider = await forkProvider(sepoliaInstance, { logger: testLogger })
+          const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+            apiClient: stagingApi,
+            logger: testLogger,
+          })
+          const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+
+          const execution = await sepoliaWithApi.execute({
+            messageId: msg.messageId,
+            wallet: w,
+            gasLimit: 500_000,
+          })
+
+          console.log(
+            `  executed ${msg.messageId.slice(0, 10)}… via API (TON source, gasLimit=1) → state=${execution.receipt.state}`,
+          )
+          assert.equal(execution.receipt.messageId, msg.messageId, 'receipt messageId should match')
+          assert.ok(execution.log.transactionHash, 'should have tx hash')
+          assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+          assert.equal(execution.receipt.state, ExecutionState.Success)
+
+          sepoliaWithApi.provider.destroy()
+        },
+      )
+
+      // Solana Devnet → Sepolia messages through the API-driven manual-exec path.
+      // - The pin's lane.version was once reported as "1.6.2"; the CCIPVersion enum only
+      //   knows "1.6.0", so the SDK must normalize patch-level versions (e.g. for the leaf
+      //   hasher in calculateManualExecProof).
+      // - Its router (Ccip842…, also the pin's onRamp) is a ccip-router 2.0.0 that keeps
+      //   serving 1.6 lanes. From 2026-11-05 to 2026-11-09 the API reported "2.0.0" for
+      //   these 1.6 messages and answered HTTP 500 on execution-inputs. rankExecFixtures
+      //   keeps only messages the API reports as v1.6, so a repeat of that regression
+      //   shows as "0 ranked", not as an HTTP 500.
+      // The pin goes first, then the lane's newest failed messages (shared `usedIds`).
+      it(
+        'should execute a Solana-source message via API-driven path (Solana Devnet -> Sepolia)',
+        { timeout: 120_000 },
+        async () => {
+          assert.ok(sepoliaInstance, 'sepolia anvil should be running')
+
+          const sepoliaProvider = await forkProvider(sepoliaInstance, { logger: testLogger })
+          const sepoliaWithApi = await EVMChain.fromProvider(sepoliaProvider, {
+            apiClient: stagingApi,
+            logger: testLogger,
+          })
+          const w = new Wallet(ANVIL_PRIVATE_KEY, sepoliaProvider)
+
+          try {
+            await tryExecFixtures(solanaApiFixtures, usedIds, async (fixture) => {
+              const execution = await sepoliaWithApi.execute({
+                messageId: fixture.messageId,
+                wallet: w,
+                gasLimit: 500_000,
+              })
+
+              console.log(
+                `  executed ${fixture.messageId.slice(0, 10)}… via API (Solana source) → state=${execution.receipt.state}`,
+              )
+              assert.equal(
+                execution.receipt.messageId,
+                fixture.messageId,
+                'receipt messageId should match',
+              )
+              assert.ok(execution.log.transactionHash, 'should have tx hash')
+              assert.ok(execution.log.blockTimestamp > 0, 'should have timestamp')
+              assert.equal(execution.receipt.state, ExecutionState.Success)
+            })
+          } finally {
+            sepoliaWithApi.provider.destroy()
+          }
+        },
+      )
+    })
   })
 
   describe('ViemTransportProvider — revert data forwarding', () => {
+    useResourceForDescribe(['sepolia'])
+    before(ensureSepoliaFork)
+
     // Triggers a real pool-capacity revert through the viem adapter and asserts the
     // SDK's error-decoding machinery recovers the custom error name + args.
     // Pre-fix (before Patch B): `ViemTransportProvider._send` drops viem's error.data;
@@ -916,7 +877,7 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
 
     it(
       'decodes TokenMaxCapacityExceeded custom error on pool-capacity revert',
-      { timeout: 60_000 },
+      { timeout: 120_000 },
       async () => {
         assert.ok(sepoliaInstance, 'sepolia anvil should be running')
         const anvilUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
@@ -981,10 +942,9 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
     // functional parity with the ethers-direct baseline.
     it(
       'produces equivalent decoded output on ethers-direct path',
-      { timeout: 60_000 },
+      { timeout: 120_000 },
       async () => {
         assert.ok(sepoliaInstance, 'sepolia anvil should be running')
-        const anvilUrl = `http://${sepoliaInstance.host}:${sepoliaInstance.port}`
         const walletAddress = await wallet.getAddress()
 
         const oversizedAmount = await overCapacityAmount()
@@ -992,7 +952,8 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
         await setERC20Balance(ethersProvider, FTF_TOKEN_SEPOLIA, walletAddress, oversizedAmount)
 
         // Dedicated EVMChain for this test (see describe-block preamble).
-        const ethersChainLocal = await EVMChain.fromProvider(new JsonRpcProvider(anvilUrl), {
+        const provider = await forkProvider(sepoliaInstance, { logger: testLogger })
+        const ethersChainLocal = await EVMChain.fromProvider(provider, {
           apiClient: null,
           logger: testLogger,
         })

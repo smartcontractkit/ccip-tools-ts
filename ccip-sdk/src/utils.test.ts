@@ -10,6 +10,7 @@ import { AbiCoder, dataLength } from 'ethers'
 import { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
 import { networkInfo } from './networks.ts'
+import { CCIPVersion } from './types.ts'
 import {
   blockRangeGenerator,
   convertKeysToCamelCase,
@@ -26,6 +27,7 @@ import {
   jsonStringify,
   leToBigInt,
   linkAbortSignals,
+  memoizeBlockInfo,
   parseTypeAndVersion,
   passesTypeAndVersion,
   scaleDecimals,
@@ -35,7 +37,7 @@ import {
   toUIAmount,
   withRetry,
 } from './utils.ts'
-import { type Logger, ChainFamily } from './index.ts'
+import { type Logger, ChainFamily, encodeAddressToAny, isCantonPartyId } from './index.ts'
 
 describe('getBlockNumberAtOrAfter', () => {
   /** Regular chain: ts(n) = base + n*blockTime. */
@@ -587,7 +589,9 @@ describe('snakeToCamel', () => {
 
   it('should handle leading underscores', () => {
     assert.equal(snakeToCamel('_private'), 'Private')
-    assert.equal(snakeToCamel('__dunder'), '_Dunder')
+    // a `__` meta key (e.g. the Move enum tag `__variant__`) passes through unchanged
+    assert.equal(snakeToCamel('__dunder'), '__dunder')
+    assert.equal(snakeToCamel('__variant__'), '__variant__')
   })
 
   it('should handle trailing underscores', () => {
@@ -783,6 +787,15 @@ describe('decodeOnRampAddress', () => {
     const aptosAddress = '0x0000000000000000000000000000000000000000000000000000000000000001'
     const decoded = decodeOnRampAddress(aptosAddress, ChainFamily.Aptos)
     assert.equal(decoded, '0x1::onramp')
+    assert.equal(
+      decodeOnRampAddress(aptosAddress, ChainFamily.Aptos, CCIPVersion.V1_6),
+      '0x1::onramp',
+    )
+  })
+
+  it('should keep a 2.0 Aptos OnRamp (state address) without a module', () => {
+    const aptosAddress = '0x0000000000000000000000000000000000000000000000000000000000000001'
+    assert.equal(decodeOnRampAddress(aptosAddress, ChainFamily.Aptos, CCIPVersion.V2_0), '0x1')
   })
 
   it('should decode Solana addresses without ::onramp', () => {
@@ -980,6 +993,26 @@ describe('getAddressBytes', () => {
     const result = getAddressBytes(address)
     assert.deepEqual(result, address)
     assert.equal(result.length, 20)
+  })
+})
+
+describe('encodeAddressToAny', () => {
+  it('should left-pad a 20-byte EVM address to 32 bytes', () => {
+    const result = encodeAddressToAny('0x1234567890123456789012345678901234567890')
+    assert.equal(
+      result.toString('hex'),
+      '0000000000000000000000001234567890123456789012345678901234567890',
+    )
+  })
+
+  it('should encode a Canton party as keccak256 of its ID', () => {
+    const party = 'ccipOwner::1220e382f4e57b0815e6be737006e381e6b7de448e06bd033ece6df498017879f551'
+    assert.equal(isCantonPartyId(party), true)
+    const result = encodeAddressToAny(party)
+    assert.equal(
+      result.toString('hex'),
+      '952fd8afa071fc6bc441ebb7165af56f9c527d143754dbd086a971933fff74a5',
+    )
   })
 })
 
@@ -1661,5 +1694,61 @@ describe('sleep abort hygiene', () => {
     await pending
     assert.ok(Date.now() - start < 5_000, 'sleep returned before its full duration')
     assert.equal(getEventListeners(controller.signal, 'abort').length, 0)
+  })
+})
+
+describe('memoizeBlockInfo', () => {
+  type Block = number | bigint | 'latest' | 'finalized'
+  const fake = () => {
+    const calls: Block[] = []
+    const state = { fail: false }
+    const fn = (block: Block) => {
+      calls.push(block)
+      if (state.fail) return Promise.reject(new Error('503 Service Unavailable'))
+      const number = typeof block === 'string' ? 100 : Number(block)
+      return Promise.resolve({ number, timestamp: number * 10 })
+    }
+    return { calls, fn, state }
+  }
+
+  it('caches a positive block number, and calls fn for every tag or depth', async () => {
+    const { calls, fn } = fake()
+    const getBlockInfo = memoizeBlockInfo(fn)
+    assert.deepEqual(await getBlockInfo(5), { number: 5, timestamp: 50 })
+    await getBlockInfo(5)
+    await getBlockInfo(5n)
+    await getBlockInfo('latest')
+    await getBlockInfo('latest')
+    await getBlockInfo(-3)
+    await getBlockInfo(-3)
+    assert.deepEqual(calls, [5, 5n, 'latest', 'latest', -3, -3])
+  })
+
+  it('serves a seeded positive block from .cache', async () => {
+    const { calls, fn } = fake()
+    const getBlockInfo = memoizeBlockInfo(fn)
+    getBlockInfo.cache.set([7], Promise.resolve({ number: 7, timestamp: 1 }))
+    assert.deepEqual(await getBlockInfo(7), { number: 7, timestamp: 1 })
+    assert.deepEqual(calls, [])
+  })
+
+  it('a failed tag call rejects only to its caller (no unhandled rejection)', async () => {
+    const { fn, state } = fake()
+    const getBlockInfo = memoizeBlockInfo(fn)
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      // With micro-memoize's forceUpdate, a success cached the tag; the next,
+      // failed call went through the forced path and left an unread cached
+      // wrapper that rejected unhandled.
+      await getBlockInfo('latest')
+      state.fail = true
+      await assert.rejects(getBlockInfo('latest'), /503/)
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.deepEqual(unhandled, [])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })

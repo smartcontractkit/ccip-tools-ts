@@ -3149,7 +3149,7 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
    * `releaseOrMint` consumes as `sourcePoolData`) and `destTokenAmount` (the post-fee amount the
    * OnRamp writes into the emitted message), plus the resolved source pool address.
    *
-   * Optional; currently implemented for EVM chains. Used by `estimateReceiveExecution` to feed
+   * Optional; implemented for EVM and Solana chains. Used by `estimateReceiveExecution` to feed
    * the destination-liquidity simulation the same source pool data a real transfer would carry.
    *
    * @param opts - lane (`onRamp`, `destChainSelector`), `token` and `amount` (source decimals),

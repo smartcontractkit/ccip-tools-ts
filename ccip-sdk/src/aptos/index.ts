@@ -11,7 +11,7 @@ import {
   SimpleTransaction,
   TransactionResponseType,
 } from '@aptos-labs/ts-sdk'
-import { type BytesLike, concat, isBytesLike, isHexString } from 'ethers'
+import { type BytesLike, concat, isBytesLike, isHexString, keccak256 } from 'ethers'
 import { memoize } from 'micro-memoize'
 
 import {
@@ -20,6 +20,7 @@ import {
   type GetBalanceOpts,
   type LogFilter,
   type TokenInfo,
+  type TokenPoolConfig,
   type TokenPoolConfigOpts,
   type TokenPoolRemote,
   type TokenPoolRemotesOpts,
@@ -43,13 +44,16 @@ import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
 import {
   type EVMExtraArgsV2,
   type ExtraArgs,
+  type GenericExtraArgsV3,
   type SVMExtraArgsV1,
   type SuiExtraArgsV1,
   EVMExtraArgsV2Tag,
   SVMExtraArgsV1Tag,
+  decodeFinalityAllowed,
 } from '../extra-args.ts'
 import { createRateLimitedFetch, fetchProfileForUrl, redactEndpointUrl } from '../fetch.ts'
 import type { LeafHasher } from '../hasher/common.ts'
+import { decodeMessageV1 } from '../messages.ts'
 import { type NetworkInfo, ChainFamily, networkInfo } from '../networks.ts'
 import { buildMessageForDest, decodeMessage, normalizeDeep } from '../requests.ts'
 import {
@@ -58,28 +62,33 @@ import {
   decodeMoveExtraArgs,
   getMoveAddress,
 } from '../shared/bcs-codecs.ts'
+import { decodeExtraArgsV3, encodeExtraArgsV3 } from '../shared/extra-args-v3.ts'
 import { supportedChains } from '../supported-chains.ts'
-import type {
-  CCIPExecution,
-  CCIPMessage,
-  CCIPRequest,
-  ChainLog,
-  ChainTransaction,
-  CommitReport,
-  ExecutionInput,
-  ExecutionReceipt,
-  Lane,
-  WithLogger,
+import {
+  type CCIPExecution,
+  type CCIPMessage,
+  type CCIPRequest,
+  type CCIPVerifications,
+  type ChainLog,
+  type ChainTransaction,
+  type CommitReport,
+  type ExecutionInput,
+  type ExecutionReceipt,
+  type Lane,
+  type WithLogger,
+  CCIPVersion,
 } from '../types.ts'
 import {
   convertKeysToCamelCase,
   decodeAddress,
   decodeOnRampAddress,
   getAddressBytes,
+  getDataBytes,
+  jsonParse,
   parseTypeAndVersion,
   util,
 } from '../utils.ts'
-import { generateUnsignedExecuteReport } from './exec.ts'
+import { generateUnsignedExecuteReport, generateUnsignedExecuteV2 } from './exec.ts'
 import { getAptosLeafHasher } from './hasher.ts'
 import {
   type AptosLogStreamOpts,
@@ -242,6 +251,34 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
           .then((modules) => modules.map(({ abi }) => abi!.name)),
       { async: true, maxSize: 100, maxArgs: 1, expires: 600e3 },
     )
+    this.getOnRampForRouter = memoize(this.getOnRampForRouter.bind(this), {
+      async: true,
+      maxSize: 100,
+      maxArgs: 2,
+      expires: 60e3, // 1min
+    })
+    // which contract an address is, and where its core package is, never change
+    this._getModule = memoize(this._getModule.bind(this), {
+      async: true,
+      maxSize: 100,
+      maxArgs: 2,
+    })
+    this._getCcipPackage = memoize(this._getCcipPackage.bind(this), {
+      async: true,
+      maxSize: 100,
+      maxArgs: 1,
+    })
+    this._getRampAddress = memoize(this._getRampAddress.bind(this), {
+      async: true,
+      maxSize: 100,
+      maxArgs: 2,
+    })
+    this._getRegistries = memoize(this._getRegistries.bind(this), {
+      async: true,
+      maxSize: 100,
+      maxArgs: 1,
+      expires: 600e3,
+    })
     this.provider.getTransactionByVersion = memoize(
       this.provider.getTransactionByVersion.bind(this.provider),
       {
@@ -412,6 +449,17 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
             : this.abort,
       }
     }
+    // logs come from modules: a 2.0 ramp can be given by its state address or its package (a 1.6
+    // package has all the modules, so the stream rejects it)
+    const { address } = opts
+    if (address && !address.includes('::')) {
+      const module = await this._getModule(address, 'offramp').catch(() => address)
+      const version = await this.typeAndVersion(module).then(
+        ([, v]) => v,
+        () => undefined,
+      )
+      if (version && version >= CCIPVersion.V2_0) opts = { ...opts, address: module }
+    }
     yield* streamAptosLogs(this, opts)
   }
 
@@ -426,6 +474,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * from SDK discovery, any casing. Both are converted to
    * `<long-address>::offramp` up front, so an exact compare downstream matches
    * successes and failures alike instead of silently dropping every receipt.
+   * A 2.0 OffRamp given by its state address compares as its `<package>::offramp`.
    */
   override async getExecutionReceiptsInTx(
     tx: string | ChainTransaction,
@@ -434,23 +483,163 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     const offRamp = filters?.offRamp
     if (!offRamp) return super.getExecutionReceiptsInTx(tx, filters)
     if (typeof tx === 'string') tx = await this.getTransaction(tx)
+    // the module of a 2.0 OffRamp given by its state address (the bare package needs no lookup)
+    const offRampModule = await this._getModule(offRamp, 'offramp').catch(() => offRamp)
     return super.getExecutionReceiptsInTx(
       {
         ...tx,
         logs: tx.logs.map((log) => ({ ...log, address: canonicalAptosLogAddress(log.address) })),
       },
-      { ...filters, offRamp: canonicalAptosLogAddress(offRamp) },
+      { ...filters, offRamp: canonicalAptosLogAddress(offRampModule) },
     )
   }
 
+  /** {@inheritDoc Chain.getVerifications} */
+  override async getVerifications(
+    opts: Parameters<Chain['getVerifications']>[0],
+  ): Promise<CCIPVerifications> {
+    const { offRamp, request } = opts
+    if (request.lane.version < CCIPVersion.V2_0) return super.getVerifications(opts)
+    // 2.0: the OffRamp tells the CCVs it requires for the message, exactly as it was emitted
+    const [requiredCCVs, optionalCCVs, optionalThreshold] = await this.provider.view<
+      [string[], string[], number]
+    >({
+      payload: {
+        function:
+          `${await this._getModule(offRamp, 'offramp')}::get_ccvs_for_message` as `${string}::${string}::get_ccvs_for_message`,
+        functionArguments: [getDataBytes(await this.resolveEncodedMessage(request))],
+      },
+    })
+    const verificationPolicy = {
+      requiredCCVs: requiredCCVs.map(getMoveAddress),
+      optionalCCVs: optionalCCVs.map(getMoveAddress),
+      optionalThreshold: Number(optionalThreshold),
+    }
+    const verifications = await this.fetchCCVResults(
+      request.message.messageId,
+      verificationPolicy,
+      opts,
+    )
+    return { verificationPolicy, verifications }
+  }
+
+  /**
+   * `<package>::<module>` of a CCIP contract, from any form of its address: the module itself; its
+   * package (on 1.6, one package has every module, and `module` selects one); or, for a 2.0 Router
+   * or ramp, its state address: the form in which remote chains and messages reference it.
+   * @internal
+   */
+  async _getModule(address: string, module = 'router'): Promise<string> {
+    if (address.includes('::')) return address
+    try {
+      await this.typeAndVersion(`${address}::${module}`)
+      return `${address}::${module}`
+    } catch (err) {
+      const info = await this._getAccountInfo(address).catch(() => undefined)
+      if (!info?.module) throw err
+      return info.module
+    }
+  }
+
+  /**
+   * The address of a ramp in every output, from any form of it: `<package>::<module>` on 1.6, and
+   * the state address in 2.0, as remote chains and messages reference it.
+   * @internal
+   */
+  async _getRampAddress(address: string, module: string): Promise<string> {
+    const rampModule = await this._getModule(address, module)
+    const [, version] = await this.typeAndVersion(rampModule)
+    if (version < CCIPVersion.V2_0) return rampModule
+    const [stateAddress] = await this.provider.view<[string]>({
+      payload: {
+        function: `${rampModule}::get_state_address` as `${string}::${string}::${string}`,
+      },
+    })
+    return getMoveAddress(stateAddress)
+  }
+
+  /**
+   * Package of the CCIP core modules (`fee_quoter`, `token_admin_registry`, `auth`) for a contract:
+   * its own package on 1.6, and the `ChainlinkCCIP` package which its package depends on in 2.0,
+   * where every contract is a package of its own.
+   * @internal
+   */
+  async _getCcipPackage(address: string): Promise<string> {
+    const pkg = address.split('::')[0]!
+    if (
+      await this.typeAndVersion(`${pkg}::fee_quoter`).then(
+        () => true,
+        () => false,
+      )
+    )
+      return pkg
+    const { module, ccip } = await this._getAccountInfo(pkg)
+    // a state address: as for its package
+    if (module && !module.startsWith(`${pkg}::`)) return this._getCcipPackage(module)
+    return ccip ?? pkg
+  }
+
+  /**
+   * What the resources of an account tell of CCIP 2.0: the Router or ramp `module` which the
+   * account is the state address of (it holds `<package>::<module>::<Module>State`) or the package
+   * of, and the `ccip` core package which a package depends on.
+   */
+  private async _getAccountInfo(address: string): Promise<{ module?: string; ccip?: string }> {
+    const isRamp = (name?: string) => ['router', 'onramp', 'offramp'].includes(name!)
+    const info: { module?: string; ccip?: string } = {}
+    for (const { type, data } of await this.provider.getAccountResources({
+      accountAddress: address,
+    })) {
+      const [pkg, name] = type.split('::')
+      if (isRamp(name)) info.module = `${pkg}::${name}`
+      if (type !== '0x1::code::PackageRegistry') continue
+      const { packages } = data as {
+        packages: {
+          modules: { name: string }[]
+          deps: { account: string; package_name: string }[]
+        }[]
+      }
+      info.ccip = packages
+        .flatMap(({ deps }) => deps)
+        .find(({ package_name }) => package_name === 'ChainlinkCCIP')?.account
+      const module = packages.flatMap(({ modules }) => modules).find(({ name }) => isRamp(name))
+      if (module) info.module ??= `${address}::${module.name}`
+    }
+    return info
+  }
+
+  /**
+   * Router package of a CCIP 2.0 deployment, which only the dest chain configs of its OnRamps
+   * name; else, its core package, which serves the registry and fee reads too.
+   */
+  private async _getRouterV2(address: string): Promise<string> {
+    const ccip = await this._getCcipPackage(address)
+    const [onRamps] = await this.provider.view<[string[]]>({
+      payload: { function: `${ccip}::auth::get_allowed_onramps` as `${string}::auth::${string}` },
+    })
+    for (const onRamp of onRamps) {
+      const [, configs] = await this.provider
+        .view<[string[], { router?: string }[]]>({
+          payload: {
+            function:
+              `${await this._getModule(onRamp, 'onramp')}::get_all_dest_chain_configs` as `${string}::${string}::${string}`,
+          },
+        })
+        .catch(() => [[], []] as const)
+      const router = configs.find(({ router }) => router)?.router
+      if (router) return router
+    }
+    return ccip
+  }
+
   /** {@inheritDoc Chain.typeAndVersion} */
-  async typeAndVersion(address: string) {
+  async typeAndVersion(address: string): ReturnType<Chain['typeAndVersion']> {
     // needs a `::<module>` suffix; a bare package address defaults to `::router`, like the
-    // router entrypoints in send.ts do — every CCIP module shares the package's address
-    const module = address.includes('::') ? address : `${address}::router`
+    // router entrypoints in send.ts do — every CCIP 1.6 module shares the package's address
+    if (!address.includes('::')) return this.typeAndVersion(await this._getModule(address))
     const [typeAndVersion] = await this.provider.view<[string]>({
       payload: {
-        function: `${module}::type_and_version` as `${string}::${string}::type_and_version`,
+        function: `${address}::type_and_version` as `${string}::${string}::type_and_version`,
       },
     })
     return parseTypeAndVersion(typeAndVersion)
@@ -458,56 +647,92 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
   /** {@inheritDoc Chain.getOnRampConfig} */
   async getOnRampConfig(onRamp: string, destChainSelector: bigint) {
-    const pkg = onRamp.split('::')[0]!
-    const feeQuoter = `${pkg}::fee_quoter`
-    const onRampModule = `${pkg}::onramp`
-    const [, , typeAndVersion] = await this.typeAndVersion(onRampModule)
-    const [sequenceNumber, allowlistEnabled, router, routerStateAddress] = await this.provider.view<
-      [
-        sequence_number: string,
-        allowlist_enabled: boolean,
-        router: string,
-        router_state_address: string,
-      ]
-    >({
-      payload: {
-        function:
-          `${onRampModule}::get_dest_chain_config_v2` as `${string}::${string}::get_dest_chain_config_v2`,
-        functionArguments: [destChainSelector],
+    const onRampModule = await this._getModule(onRamp, 'onramp')
+    const feeQuoter = `${await this._getCcipPackage(onRampModule)}::fee_quoter`
+    const [, version, typeAndVersion] = await this.typeAndVersion(onRampModule)
+    const view = async <T = Record<string, unknown>>(fn: string, ...args: unknown[]) =>
+      (
+        await this.provider.view<[T]>({
+          payload: {
+            function: fn as `${string}::${string}::${string}`,
+            functionArguments: args as [],
+          },
+        })
+      )[0]
+    let config: Record<string, unknown> & {
+      router: string
+      sequenceNumber?: number
+      allowlistEnabled?: boolean
+      routerStateAddress?: string
+    }
+    if (version < CCIPVersion.V2_0) {
+      const [sequenceNumber, allowlistEnabled, router, routerStateAddress] =
+        await this.provider.view<
+          [
+            sequence_number: string,
+            allowlist_enabled: boolean,
+            router: string,
+            router_state_address: string,
+          ]
+        >({
+          payload: {
+            function:
+              `${onRampModule}::get_dest_chain_config_v2` as `${string}::${string}::get_dest_chain_config_v2`,
+            functionArguments: [destChainSelector],
+          },
+        })
+      config = { sequenceNumber: +sequenceNumber, allowlistEnabled, router, routerStateAddress }
+    } else {
+      // 2.0: every field of the OnRamp's configs, as the contract names them; only the dest chain
+      // config is essential, so the contract can change the others
+      const optional = (fn: string, ...args: unknown[]) =>
+        view(`${onRampModule}::${fn}`, ...args).catch(() => undefined)
+      config = {
+        ...(await optional('get_static_config')),
+        ...(await optional('get_dynamic_config')),
+        ...(await view<{ router: string }>(
+          `${onRampModule}::get_dest_chain_config`,
+          destChainSelector,
+        )),
+        expectedNextMessageNumber: await optional(
+          'get_expected_next_message_number',
+          destChainSelector,
+        ),
+      }
+    }
+    const feeQuoterConfig = await view(`${feeQuoter}::get_static_config`)
+    const feeQuoterDestConfig = await view(`${feeQuoter}::get_dest_chain_config`, destChainSelector)
+    const address = await this._getRampAddress(onRampModule, 'onramp')
+    return normalizeDeep(
+      {
+        onRamp: address,
+        // a 2.0 OnRamp's address is its state's: its module emits the logs (their `contract`)
+        ...(address !== onRampModule && { contract: onRampModule }),
+        feeQuoter,
+        destChainSelector,
+        ...config,
+        router: config.router.includes('::') ? config.router : `${config.router}::router`,
+        feeQuoterConfig: { ...feeQuoterConfig, ...feeQuoterDestConfig },
+        typeAndVersion,
       },
-    })
-    const [feeQuoterConfig] = await this.provider.view<[Record<string, unknown>]>({
-      payload: {
-        function: `${feeQuoter}::get_static_config` as `${string}::${string}::get_static_config`,
+      {
+        sourceFamily: (this.constructor as typeof AptosChain).family,
+        destFamily: networkInfo(destChainSelector).family,
       },
-    })
-    const [feeQuoterDestConfig] = await this.provider.view<[Record<string, unknown>]>({
-      payload: {
-        function:
-          `${feeQuoter}::get_dest_chain_config` as `${string}::${string}::get_dest_chain_config`,
-        functionArguments: [destChainSelector],
-      },
-    })
-    return normalizeDeep({
-      feeQuoter,
-      destChainSelector,
-      sequenceNumber: +sequenceNumber,
-      allowlistEnabled,
-      router: router.includes('::') ? router : `${router}::router`,
-      routerStateAddress,
-      feeQuoterConfig: { ...feeQuoterConfig, ...feeQuoterDestConfig },
-      typeAndVersion,
-    })
+    )
   }
 
   /** {@inheritDoc Chain.getOffRampConfig} */
   async getOffRampConfig(offRamp: string, sourceChainSelector: bigint) {
-    const pkg = offRamp.split('::')[0]!
-    const router = `${pkg}::router`
-    const offRampModule = offRamp.includes('::') ? offRamp : `${pkg}::offramp`
-    const [, , typeAndVersion] = await this.typeAndVersion(offRampModule)
+    const offRampModule = await this._getModule(offRamp, 'offramp')
+    const [, version, typeAndVersion] = await this.typeAndVersion(offRampModule)
+    // a 2.0 OffRamp does not name its Router
+    const router =
+      version < CCIPVersion.V2_0
+        ? `${offRampModule.split('::')[0]}::router`
+        : `${await this._getRouterV2(offRampModule)}::router`
     const [sourceChainConfig] = await this.provider.view<
-      [Record<string, unknown> & { on_ramp: string }]
+      [Record<string, unknown> & { on_ramp?: string; on_ramps?: string[] }]
     >({
       payload: {
         function:
@@ -515,22 +740,24 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         functionArguments: [sourceChainSelector],
       },
     })
-    const onRamp = decodeOnRampAddress(
-      sourceChainConfig.on_ramp,
-      networkInfo(sourceChainSelector).family,
-    )
+    const sourceFamily = networkInfo(sourceChainSelector).family
+    const address = await this._getRampAddress(offRampModule, 'offramp')
     return normalizeDeep(
       {
+        offRamp: address,
+        // a 2.0 OffRamp's address is its state's: its module emits the logs (their `contract`)
+        ...(address !== offRampModule && { contract: offRampModule }),
         sourceChainSelector,
         ...sourceChainConfig,
-        onRamps: [onRamp],
+        // 1.6 names one OnRamp, by its package; 2.0 lists them, as the source chain and the
+        // messages reference them
+        onRamps: sourceChainConfig.on_ramps ?? [
+          decodeOnRampAddress(sourceChainConfig.on_ramp!, sourceFamily),
+        ],
         router,
         typeAndVersion,
       },
-      {
-        sourceFamily: networkInfo(sourceChainSelector).family,
-        destFamily: (this.constructor as typeof AptosChain).family,
-      },
+      { sourceFamily, destFamily: (this.constructor as typeof AptosChain).family },
     )
   }
 
@@ -540,13 +767,37 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
   }
 
   /** {@inheritDoc Chain.getOffRampsForRouter} */
-  getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
-    return Promise.resolve([router.split('::')[0] + '::offramp'])
+  async getOffRampsForRouter(router: string, _sourceChainSelector: bigint): Promise<string[]> {
+    const pkg = router.split('::')[0]!
+    const ccip = await this._getCcipPackage(router)
+    if (ccip === pkg) return [pkg + '::offramp']
+    // 2.0: the OffRamps which the core package allows, by their state addresses
+    const [offRamps] = await this.provider.view<[string[]]>({
+      payload: { function: `${ccip}::auth::get_allowed_offramps` as `${string}::auth::${string}` },
+    })
+    return offRamps.map(getMoveAddress)
   }
 
   /** {@inheritDoc Chain.getOnRampForRouter} */
-  getOnRampForRouter(router: string, _destChainSelector: bigint): Promise<string> {
-    return Promise.resolve(router.split('::')[0] + '::onramp')
+  async getOnRampForRouter(router: string, destChainSelector: bigint): Promise<string> {
+    const pkg = router.split('::')[0]!
+    // 1.6: the Router and the OnRamp are modules of one package
+    let onRamp = `${pkg}::onramp`
+    const isSamePackage = await this.typeAndVersion(onRamp).then(
+      () => true,
+      () => false,
+    )
+    if (!isSamePackage) {
+      // else, the Router routes each destination to the package of an OnRamp
+      const [onRampPkg] = await this.provider.view<[string]>({
+        payload: {
+          function: `${pkg}::router::get_on_ramp` as `${string}::router::get_on_ramp`,
+          functionArguments: [destChainSelector],
+        },
+      })
+      onRamp = `${onRampPkg}::onramp`
+    }
+    return this._getRampAddress(onRamp, 'onramp')
   }
 
   /** {@inheritDoc Chain.getBalance} */
@@ -566,12 +817,29 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @throws {@link CCIPAptosRegistryTypeInvalidError} if registry type is invalid
    */
   async getTokenAdminRegistryFor(address: string): Promise<string> {
-    const registry = address.split('::')[0] + '::token_admin_registry'
+    const [registry] = (await this._getRegistries(address)) as [string]
     const [type] = await this.typeAndVersion(registry)
     if (type !== 'TokenAdminRegistry') {
       throw new CCIPAptosRegistryTypeInvalidError(registry, type)
     }
     return registry
+  }
+
+  /**
+   * Token registries of the core package of a contract (or of a registry itself). CCIP 2.0 adds
+   * `token_admin_registry_v2`, which the ramps ask before the 1.6 one.
+   * @internal
+   */
+  async _getRegistries(address: string): Promise<string[]> {
+    const registry = `${await this._getCcipPackage(address)}::token_admin_registry`
+    try {
+      await this.typeAndVersion(`${registry}_v2`)
+      return [`${registry}_v2`, registry]
+    } catch (err) {
+      // only the node's answer that there is no such module selects the 1.6 registry alone
+      if ((err as AptosApiError).data?.error_code !== 'module_not_found') throw err
+      return [registry]
+    }
   }
 
   /**
@@ -589,8 +857,19 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       (typeof data !== 'object' || isBytesLike(data))
     )
       throw new CCIPLogDataInvalidError(util.inspect(log), { chain: ChainFamily.Aptos })
-    // offload massaging to generic decodeJsonMessage
     try {
+      const event = typeof data === 'string' ? jsonParse<Record<string, unknown>>(data) : data
+      // a 2.0 event carries the message encoded (MessageV1, as in every family), next to other
+      // fields, which pass through with their integers as bigints
+      if (isBytesLike(event.encoded_message))
+        return decodeMessage({
+          messageId: keccak256(event.encoded_message),
+          ...(convertKeysToCamelCase(event, (v) =>
+            (typeof v === 'string' && v.match(/^\d+$/)) || typeof v === 'number' ? BigInt(v) : v,
+          ) as Record<string, unknown>),
+          ...decodeMessageV1(event.encoded_message),
+        })
+      // offload massaging to generic decodeJsonMessage
       return decodeMessage(data)
     } catch {
       // return undefined
@@ -606,10 +885,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     extraArgs: BytesLike,
   ):
     | (EVMExtraArgsV2 & { _tag: 'EVMExtraArgsV2' })
+    | (GenericExtraArgsV3 & { _tag: 'GenericExtraArgsV3' })
     | (SVMExtraArgsV1 & { _tag: 'SVMExtraArgsV1' })
     | (SuiExtraArgsV1 & { _tag: 'SuiExtraArgsV1' })
     | undefined {
-    return decodeMoveExtraArgs(extraArgs)
+    return decodeMoveExtraArgs(extraArgs) ?? decodeExtraArgsV3(extraArgs, ChainFamily.Aptos)
   }
 
   /**
@@ -619,7 +899,8 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
    * @throws {@link CCIPAptosExtraArgsEncodingError} if extra args format is not supported
    */
   static encodeExtraArgs(extraArgs: ExtraArgs): string {
-    if ('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
+    if ('finality' in extraArgs) return encodeExtraArgsV3(extraArgs, ChainFamily.Aptos)
+    else if ('gasLimit' in extraArgs && 'allowOutOfOrderExecution' in extraArgs)
       return concat([EVMExtraArgsV2Tag, BcsEVMExtraArgsV2Codec.serialize(extraArgs).toBytes()])
     else if ('computeUnits' in extraArgs)
       return concat([
@@ -633,7 +914,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       ])
     throw new CCIPExtraArgsEncodingUnsupportedError(
       ChainFamily.Aptos,
-      'EVMExtraArgsV2 & SVMExtraArgsV1',
+      'EVMExtraArgsV2, SVMExtraArgsV1 & GenericExtraArgsV3',
     )
   }
 
@@ -683,9 +964,11 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       throw new CCIPLogDataInvalidError(data, { chain: ChainFamily.Aptos })
     const data_ = data as { message_id: string; state: number }
     if (!data_.message_id || !data_.state) return
-    return convertKeysToCamelCase(data_, (v) =>
+    const receipt = convertKeysToCamelCase(data_, (v) =>
       typeof v === 'string' && v.match(/^\d+$/) ? BigInt(v) : v,
-    ) as ExecutionReceipt
+    ) as Partial<ExecutionReceipt> & { messageNumber?: bigint }
+    receipt.sequenceNumber ??= receipt.messageNumber // as 2.0 names it
+    return receipt as ExecutionReceipt
   }
 
   /**
@@ -791,6 +1074,16 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     ...opts
   }: Parameters<Chain['generateUnsignedExecute']>[0]): Promise<UnsignedAptosTx> {
     const resolved = await this.resolveExecuteOpts(opts)
+    if ('encodedMessage' in resolved.input) {
+      const tx = await generateUnsignedExecuteV2(
+        this.provider,
+        payer,
+        await this._getModule(resolved.offRamp, 'offramp'),
+        resolved.input,
+        resolved,
+      )
+      return { family: ChainFamily.Aptos, transactions: [tx] }
+    }
     if (
       !('message' in resolved.input) ||
       !('allowOutOfOrderExecution' in resolved.input.message) ||
@@ -857,6 +1150,9 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       ('vmStatus' in data || 'vm_status' in data)
     )
       return data as Record<string, unknown>
+    // a view or simulation which the VM aborted: the node's answer names the Move abort
+    const error = data instanceof AptosApiError && (data.data as Record<string, unknown> | null)
+    if (error && error.vm_error_code) return error
     try {
       if (isBytesLike(data)) {
         const parsedExtraArgs = this.decodeExtraArgs(data)
@@ -869,21 +1165,23 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
 
   /** {@inheritDoc Chain.getSupportedTokens} */
   async getSupportedTokens(address: string, opts?: Pick<LogFilter, 'page'>): Promise<string[]> {
-    const res = []
-    let page,
-      nextKey = '0x0',
-      hasMore
-    do {
-      ;[page, nextKey, hasMore] = await this.provider.view<[string[], string, boolean]>({
-        payload: {
-          function:
-            `${address.split('::')[0] + '::token_admin_registry'}::get_all_configured_tokens` as `${string}::${string}::get_all_configured_tokens`,
-          functionArguments: [nextKey, (opts?.page ?? 1000) || Number.MAX_SAFE_INTEGER],
-        },
-      })
-      res.push(...page)
-    } while (hasMore)
-    return page
+    const res = new Set<string>()
+    for (const registry of await this._getRegistries(address)) {
+      let page,
+        nextKey = '0x0',
+        hasMore
+      do {
+        ;[page, nextKey, hasMore] = await this.provider.view<[string[], string, boolean]>({
+          payload: {
+            function:
+              `${registry}::get_all_configured_tokens` as `${string}::${string}::get_all_configured_tokens`,
+            functionArguments: [nextKey, (opts?.page ?? 1000) || Number.MAX_SAFE_INTEGER],
+          },
+        })
+        for (const token of page) res.add(token)
+      } while (hasMore)
+    }
+    return [...res]
   }
 
   /**
@@ -898,57 +1196,65 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     pendingAdministrator?: string
     tokenPool?: string
   }> {
-    const [tokenPool, administrator, pendingAdministrator] = await this.provider.view<
-      [string, string, string]
-    >({
-      payload: {
-        function:
-          `${registry.includes('::') ? registry : registry + '::token_admin_registry'}::get_token_config` as `${string}::${string}::get_token_config`,
-        functionArguments: [token],
-      },
-    })
-    if (administrator.match(/^0x0*$/)) throw new CCIPTokenNotRegisteredError(token, registry)
-    return {
-      administrator,
-      ...(!pendingAdministrator.match(/^0x0*$/) && { pendingAdministrator }),
-      ...(!tokenPool.match(/^0x0*$/) && { tokenPool }),
-    }
+    const configs = await Promise.all(
+      (await this._getRegistries(registry)).map(async (module) => {
+        const [tokenPool, administrator, pendingAdministrator] = await this.provider.view<
+          [string, string, string]
+        >({
+          payload: {
+            function: `${module}::get_token_config` as `${string}::${string}::get_token_config`,
+            functionArguments: [token],
+          },
+        })
+        return {
+          administrator,
+          ...(!pendingAdministrator.match(/^0x0*$/) && { pendingAdministrator }),
+          ...(!tokenPool.match(/^0x0*$/) && { tokenPool }),
+        }
+      }),
+    )
+    // like the ramps: the first registry with a pool for the token, else the first which knows it
+    const config =
+      configs.find((c) => c.tokenPool) ?? configs.find((c) => !c.administrator.match(/^0x0*$/))
+    if (!config) throw new CCIPTokenNotRegisteredError(token, registry)
+    return config
+  }
+
+  /** Pool modules of a pool package: a 2.0 one (`*_token_pool_v2`) before its 1.6 one. */
+  private async _getPoolModules(tokenPool: string): Promise<string[]> {
+    return (await this._getAccountModulesNames(tokenPool))
+      .filter((name) => name.match(/token_pool(_v\d+)?$/))
+      .sort((a, b) => b.length - a.length)
+      .map((name) => `${tokenPool}::${name}`)
   }
 
   /** {@inheritDoc Chain.getTokenPoolConfig} */
   async getTokenPoolConfig(
     tokenPool: string,
     _opts?: TokenPoolConfigOpts,
-  ): Promise<{
-    token: string
-    router: string
-    typeAndVersion?: string
-  }> {
-    const modulesNames = (await this._getAccountModulesNames(tokenPool))
-      .reverse()
-      .filter((name) => name.endsWith('token_pool'))
+  ): Promise<TokenPoolConfig> {
     let firstErr
-    for (const name of modulesNames) {
+    for (const module of await this._getPoolModules(tokenPool)) {
+      const view = async <T>(fn: string) =>
+        (
+          await this.provider.view<[T]>({
+            payload: { function: `${module}::${fn}` as `${string}::${string}::${string}` },
+          })
+        )[0]
       try {
-        const [typeAndVersion, token, router] = await Promise.all([
-          this.typeAndVersion(`${tokenPool}::${name}`),
-          this.provider.view<[string]>({
-            payload: {
-              function: `${tokenPool}::${name}::get_token`,
-              functionArguments: [],
-            },
-          }),
-          this.provider.view<[string]>({
-            payload: {
-              function: `${tokenPool}::${name}::get_router`,
-              functionArguments: [],
-            },
-          }),
+        const [typeAndVersion, token, router, allowedFinality] = await Promise.all([
+          this.typeAndVersion(module),
+          view<string>('get_token'),
+          // a 2.0 pool does not name its Router
+          view<string>('get_router').catch(() => this._getRouterV2(module)),
+          // 2.0: the finality which a transfer may request
+          view<number>('get_allowed_finality_config').catch(() => undefined),
         ])
         return {
-          token: token[0],
-          router: router[0],
+          token,
+          router,
           typeAndVersion: typeAndVersion[2],
+          ...(allowedFinality != null && decodeFinalityAllowed(Number(allowedFinality))),
         }
       } catch (err) {
         firstErr ??= err as Error
@@ -970,86 +1276,69 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
       rate: string
       tokens: string
     }
-    const modulesNames = (await this._getAccountModulesNames(tokenPool))
-      .filter((name) => name.endsWith('token_pool'))
-      .sort((a, b) => b.length - a.length)
+    const toState = (state?: RawRateLimiterState_) =>
+      state?.is_enabled
+        ? {
+            capacity: BigInt(state.capacity),
+            lastUpdated: Number(state.last_updated),
+            rate: BigInt(state.rate),
+            tokens: BigInt(state.tokens),
+          }
+        : null
     let firstErr
-    for (const name of modulesNames) {
+    for (const module of await this._getPoolModules(tokenPool)) {
+      const view = async <T>(fn: string, ...args: unknown[]) =>
+        (
+          await this.provider.view<[T]>({
+            payload: {
+              function: `${module}::${fn}` as `${string}::${string}::${string}`,
+              functionArguments: args as [],
+            },
+          })
+        )[0]
+      // a 2.0 pool has a second pair of buckets, for fast finality: its views take that flag too
+      const buckets = (fn: string, selector: bigint) =>
+        view<RawRateLimiterState_>(fn, selector).then(
+          (state) => [state],
+          (err: unknown) => {
+            if (!String(err).includes('Too few arguments')) throw err
+            return Promise.all([
+              view<RawRateLimiterState_>(fn, selector, false),
+              view<RawRateLimiterState_>(fn, selector, true),
+            ])
+          },
+        )
       try {
-        const [supportedChains] = remoteChainSelector
-          ? [[remoteChainSelector]]
-          : await this.provider.view<[string[]]>({
-              payload: {
-                function: `${tokenPool}::${name}::get_supported_chains`,
-                functionArguments: [],
-              },
-            })
+        const supportedChains = remoteChainSelector
+          ? [remoteChainSelector]
+          : await view<string[]>('get_supported_chains')
         return Object.fromEntries(
           await Promise.all(
             supportedChains.map(networkInfo).map(async (chain) => {
-              const remoteToken$ = this.provider.view<[BytesLike]>({
-                payload: {
-                  function: `${tokenPool}::${name}::get_remote_token`,
-                  functionArguments: [chain.chainSelector],
-                },
-              })
-              const remotePools$ = this.provider.view<[BytesLike[]]>({
-                payload: {
-                  function: `${tokenPool}::${name}::get_remote_pools`,
-                  functionArguments: [chain.chainSelector],
-                },
-              })
-              const inboundRateLimiterState$ = this.provider.view<[RawRateLimiterState_]>({
-                payload: {
-                  function: `${tokenPool}::${name}::get_current_inbound_rate_limiter_state`,
-                  functionArguments: [chain.chainSelector],
-                },
-              })
-              const outboundRateLimiterState$ = this.provider.view<[RawRateLimiterState_]>({
-                payload: {
-                  function: `${tokenPool}::${name}::get_current_outbound_rate_limiter_state`,
-                  functionArguments: [chain.chainSelector],
-                },
-              })
               try {
-                const [
-                  [remoteToken],
-                  [remotePools],
-                  [inboundRateLimiterState],
-                  [outboundRateLimiterState],
-                ] = await Promise.all([
-                  remoteToken$,
-                  remotePools$,
-                  inboundRateLimiterState$,
-                  outboundRateLimiterState$,
+                const [remoteToken, remotePools, inbound, outbound] = await Promise.all([
+                  view<BytesLike>('get_remote_token', chain.chainSelector),
+                  view<BytesLike[]>('get_remote_pools', chain.chainSelector),
+                  buckets('get_current_inbound_rate_limiter_state', chain.chainSelector),
+                  buckets('get_current_outbound_rate_limiter_state', chain.chainSelector),
                 ])
                 return [
                   chain.name,
                   {
                     remoteToken: decodeAddress(remoteToken, chain.family),
                     remotePools: remotePools.map((pool) => decodeAddress(pool, chain.family)),
-                    inboundRateLimiterState: inboundRateLimiterState.is_enabled
-                      ? {
-                          capacity: BigInt(inboundRateLimiterState.capacity),
-                          lastUpdated: Number(inboundRateLimiterState.last_updated),
-                          rate: BigInt(inboundRateLimiterState.rate),
-                          tokens: BigInt(inboundRateLimiterState.tokens),
-                        }
-                      : null,
-                    outboundRateLimiterState: outboundRateLimiterState.is_enabled
-                      ? {
-                          capacity: BigInt(outboundRateLimiterState.capacity),
-                          lastUpdated: Number(outboundRateLimiterState.last_updated),
-                          rate: BigInt(outboundRateLimiterState.rate),
-                          tokens: BigInt(outboundRateLimiterState.tokens),
-                        }
-                      : null,
+                    inboundRateLimiterState: toState(inbound[0]),
+                    outboundRateLimiterState: toState(outbound[0]),
+                    ...(outbound.length > 1 && {
+                      fastInboundRateLimiterState: toState(inbound[1]),
+                      fastOutboundRateLimiterState: toState(outbound[1]),
+                    }),
                   },
                 ] as const
               } catch (err) {
                 if (
                   err instanceof AptosApiError &&
-                  err.message.includes('Key not found in the smart table')
+                  err.message.match(/Key not found in the smart table|E_UNKNOWN_REMOTE_CHAIN/)
                 )
                   throw new CCIPTokenPoolChainConfigNotFoundError(tokenPool, tokenPool, chain.name)
                 throw err
@@ -1075,7 +1364,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
         'getTokenPrice: timestamp parameter not yet supported on Aptos, returning latest price',
       )
     }
-    const feeQuoterModule = `${opts.router.split('::')[0]}::fee_quoter`
+    const feeQuoterModule = `${await this._getCcipPackage(opts.router)}::fee_quoter`
 
     const [[prices], { decimals }] = await Promise.all([
       this.provider.view<[{ value: string; timestamp: string }[]]>({
@@ -1099,7 +1388,7 @@ export class AptosChain extends Chain<typeof ChainFamily.Aptos> {
     const [feeTokens] = await this.provider.view<[string[]]>({
       payload: {
         function:
-          `${router.split('::')[0] + '::fee_quoter'}::get_fee_tokens` as `${string}::${string}::get_fee_tokens`,
+          `${await this._getCcipPackage(router)}::fee_quoter::get_fee_tokens` as `${string}::${string}::get_fee_tokens`,
       },
     })
     return Object.fromEntries(

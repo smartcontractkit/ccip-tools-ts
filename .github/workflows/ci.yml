@@ -133,12 +133,12 @@ jobs:
 
       - name: Run tests with coverage
         env:
-          # Max total wait for a suite's network locks. A suite that needs several
-          # locks (e.g. evm/fork.test.ts: sepolia, fuji, solana-devnet, api) gets
-          # them only when all are free at once, while single-lock suites take them
-          # in turn: under 10 min it timed out before the other suites finished
-          # (runs 42860314677, 42839821345). 30 min lets it run once they finish.
+          # Blocks that need multiple locks acquire them together. Allow a block to
+          # wait through transient RPC stalls in the suites ahead of it.
           NETWORK_LOCK_TIMEOUT_MS: '1800000'
+          # Node buffers test file output. Log measured durations instead of relying
+          # on Actions timestamps to distinguish lock waits and slow RPC probes.
+          NETWORK_TEST_TIMINGS: '1'
           # RPC endpoints per network, one secret each; a value may hold
           # several endpoints for the same network, comma-separated. Unset
           # secrets resolve to the keyless public defaults hard-coded in the

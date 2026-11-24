@@ -8,6 +8,7 @@ import {
   type Chain,
   type ChainGetter,
   type OffchainTokenData,
+  CCIPVersion,
   ExecutionState,
   jsonParse,
   networkInfo,
@@ -52,7 +53,7 @@ const execution = (state: ExecutionState = ExecutionState.Success) =>
 const commit = {
   report: { merkleRoot: txHash, minSeqNr: 1n, maxSeqNr: 1n },
   log: { address: offRamp, transactionHash: txHash, blockNumber: 1, tx: { from: offRamp } },
-} as CCIPVerifications
+} as Extract<CCIPVerifications, { log: unknown }>
 const attestations: OffchainTokenData[] = [{ _tag: 'usdc', attestation: '0xab' }]
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve))
 /** Mock `setTimeout`, so a test can end the 5 s grace that a found execution gives in `--wait`. */
@@ -72,6 +73,7 @@ function fixture(
     block?: Promise<number>
     origin?: Promise<string>
     receiptsError?: Error
+    request?: CCIPRequest
   } = {},
 ) {
   const finality = Promise.withResolvers<unknown>()
@@ -108,9 +110,13 @@ function fixture(
   const take = (signal?: boolean | AbortSignal) => {
     if (signal instanceof AbortSignal) signals.push(signal)
   }
+  const shownRequest = config.request ?? request
+  const shownSource = networkInfo(shownRequest.lane.sourceChainSelector)
   let receipts!: Parameters<Chain['getExecutionReceipts']>[0]
+  let verificationOffRamp: string | undefined
+  let receiptTx: Parameters<Chain['getExecutionReceiptsInTx']> | undefined
   const source = {
-    network: sourceNetwork,
+    network: shownSource,
     waitFinalized: async ({ abort }: Parameters<Chain['waitFinalized']>[0]) => {
       calls.push('finalized')
       take(abort)
@@ -126,9 +132,10 @@ function fixture(
   }
   const dest = {
     network: destNetwork,
-    getVerifications: async ({ watch }: Parameters<Chain['getVerifications']>[0]) => {
+    getVerifications: async (opts: Parameters<Chain['getVerifications']>[0]) => {
       calls.push('verifications')
-      take(watch)
+      verificationOffRamp = opts.offRamp
+      take(opts.watch)
       return config.commit ?? verification.promise
     },
     getExecutionReceipts: async function* (opts: typeof receipts) {
@@ -140,17 +147,25 @@ function fixture(
       await exec.promise
       yield execution(config.state)
     },
-    getBlockTimestamp: async () => config.block ?? 1_700_000_005,
+    getExecutionReceiptsInTx: async (...args: Parameters<Chain['getExecutionReceiptsInTx']>) => {
+      calls.push('receiptsInTx')
+      receiptTx = args
+      return [execution(config.state)]
+    },
+    getBlockInfo: async (block: number) => {
+      calls.push('block')
+      return { number: block, timestamp: await (config.block ?? 1_700_000_005) }
+    },
     getTransaction: async () => {
       calls.push('origin')
       return { from: await (config.origin ?? executor) }
     },
   }
   const getChain: ChainGetter = async (id) =>
-    (id === sourceNetwork.chainSelector ? source : dest) as unknown as Chain
+    (id === shownSource.chainSelector ? source : dest) as unknown as Chain
   const run = (argv: Partial<Parameters<typeof showRequests>[1]>) =>
     showRequests(ctx, { format: Format.log, ...argv } as Parameters<typeof showRequests>[1], {
-      request,
+      request: shownRequest,
       getChain,
     })
   return {
@@ -168,9 +183,21 @@ function fixture(
     get receipts() {
       return receipts
     },
+    get verificationOffRamp() {
+      return verificationOffRamp
+    },
+    get receiptTx() {
+      return receiptTx
+    },
   }
 }
 const indexOf = (writes: unknown[][], name: string) => writes.findIndex(([first]) => first === name)
+const parseEnvelope = (writes: unknown[][]) =>
+  jsonParse<{
+    request: CCIPRequest
+    receipts: CCIPExecution[]
+    verifications?: CCIPVerifications
+  }>(String(writes[0]?.[0]))
 
 for (const state of [ExecutionState.Success, ExecutionState.Failed]) {
   it(
@@ -304,6 +331,21 @@ it('pretty: a slow origin lookup does not hold the receipt past the grace', asyn
   assert.deepEqual(f.warnings, [])
 })
 
+it('pretty: takes the commit time from its log, without a block read', async () => {
+  const logged = {
+    ...commit,
+    log: { ...commit.log, blockTimestamp: 1_700_000_007 },
+  } as CCIPVerifications
+  const f = fixture({ attestations, commit: logged })
+  f.exec.resolve()
+  await f.run({ format: Format.pretty })
+  const table = f.tables.find((t) => 'merkleRoot' in t)
+  assert.ok(table, 'the commit table is printed')
+  assert.match(String(table.timestamp), /\(7s after request\)/)
+  assert.ok(!f.calls.includes('block'), 'no block read for a log that has its timestamp')
+  assert.deepEqual(f.warnings, [])
+})
+
 it('non-wait: preserves one-shot attestation, commit order, and receipt scan hint', async () => {
   const f = fixture({ attestations, commit })
   f.exec.resolve()
@@ -316,3 +358,74 @@ it('non-wait: preserves one-shot attestation, commit order, and receipt scan hin
   assert.ok(indices.every((index, n) => index >= 0 && (n === 0 || index > indices[n - 1]!)))
   assert.deepEqual(f.warnings, [])
 })
+
+for (const version of [CCIPVersion.V1_2, CCIPVersion.V1_5, CCIPVersion.V1_6]) {
+  it(`show JSON: includes the historical ${version} commit report and receipt`, async () => {
+    const evmSource = networkInfo('avalanche-testnet-fuji').chainSelector
+    const historical: CCIPRequest = {
+      ...request,
+      lane: { ...request.lane, sourceChainSelector: evmSource, onRamp: offRamp, version },
+      message: { ...request.message, sourceChainSelector: evmSource, sender: executor },
+      log: { ...request.log, address: offRamp, transactionHash: txHash },
+      tx: { ...request.tx, hash: txHash, from: executor },
+    }
+    const f = fixture({ request: historical, attestations: [], commit })
+    f.exec.resolve()
+    await f.run({ format: Format.json })
+
+    assert.deepEqual(f.calls, ['verifications', 'receipts'])
+    assert.equal(f.receipts.verifications, commit)
+    assert.equal(f.receipts.offRamp, offRamp)
+    const envelope = parseEnvelope(f.writes)
+    assert.equal(envelope.request.lane.version, version)
+    assert.deepEqual(envelope.verifications, commit)
+    assert.equal(envelope.receipts[0]?.receipt.messageId, messageId)
+  })
+}
+
+it('show JSON: v2 uses the message OffRamp and preserves CCV verifications', async () => {
+  const messageOffRamp = '0x' + 'cd'.repeat(20)
+  const v2: CCIPRequest = {
+    ...request,
+    lane: { ...request.lane, version: CCIPVersion.V2_0 },
+    message: { ...request.message, offRampAddress: messageOffRamp },
+  }
+  const ccvs = {
+    verificationPolicy: { requiredCCVs: [executor], optionalCCVs: [], optionalThreshold: 0 },
+    verifications: [],
+  } satisfies CCIPVerifications
+  const f = fixture({ request: v2, attestations: [], commit: ccvs })
+  f.exec.resolve()
+  await f.run({ format: Format.json })
+
+  assert.equal(f.verificationOffRamp, messageOffRamp)
+  assert.equal(f.receipts.offRamp, messageOffRamp)
+  assert.deepEqual(parseEnvelope(f.writes).verifications, ccvs)
+})
+
+for (const version of [CCIPVersion.V1_6, CCIPVersion.V2_0]) {
+  it(`show JSON: ${version} uses the API receipt transaction without scanning`, async () => {
+    assert.ok(request.metadata)
+    const indexed: CCIPRequest = {
+      ...request,
+      lane: { ...request.lane, version },
+      metadata: { ...request.metadata, receiptTransactionHash: txHash },
+    }
+    const f = fixture({ request: indexed, attestations: [] })
+    await f.run({ format: Format.json })
+
+    assert.deepEqual(f.calls, ['receiptsInTx'])
+    assert.deepEqual(f.receiptTx, [
+      txHash,
+      {
+        offRamp,
+        messageId,
+        sourceChainSelector: sourceNetwork.chainSelector,
+        sequenceNumber: undefined,
+      },
+    ])
+    const envelope = parseEnvelope(f.writes)
+    assert.equal(envelope.verifications, undefined)
+    assert.equal(envelope.receipts[0]?.log.transactionHash, txHash)
+  })
+}

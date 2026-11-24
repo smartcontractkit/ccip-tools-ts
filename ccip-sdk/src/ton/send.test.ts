@@ -159,6 +159,22 @@ describe('TON send unit tests', () => {
 
       assert.equal(unsigned.value, fee + customBuffer)
     })
+
+    it('should use txGasLimit as the total value when provided', () => {
+      const fee = 2_000_000_000n
+      const txGasLimit = 750_000_000
+      const messageWithFee = { ...baseMessage, fee }
+      const unsigned = generateUnsignedCcipSend(
+        { provider: mockProvider },
+        'sender',
+        TEST_ROUTER,
+        TEST_DEST_CHAIN_SELECTOR,
+        messageWithFee,
+        { txGasLimit },
+      )
+
+      assert.equal(unsigned.value, BigInt(txGasLimit))
+    })
   })
 
   describe('getFee', () => {

@@ -533,6 +533,7 @@ const SELECTORS: Selectors = {
     selector: 15293031020466096408n,
     name: 'lisk-mainnet',
     network_type: 'MAINNET',
+    deprecated: true,
     family: 'EVM',
   },
   '1284': {
@@ -815,6 +816,7 @@ const SELECTORS: Selectors = {
     selector: 5298399861320400553n,
     name: 'ethereum-testnet-sepolia-lisk-1',
     network_type: 'TESTNET',
+    deprecated: true,
     family: 'EVM',
   },
   '4217': {
@@ -1780,6 +1782,12 @@ const SELECTORS: Selectors = {
     selector: 13879014182901017172n,
     name: 'dtcc-mainnet-appchain',
     network_type: 'MAINNET',
+    family: 'EVM',
+  },
+  '2026110701': {
+    selector: 16138070312089718605n,
+    name: 'private-testnet-lignite',
+    network_type: 'TESTNET',
     family: 'EVM',
   },
   '2494104990': {
