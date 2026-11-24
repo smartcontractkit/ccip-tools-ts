@@ -1435,7 +1435,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const onRamps = []
         for (const onRamp of sourceChainConfig.onRamps) {
           try {
-            onRamps.push(decodeOnRampAddress(onRamp, sourceFamily))
+            onRamps.push(decodeOnRampAddress(onRamp, sourceFamily, CCIPVersion.V2_0))
           } catch {
             // ignore
           }

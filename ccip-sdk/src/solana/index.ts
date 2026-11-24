@@ -790,13 +790,17 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
 
     // v1 exposes a single `onRamp`; v2 exposes a `onRamps` Vec. Normalize both to `onRamps`.
     const sourceFamily = networkInfo(sourceChainSelector).family
-    const decodeOnRampField = (onRampField: { bytes: readonly number[]; len: number }) =>
+    const decodeOnRampField = (
+      onRampField: { bytes: readonly number[]; len: number },
+      version?: CCIPVersion,
+    ) =>
       decodeOnRampAddress(
         getAddressBytes(onRampField.bytes).subarray(0, onRampField.len),
         sourceFamily,
+        version,
       )
     const onRamps = Array.isArray(sourceChain.config.onRamps)
-      ? sourceChain.config.onRamps.map(decodeOnRampField)
+      ? sourceChain.config.onRamps.map((onRamp) => decodeOnRampField(onRamp, CCIPVersion.V2_0))
       : [decodeOnRampField(sourceChain.config.onRamp)]
     const { onRamp: _onRamp, onRamps: _onRamps, ...sourceConfig } = sourceChain.config
 

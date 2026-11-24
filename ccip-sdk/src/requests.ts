@@ -66,6 +66,8 @@ export function normalizeDeep<T extends Record<string, unknown>>(
   return convertKeysToCamelCase(data, (v, k) => {
     // Flags such as tokenReceiverAllowed can match an address field name pattern.
     if (typeof v === 'boolean') return v
+    // and so can hashes, such as allowedOnRampHashes
+    if (typeof v === 'string' && k?.match(/hash(es)?$/i)) return v
     if (k === 'chainFamilySelector') return hexlify(getDataBytes(v as number[]))
     if (typeof v === 'object' && v != null && (v as { _bn?: unknown } | undefined)?._bn)
       return (v as PublicKey).toString()
@@ -309,7 +311,12 @@ export async function resolveLane(
   log: ChainLog,
 ): Promise<Lane> {
   if ('destChainSelector' in message) {
-    if (source.network.family === ChainFamily.Canton) {
+    // an Aptos 2.0 message names its OnRamp as remote chains do: by its state address, and not by
+    // the module which emits the log
+    if (
+      source.network.family === ChainFamily.Canton ||
+      (source.network.family === ChainFamily.Aptos && 'offRampAddress' in message)
+    ) {
       const onRamp =
         ('onRampAddress' in message &&
           typeof message.onRampAddress === 'string' &&
