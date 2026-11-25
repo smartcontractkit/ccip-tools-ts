@@ -63,7 +63,7 @@ All bytearray fields (addresses, data payloads) use the **destination chain's na
 | TON          | `workchain:hash`                     | Hex string   | TONScan          |
 
 :::tip Aptos/Sui Module Suffixes
-Aptos and Sui addresses often include module suffixes (e.g., `0x123...abc::router`, `0x123...abc::onramp`). The `getAddress()` method preserves these suffixes. Different CCIP components share the same package address but differ by module: `::router`, `::onramp`, `::offramp`, `::fee_quoter`.
+Aptos and Sui addresses often include module suffixes (e.g., `0x123...abc::router`, `0x123...abc::onramp`). The `getAddress()` method preserves these suffixes. In a CCIP 1.6 deployment, the components share one package address and differ by module: `::router`, `::onramp`, `::offramp`, `::fee_quoter`. In an Aptos CCIP 2.0 deployment, each component is its own package, and remote chains and messages reference an OnRamp or OffRamp by its state address, which has no modules. `AptosChain` uses that state address for a 2.0 ramp, and finds its `<package>::<module>` when it calls the contract. A log keeps the `<package>::<module>` which emits it.
 :::
 
 ### Determining Format for New Chains

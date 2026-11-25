@@ -7,7 +7,7 @@ import {
   TransactionResponseType,
   getAptosFullNode,
 } from '@aptos-labs/ts-sdk'
-import { getBytes, hexlify, isHexString } from 'ethers'
+import { getBytes, hexlify, isHexString, keccak256 } from 'ethers'
 import { memoize } from 'micro-memoize'
 import type { SetRequired } from 'type-fest'
 
@@ -20,6 +20,7 @@ import {
   CCIPNotImplementedError,
   CCIPTopicsInvalidError,
 } from '../errors/index.ts'
+import { decodeMessageV1Raw } from '../messages.ts'
 import { type ChainLog, type LeanNumbers, type WithLogger, ExecutionState } from '../types.ts'
 import { passesTypeAndVersion, signalToPromise } from '../utils.ts'
 import { ExecutionReportCodec } from './types.ts'
@@ -101,6 +102,21 @@ export async function getVersionTimestamp(
   return +(tx as UserTransactionResponse).timestamp / 1e6
 }
 
+/**
+ * {@link getVersionTimestamp} for comparisons against a `startTime` floor. A version the node
+ * pruned reads as 0: older than every version it keeps. A load-balanced endpoint can list an
+ * event (or a version) that the next request finds pruned; such a version is unreadable there
+ * anyway (no hash, no timestamp), so it is placed before the floor instead of failing the scan.
+ */
+async function getStartTimestamp(provider: Aptos, version: number): Promise<number> {
+  try {
+    return await getVersionTimestamp(provider, version)
+  } catch (err) {
+    if (isAptosVersionPrunedError(err)) return 0
+    throw err
+  }
+}
+
 type AptosEntryFunction = {
   function: string
   arguments: unknown[]
@@ -161,6 +177,13 @@ function isExecutionReport(value: unknown): value is AptosExecutionReport {
 function parseExecutionReport(value: unknown): AptosExecutionReport | undefined {
   const bytes = toAptosBytes(value)
   if (bytes) {
+    try {
+      // a 2.0 `execute` takes the message as it was emitted (MessageV1), whose hash is its id
+      const message = decodeMessageV1Raw(bytes)
+      return { ...message, sequenceNumber: message.messageNumber, messageId: keccak256(bytes) }
+    } catch {
+      // Not a 2.0 message.
+    }
     try {
       const report = ExecutionReportCodec.parse(bytes)
       if (isExecutionReport(report)) return report
@@ -241,8 +264,8 @@ function aptosInteger(value: unknown): string | undefined {
 
 /**
  * Turns Aptos's VM status into stable, useful return data. Move aborts expose
- * their module and numeric code in the status string; no ABI is required for
- * this decoding.
+ * their module and code (numeric, or named: `<NAME>(0x<code>)`) in the status
+ * string; no ABI is required for this decoding.
  */
 function getAptosFailureData(
   tx: UserTransactionResponse,
@@ -255,13 +278,14 @@ function getAptosFailureData(
     function: functionName,
     gas_used: tx.gas_used,
   }
-  const abort = vmStatus.match(/Move abort in (.+?): code (\d+)/i)
+  const abort = vmStatus.match(/Move abort in (.+?): (?:code (\d+)|(\w+)\((0x[0-9a-f]+)\))/i)
   if (abort) {
     // the VM renders the module's address padded; surface it short, like the
     // rest of the SDK's Aptos addresses
     const [locPkg, ...locRest] = abort[1]!.split('::')
     data.location = [toAptosShortAddress(locPkg!), ...locRest].join('::')
-    data.abort_code = abort[2]!
+    data.abort_code = abort[2] ?? BigInt(abort[4]!).toString()
+    if (abort[3]) data.abort_name = abort[3]
   }
   const status = vmStatus.match(/Execution failed with status:\s*(.+)$/i)
   if (status) data.status = status[1]!.trim()
@@ -481,12 +505,27 @@ async function initHandleState(
 ) {
   const fetchBatch = memoize(
     async (start?: number) => {
-      const { data }: { data: ResEvent[] } = await getAptosFullNode({
-        aptosConfig: provider.config,
-        originMethod: 'getEventsByEventHandle',
-        path: `accounts/${stateAddr}/events/${opts.address}::${eventHandlerField}`,
-        params: { start, limit },
-      })
+      const get = async (start_?: number) => {
+        const { data }: { data: ResEvent[] } = await getAptosFullNode({
+          aptosConfig: provider.config,
+          originMethod: 'getEventsByEventHandle',
+          path: `accounts/${stateAddr}/events/${opts.address}::${eventHandlerField}`,
+          params: { start: start_, limit },
+        })
+        return data
+      }
+      let data: ResEvent[]
+      try {
+        data = await get(start)
+      } catch (err) {
+        // a pruning node rejects a start below the oldest event it keeps, and names that one:
+        // continue from it (the pruned events are unreachable on this node)
+        const oldest = isAptosVersionPrunedError(err)
+          ? Number((err as Error).message.match(/oldest available sequence number is (\d+)/)?.[1])
+          : NaN
+        if (!(Number.isSafeInteger(oldest) && oldest > (start ?? 0))) throw err
+        data = await get(oldest)
+      }
       if (!start && data.length)
         fetchBatch.cache.set([+data[0]!.sequence_number], Promise.resolve(data))
       return data
@@ -552,11 +591,11 @@ async function initHandleState(
     if (
       opts.startTime != null &&
       (opts.startBlock == null || Number(opts.startBlock) < +initialBatch[0]!.version) &&
-      Number(opts.startTime) < (await getVersionTimestamp(provider, +initialBatch[0]!.version))
+      Number(opts.startTime) < (await getStartTimestamp(provider, +initialBatch[0]!.version))
     ) {
       const i = await binarySearchFirst(0, Math.floor(end / limit) - 1, async (i) => {
         const batch = await fetchBatch(end - (i + 1) * limit + 1)
-        const firstTimestamp = await getVersionTimestamp(provider, +batch[0]!.version)
+        const firstTimestamp = await getStartTimestamp(provider, +batch[0]!.version)
         return firstTimestamp > Number(opts.startTime!)
       })
       start = Math.max(end - (i + 1) * limit + 1, 0)
@@ -631,11 +670,11 @@ async function fetchHandleRound(
     opts.startTime != null &&
     !state.hintCoversFloor && // the resume hint already satisfies the startTime floor
     data.length > 0 && // a hint past the tip can make the first batch empty
-    (await getVersionTimestamp(provider, +data[0]!.version)) < Number(opts.startTime)
+    (await getStartTimestamp(provider, +data[0]!.version)) < Number(opts.startTime)
   ) {
     // the first batch may have some head which is not in the range
     const actualStart = await binarySearchFirst(0, data.length - 1, async (i) => {
-      const timestamp = await getVersionTimestamp(provider, +data[i]!.version)
+      const timestamp = await getStartTimestamp(provider, +data[i]!.version)
       return timestamp < Number(opts.startTime!)
     })
     data.splice(0, actualStart - 1)
@@ -1109,24 +1148,57 @@ async function resolveAptosEndVersion(
   return (await getAptosLedgerVersion(provider)) ?? Number.MAX_SAFE_INTEGER
 }
 
+/**
+ * Tells if an error is the node's answer for a ledger version it pruned (HTTP 410,
+ * `version_pruned`). A pruning node keeps only recent history; a load-balanced endpoint can
+ * answer one request from an archival node and the next from a pruning one.
+ */
+export function isAptosVersionPrunedError(err: unknown): boolean {
+  if (!(err instanceof AptosApiError)) return false
+  const code = (err.data as { error_code?: unknown } | undefined)?.error_code
+  return code === 'version_pruned' || (err.status === 410 && /pruned/i.test(err.message))
+}
+
+/**
+ * Binary search for the first ledger version at or after `timestamp`. A version the node pruned
+ * reads as older than every version it keeps, so the search continues above it. When the result
+ * sits directly above pruned history, the real first version can be older than what the node
+ * keeps: a warning tells that the scan cannot reach it.
+ */
 async function findAptosVersionAtOrAfter(
   provider: Aptos,
   timestamp: number,
   latestVersion: number,
+  logger: WithLogger['logger'] = console,
 ): Promise<number> {
   if (!Number.isFinite(timestamp) || latestVersion < 0) return 0
   if (typeof provider.getTransactionByVersion !== 'function') return 0
   let low = 0
   let high = latestVersion
   let result = latestVersion + 1
+  let lastPruned: number | undefined
   while (low <= high) {
     const mid = Math.floor((low + high) / 2)
-    if ((await getVersionTimestamp(provider, mid)) < timestamp) low = mid + 1
+    let before: boolean
+    try {
+      before = (await getVersionTimestamp(provider, mid)) < timestamp
+    } catch (err) {
+      if (!isAptosVersionPrunedError(err)) throw err
+      before = true
+      lastPruned = Math.max(lastPruned ?? mid, mid)
+    }
+    if (before) low = mid + 1
     else {
       result = mid
       high = mid - 1
     }
   }
+  if (lastPruned != null && result === lastPruned + 1)
+    logger.warn(
+      `Aptos: the node pruned the history before version ${result}. The scan starts at that ` +
+        'version: earlier executions, also failed attempts, are not found. Use an archival ' +
+        'endpoint to see them.',
+    )
   return result
 }
 
@@ -1186,7 +1258,7 @@ async function* streamAptosExecutionLogs(
   if (opts.startBlock == null && opts.startTime != null && initialEnd < Number.MAX_SAFE_INTEGER)
     nextVersion = Math.max(
       nextVersion,
-      await findAptosVersionAtOrAfter(ctx.provider, Number(opts.startTime), initialEnd),
+      await findAptosVersionAtOrAfter(ctx.provider, Number(opts.startTime), initialEnd, ctx.logger),
     )
 
   const scanTo = async function* (end: number): AsyncGenerator<ChainLog> {
@@ -1377,7 +1449,7 @@ async function initFailureScanState(
     if (tip != null)
       nextVersion = Math.max(
         nextVersion,
-        await findAptosVersionAtOrAfter(ctx.provider, Number(opts.startTime), tip),
+        await findAptosVersionAtOrAfter(ctx.provider, Number(opts.startTime), tip, ctx.logger),
       )
   }
   return {
