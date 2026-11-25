@@ -2,6 +2,13 @@ import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
 
 import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  MINT_SIZE,
+  MintLayout,
+  TOKEN_PROGRAM_ID,
+  getAssociatedTokenAddressSync,
+} from '@solana/spl-token'
+import {
   type Connection,
   type VersionedTransaction,
   Keypair,
@@ -14,8 +21,9 @@ import '../index.ts' // registers the chain families
 import { CCIPSolanaReceiverRegistryInvalidError } from '../errors/index.ts'
 import { networkInfo } from '../networks.ts'
 import { CCIPVersion } from '../types.ts'
+import { parseTypeAndVersion } from '../utils.ts'
 import { sighash } from './coder.ts'
-import { SVMTokenReceiverUsage } from './extra-args.ts'
+import { SVMTokenReceiverUsage, encodeSVMExecutorArgsV1 } from './extra-args.ts'
 import { estimateExecComputeUnits, getReceiverVersion } from './gas.ts'
 import { SolanaChain } from './index.ts'
 
@@ -86,15 +94,27 @@ function captureReceiveIx(extra: Partial<Record<keyof Connection, unknown>> = {}
   })
   const connection = { simulateTransaction, ...extra } as unknown as Connection
   const receiveIx = () => {
-    const { compiledInstructions, staticAccountKeys } = simulated.at(-1)!.message
-    // [setComputeUnitLimit, ccip_receive(_v2)]; token setup fails on the mock, so it's skipped
+    const message = simulated.at(-1)!.message
+    const { compiledInstructions, staticAccountKeys } = message
+    // [setComputeUnitLimit, ...token setup, ccip_receive(_v2)]; the receiver callback is last
     const ix = compiledInstructions.at(-1)!
     return {
       programId: staticAccountKeys[ix.programIdIndex]!.toBase58(),
       data: hexlify(ix.data),
+      accounts: ix.accountKeyIndexes.map((i) => ({
+        pubkey: staticAccountKeys[i]!.toBase58(),
+        isWritable: message.isAccountWritable(i),
+      })),
     }
   }
-  return { connection, receiveIx }
+  const instructions = () => {
+    const { compiledInstructions, staticAccountKeys } = simulated.at(-1)!.message
+    return compiledInstructions.map((ix) => ({
+      programId: staticAccountKeys[ix.programIdIndex]!.toBase58(),
+      keys: ix.accountKeyIndexes.map((i) => staticAccountKeys[i]!.toBase58()),
+    }))
+  }
+  return { connection, receiveIx, instructions }
 }
 
 describe('estimateExecComputeUnits receiver interface', () => {
@@ -343,5 +363,246 @@ describe('SolanaChain.estimateReceiveExecution receiver interface', () => {
     const { discriminator, sender } = await simulatedCallback(CCIPVersion.V1_6)
     assert.deepEqual(discriminator, new Uint8Array(sighash('global', 'ccip_receive')))
     assert.equal(sender, evmSender)
+  })
+})
+
+const quiet = { debug: () => {}, warn: () => {} } as unknown as Console
+
+function mintAccount(authority: PublicKey) {
+  const data = Buffer.alloc(MINT_SIZE)
+  MintLayout.encode(
+    {
+      mintAuthorityOption: 1,
+      mintAuthority: authority,
+      supply: 0n,
+      decimals: 9,
+      isInitialized: true,
+      freezeAuthorityOption: 0,
+      freezeAuthority: PublicKey.default,
+    },
+    data,
+  )
+  return { owner: TOKEN_PROGRAM_ID, executable: false, lamports: 1_000_000, data }
+}
+
+describe('estimateExecComputeUnits token setup, per token delivery mode', () => {
+  const mint = Keypair.generate().publicKey
+  const tokenReceiver = Keypair.generate().publicKey
+  const ata = getAssociatedTokenAddressSync(mint, tokenReceiver, true, TOKEN_PROGRAM_ID)
+
+  /** the token setup instructions simulated before the callback, for a receiver without an ATA */
+  const setupFor = async (tokenReceiverUsage?: SVMTokenReceiverUsage) => {
+    const { connection, instructions } = captureReceiveIx({
+      getAccountInfo: async (key: PublicKey) =>
+        key.equals(mint) ? mintAccount(Keypair.generate().publicKey) : null,
+    })
+    await estimateExecComputeUnits({
+      connection,
+      router: randomPublicKey(),
+      offRamp: randomPublicKey(),
+      receiverVersion: 2,
+      tokenReceiverUsage,
+      message: {
+        sourceChainSelector: 1n,
+        messageId: hexlify(randomBytes(32)),
+        receiver: randomPublicKey(),
+        tokenReceiver: tokenReceiver.toBase58(),
+        destTokenAmounts: [{ token: mint.toBase58(), amount: 7n }],
+      },
+      logger: quiet,
+    })
+    return instructions().filter(
+      ({ programId }) =>
+        programId === TOKEN_PROGRAM_ID.toBase58() ||
+        programId === ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
+    )
+  }
+
+  it('credits the token receiver itself for UseAsIs', async () => {
+    const setup = await setupFor(SVMTokenReceiverUsage.UseAsIs)
+    // MintToChecked [mint, destination, authority]; no ATA to create
+    assert.deepEqual(
+      setup.map(({ programId, keys }) => [programId, keys[1]]),
+      [[TOKEN_PROGRAM_ID.toBase58(), tokenReceiver.toBase58()]],
+    )
+  })
+
+  it("creates and credits the token receiver's ATA for DeriveAtaAndCreate (the default)", async () => {
+    for (const usage of [undefined, SVMTokenReceiverUsage.DeriveAtaAndCreate]) {
+      const setup = await setupFor(usage)
+      assert.deepEqual(
+        setup.map(({ programId }) => programId),
+        [ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(), TOKEN_PROGRAM_ID.toBase58()],
+      )
+      assert.equal(setup[1]!.keys[1], ata.toBase58())
+    }
+  })
+
+  it('credits nothing for DeriveAtaDontCreate when the ATA is missing', async () => {
+    assert.deepEqual(await setupFor(SVMTokenReceiverUsage.DeriveAtaDontCreate), [])
+  })
+})
+
+describe('SolanaChain.estimateReceiveExecution, one Router serving 1.6 and 2.0 OffRamps', () => {
+  const router = randomPublicKey()
+  const offRamp16 = randomPublicKey()
+  const offRamp20 = randomPublicKey()
+  const receiver = randomPublicKey()
+  const tokenReceiver = randomPublicKey()
+  const mint = randomPublicKey()
+  const writable = randomPublicKey()
+  const readonly = randomPublicKey()
+  const messageId = hexlify(randomBytes(32))
+  const evmSender = '0x00000000000000000000000000000000000000aa'
+  const sourceChainSelector = networkInfo('ethereum-testnet-sepolia').chainSelector
+  const [registryPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('receiver_registry'), new PublicKey(receiver).toBuffer()],
+    new PublicKey(router),
+  )
+  const v2Registry = {
+    owner: new PublicKey(router),
+    executable: false,
+    lamports: 1_000_000,
+    data: Buffer.from(
+      getBytes(
+        concat([
+          new Uint8Array([143, 191, 40, 192, 11, 255, 173, 235, 254, 1]),
+          new PublicKey(receiver).toBytes(),
+          new Uint8Array([2]),
+        ]),
+      ),
+    ),
+  }
+  const receiverAccounts = { accounts: [writable, readonly], accountIsWritableBitmap: 0b01n }
+  const v2Discriminator = new Uint8Array([193, 155, 158, 156, 161, 212, 122, 116])
+  /** `ccip_receive_v2` data for this message, with its token transfer delivered per `usage` */
+  const v2Callback = (usage: SVMTokenReceiverUsage) =>
+    hexlify(
+      concat([
+        v2Discriminator,
+        messageId,
+        le(sourceChainSelector, 8),
+        u32(32),
+        zeroPadValue(evmSender, 32),
+        u32(2),
+        '0x1234',
+        '0x01', // Some(TokenTransfer)
+        new PublicKey(mint).toBytes(),
+        le(7, 8),
+        new PublicKey(tokenReceiver).toBytes(),
+        new Uint8Array([usage]),
+      ]),
+    )
+
+  const setup = () => {
+    const registryReads = mock.fn()
+    const { connection, receiveIx } = captureReceiveIx({
+      getAccountInfo: async (key: PublicKey) => {
+        if (!key.equals(registryPda)) return null
+        registryReads()
+        return v2Registry
+      },
+      getSignaturesForAddress: async () => [],
+    })
+    const solana = new SolanaChain(connection, networkInfo('solana-devnet'), {
+      apiClient: null,
+      logger: quiet,
+    })
+    Object.assign(solana, {
+      typeAndVersion: async (address: string) =>
+        parseTypeAndVersion(`ccip-offramp ${address === offRamp16 ? '1.6.0' : '2.0.0'}`),
+      getRouterForOffRamp: async () => router,
+      getTokenInfo: async () => ({ symbol: 'TKN', decimals: 9 }),
+    })
+    // the receiver's accounts, past the 3 fixed ones (authority, OffRamp, allowed-OffRamp PDA)
+    const callback = () => {
+      const { data, accounts } = receiveIx()
+      return { data, remainingAccounts: accounts.slice(3) }
+    }
+    return { solana, registryReads, callback }
+  }
+
+  // as `send` passes it: extraArgs fields flat in the message
+  const preSendMessage = {
+    sourceChainSelector,
+    messageId,
+    receiver,
+    sender: evmSender,
+    data: '0x1234',
+    tokenReceiver,
+    tokenAmounts: [{ token: mint, amount: 7n }],
+    executorArgs: encodeSVMExecutorArgsV1({
+      useAta: SVMTokenReceiverUsage.UseAsIs,
+      ...receiverAccounts,
+    }),
+  }
+
+  it('before send, a 2.0 OffRamp reads the registry and uses the executorArgs', async () => {
+    const { solana, registryReads, callback } = setup()
+    await solana.estimateReceiveExecution({ offRamp: offRamp20, message: preSendMessage })
+    assert.equal(registryReads.mock.calls.length, 1)
+    const { data, remainingAccounts } = callback()
+    assert.equal(data, v2Callback(SVMTokenReceiverUsage.UseAsIs))
+    assert.deepEqual(remainingAccounts, [
+      { pubkey: writable, isWritable: true },
+      { pubkey: readonly, isWritable: false },
+    ])
+  })
+
+  it('before send, a 1.6 OffRamp skips the registry and keeps the legacy accounts', async () => {
+    const { solana, registryReads, callback } = setup()
+    await solana.estimateReceiveExecution({ offRamp: offRamp16, message: preSendMessage })
+    assert.equal(registryReads.mock.calls.length, 0)
+    const { data, remainingAccounts } = callback()
+    assert.equal(data.slice(0, 18), hexlify(sighash('global', 'ccip_receive')))
+    // executorArgs is a 2.0 field: a 1.6 OffRamp takes the receiver's accounts from `accounts`
+    assert.deepEqual(remainingAccounts, [])
+    const legacy = setup()
+    await legacy.solana.estimateReceiveExecution({
+      offRamp: offRamp16,
+      message: { ...preSendMessage, ...receiverAccounts },
+    })
+    assert.deepEqual(legacy.callback().remainingAccounts, [
+      { pubkey: writable, isWritable: true },
+      { pubkey: readonly, isWritable: false },
+    ])
+  })
+
+  it('after send, uses the signed destBlob and token receiver of a 2.0 message', async () => {
+    const { solana, registryReads, callback } = setup()
+    Object.assign(solana, {
+      getMessageById: async () => ({
+        lane: { sourceChainSelector },
+        message: {
+          messageId,
+          receiver,
+          sender: evmSender,
+          data: '0x1234',
+          offRampAddress: offRamp20,
+          destBlob: encodeSVMExecutorArgsV1({
+            useAta: SVMTokenReceiverUsage.DeriveAtaDontCreate,
+            ...receiverAccounts,
+          }),
+          tokenAmounts: [
+            {
+              amount: 7n,
+              sourcePoolAddress: '0x00000000000000000000000000000000000000b0',
+              sourceTokenAddress: '0x00000000000000000000000000000000000000b1',
+              destTokenAddress: mint,
+              tokenReceiver,
+              extraData: '0x',
+            },
+          ],
+        },
+      }),
+    })
+    await solana.estimateReceiveExecution({ messageId })
+    assert.equal(registryReads.mock.calls.length, 1)
+    const { data, remainingAccounts } = callback()
+    assert.equal(data, v2Callback(SVMTokenReceiverUsage.DeriveAtaDontCreate))
+    assert.deepEqual(remainingAccounts, [
+      { pubkey: writable, isWritable: true },
+      { pubkey: readonly, isWritable: false },
+    ])
   })
 })

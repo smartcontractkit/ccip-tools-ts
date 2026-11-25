@@ -27,6 +27,7 @@ import {
   CCIPInteractiveRequiredError,
   CCIPMessageIdNotFoundError,
   CCIPTransactionNotFoundError,
+  ChainFamily,
   discoverOffRamp,
   estimateReceiveExecution,
   isSupportedTxHash,
@@ -275,6 +276,19 @@ async function manualExec(
           '< original gasLimit =',
           origLimit,
           '. Leaving unchanged.',
+        )
+      } else if (
+        dest.network.family === ChainFamily.Solana &&
+        'ccipReceiveGasLimit' in request.message
+      ) {
+        // a 2.0 message to Solana signs its receiver budget, and the OffRamp has no override for it
+        logger.warn(
+          'Estimated receiver computeUnits =',
+          estimated,
+          ...(argv.estimateGasLimit ? ['+', argv.estimateGasLimit, '% =', withBuffer] : []),
+          '> signed ccipReceiveGasLimit =',
+          origLimit,
+          ". Advisory only: a CCIP 2.0 message to Solana can't override its signed receiver budget; --tx-gas-limit sets the execute transaction's compute budget, not the receiver's.",
         )
       } else {
         if (argv.format !== Format.json)

@@ -103,7 +103,10 @@ type EstimateExecComputeUnitsOpts = {
   }
   /** Receiver interface to call (see {@link getReceiverVersion}); default 1 (`ccip_receive`) */
   receiverVersion?: SolanaReceiverVersion
-  /** v2 only: how the OffRamp delivers the tokens to `tokenReceiver`; default `DeriveAtaAndCreate` */
+  /**
+   * v2 only (a 2.0 message's `destBlob`): how the OffRamp delivers the tokens to `tokenReceiver`,
+   * which the callback carries and the token setup credits; default `DeriveAtaAndCreate`
+   */
   tokenReceiverUsage?: SVMTokenReceiverUsage
 } & WithLogger
 
@@ -122,11 +125,13 @@ function getReceiverRemainingAccounts(
 async function getTokenSetupInstructions({
   connection,
   message,
+  tokenReceiverUsage = SVMTokenReceiverUsage.DeriveAtaAndCreate,
   payer,
   logger,
 }: {
   connection: EstimateExecComputeUnitsOpts['connection']
   message: EstimateExecComputeUnitsOpts['message']
+  tokenReceiverUsage?: SVMTokenReceiverUsage
   payer: PublicKey
 } & WithLogger): Promise<TransactionInstruction[]> {
   if (!message.tokenReceiver || !message.destTokenAmounts?.length) return []
@@ -146,8 +151,17 @@ async function getTokenSetupInstructions({
       continue
     }
 
-    const ataInfo = await connection.getAccountInfo(ata)
-    if (!ataInfo) {
+    // where the OffRamp delivers the tokens: `UseAsIs` takes the token receiver as the token
+    // account itself; otherwise its associated token account, which only `DeriveAtaAndCreate`
+    // creates (a missing one fails the real execution, so there's nothing to credit)
+    let destination = ata
+    if (tokenReceiverUsage === SVMTokenReceiverUsage.UseAsIs) {
+      destination = tokenReceiver
+    } else if (!(await connection.getAccountInfo(ata))) {
+      if (tokenReceiverUsage !== SVMTokenReceiverUsage.DeriveAtaAndCreate) {
+        logger?.debug('Skipping Solana token setup; token receiver has no ATA:', ata.toBase58())
+        continue
+      }
       instructions.push(
         createAssociatedTokenAccountIdempotentInstruction(
           payer,
@@ -162,7 +176,7 @@ async function getTokenSetupInstructions({
     instructions.push(
       createMintToCheckedInstruction(
         mint,
-        ata,
+        destination,
         mintInfo.mintAuthority,
         tokenAmount.amount,
         mintInfo.decimals,
@@ -255,6 +269,7 @@ export async function estimateExecComputeUnits({
   const setupIxs = await getTokenSetupInstructions({
     connection,
     message,
+    tokenReceiverUsage,
     payer: SIMULATION_PAYER,
     logger,
   }).catch((err: unknown) => {

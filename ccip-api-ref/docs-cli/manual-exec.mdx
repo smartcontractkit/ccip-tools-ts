@@ -266,6 +266,8 @@ Solana transactions have size limits. For large messages:
 
 After successful execution, buffers auto-clear. Lookup tables require a grace period before deletion.
 
+A CCIP 2.0 message signs its receiver's compute budget (`ccipReceiveGasLimit`), and the Solana OffRamp has no override for it. For such a message, `--estimate-gas-limit` only reports the receiver estimate, and warns when it exceeds the signed budget. `--tx-gas-limit` sets the execute transaction's compute budget, not the receiver's.
+
 ## Canton Considerations
 
 Canton execution submits transactions directly using the JWT from config (either the static `jwt` field or a token resolved from `auth`).

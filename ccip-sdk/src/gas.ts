@@ -38,7 +38,7 @@ export type EstimateMessageInput = Simplify<
     Partial<
       Pick<
         CCIPMessage_V2_0,
-        'messageId' | 'sender' | 'onRampAddress' | 'offRampAddress' | 'finality'
+        'messageId' | 'sender' | 'onRampAddress' | 'offRampAddress' | 'finality' | 'destBlob'
       >
     > &
     Partial<
@@ -68,6 +68,12 @@ export type EstimateMessageInput = Simplify<
        * Empty for legacy V1/V2 extraArgs.
        */
       tokenArgs?: string
+      /**
+       * Message-level `GenericExtraArgsV3.executorArgs` of a message not sent yet: its
+       * destination-specific args, which the OnRamp signs as the message's `destBlob` (to Solana,
+       * an `SVMExecutorArgsV1` with the receiver's accounts and how to deliver its tokens).
+       */
+      executorArgs?: string
       /**
        * Offchain token data (CCTP attestations, bridge proofs), index-aligned with
        * `tokenAmounts`. Only exists post-send — fetch with `source.getOffchainTokenData(request)`

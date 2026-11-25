@@ -128,6 +128,8 @@ import {
 } from './exec-v2.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import {
+  type SVMTokenReceiverUsage,
+  decodeSVMExecutorArgsV1,
   decodeSolanaGenericExtraArgsV3,
   decodeSolanaSuiExtraArgsV1,
   encodeSVMExecutorArgsV1,
@@ -1914,10 +1916,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
               getDestTokenAmount({ dest: this, tokenAmount }),
             ),
           ),
-          tokenReceiver: 'tokenReceiver' in message ? message.tokenReceiver : undefined,
+          // a 2.0 message signs its token receiver in its token transfer
+          tokenReceiver:
+            'tokenReceiver' in message
+              ? message.tokenReceiver
+              : message.tokenAmounts.find((ta) => 'tokenReceiver' in ta)?.tokenReceiver,
           accounts: 'accounts' in message ? message.accounts : undefined,
           accountIsWritableBitmap:
             'accountIsWritableBitmap' in message ? message.accountIsWritableBitmap : undefined,
+          destBlob: 'destBlob' in message ? message.destBlob : undefined,
         },
       }
     } else {
@@ -1939,6 +1946,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     // a 2.0 OffRamp calls `ccip_receive_v2` on receivers registered as v2 with the router; a 1.6
     // OffRamp always calls `ccip_receive`
     let receiverVersion: SolanaReceiverVersion = 1
+    let tokenReceiverUsage: SVMTokenReceiverUsage | undefined
     let message = opts_.message
     if (!new PublicKey(message.receiver).equals(PublicKey.default)) {
       const [, offRampVersion] = await this.typeAndVersion(opts_.offRamp)
@@ -1949,6 +1957,22 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         const senderBytes = getAddressBytes(message.sender ?? '0x')
         if (senderBytes.length > 0 && senderBytes.length < 32)
           message = { ...message, sender: zeroPadValue(senderBytes, 32) }
+        // the OffRamp takes the receiver's accounts and the token delivery mode from the signed
+        // `destBlob`, which is the message's `executorArgs` before it's sent
+        const destBlob =
+          message.destBlob || ('executorArgs' in message ? message.executorArgs : undefined)
+        if (destBlob && getDataBytes(destBlob).length) {
+          const { useAta, accounts, accountIsWritableBitmap } = decodeSVMExecutorArgsV1(destBlob)
+          message = { ...message, accounts, accountIsWritableBitmap }
+          tokenReceiverUsage = useAta
+        }
+        // and the token receiver from its token transfer, once sent
+        const signedTokenReceiver =
+          'tokenAmounts' in message
+            ? message.tokenAmounts?.find((ta) => 'tokenReceiver' in ta && ta.tokenReceiver)
+            : undefined
+        if (signedTokenReceiver && 'tokenReceiver' in signedTokenReceiver)
+          message = { ...message, tokenReceiver: signedTokenReceiver.tokenReceiver }
       }
     }
     return estimateExecComputeUnits({
@@ -1957,6 +1981,7 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
       ...opts_,
       message,
       receiverVersion,
+      tokenReceiverUsage,
       logger: this.logger,
     })
   }
