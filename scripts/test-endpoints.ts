@@ -56,12 +56,11 @@ export type RpcEnvName = (typeof RPC_ENV)[keyof typeof RPC_ENV]
  */
 export const DEFAULT_RPC_ENDPOINTS: Record<RpcEnvName, string> = {
   RPC_SEPOLIA:
-    // ethpandaops leads for first-entry suites. Do NOT add drpc (or other
-    // first-answer-fast but call-unsafe) endpoints: the CLI e2e races these by
-    // chainId, and drpc's pattern (wins the race, then fails half of every
-    // batched eth_call with empty revert data — seen on its bsc endpoint)
-    // breaks the show/lane e2e suites the same way (observed 2026-09).
-    'https://rpc.sepolia.ethpandaops.io,https://0xrpc.io/sep,https://gateway.tenderly.co/public/sepolia',
+    // Tenderly and 0xRPC lead: both serve the execution fixtures' historical logs.
+    // PublicNode prunes that history. EthPandaOps timed out on later fork storage reads.
+    // Keep those two only as later fallbacks. Do NOT add drpc: it wins the chainId
+    // race, then fails batched eth_call with empty revert data.
+    'https://gateway.tenderly.co/public/sepolia,https://0xrpc.io/sep,https://ethereum-sepolia-rpc.publicnode.com,https://rpc.sepolia.ethpandaops.io',
   RPC_BASE_SEPOLIA: 'https://gateway.tenderly.co/public/base-sepolia,https://sepolia.base.org',
   RPC_ARBITRUM_SEPOLIA: 'https://sepolia-rollup.arbitrum.io/rpc',
   RPC_OPTIMISM_SEPOLIA:
@@ -188,21 +187,88 @@ export function rpcCandidates(envName: RpcEnvName): string[] {
   return [...new Set([...rpcEndpoints(envName), ...parseList(DEFAULT_RPC_ENDPOINTS[envName])])]
 }
 
-/** Probe: `eth_chainId` returns a chain id (not an HTTP error, RPC error or block page). */
-export async function evmChainIdProbe(url: string): Promise<boolean> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}',
-    // aborts the request too, not only the race in raceRpcEndpoint
-    signal: AbortSignal.timeout(10_000),
-  })
-  if (!res.ok) {
-    await res.body?.cancel()
-    return false
+/**
+ * One JSON-RPC call's result, or `undefined` on a transport error, a non-2xx answer
+ * or a JSON-RPC `error`. Probes use it to check an endpoint without repeating the
+ * request shape. The caller's signal bounds each request and cancels a timed-out probe.
+ */
+async function probeRpcResult(
+  url: string,
+  method: string,
+  params: unknown[],
+  signal: AbortSignal,
+): Promise<unknown> {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal,
+    })
+    if (!res.ok) {
+      await res.body?.cancel()
+      return undefined
+    }
+    const json = (await res.json()) as { result?: unknown; error?: unknown } | null
+    return json?.error == null ? json?.result : undefined
+  } catch {
+    return undefined
   }
-  const json = (await res.json()) as { result?: unknown; error?: unknown } | null
-  return json?.error == null && /^0x[\da-f]+$/i.test(String(json?.result))
+}
+
+/** JSON-RPC hex quantity, returned as a string by conforming EVM endpoints. */
+function isHexQuantity(value: unknown): value is string {
+  return typeof value === 'string' && /^0x[\da-f]+$/i.test(value)
+}
+
+/** Probe: `eth_chainId` returns a chain id (not an HTTP error, RPC error or block page). */
+export async function evmChainIdProbe(
+  url: string,
+  signal = AbortSignal.timeout(10_000),
+): Promise<boolean> {
+  return isHexQuantity(await probeRpcResult(url, 'eth_chainId', [], signal))
+}
+
+/**
+ * Probe: the endpoint answers a head block read. The scan-heavy e2e lanes page
+ * `eth_getBlockByNumber` over the destination chain, and a gateway can answer the
+ * cheap `eth_chainId` probe and then failsafe-timeout on block reads — it must not
+ * win their endpoint race on that alone.
+ */
+export async function evmHeadBlockProbe(
+  url: string,
+  signal = AbortSignal.timeout(10_000),
+): Promise<boolean> {
+  const head = await probeRpcResult(url, 'eth_blockNumber', [], signal)
+  if (!isHexQuantity(head)) return false
+  const block = await probeRpcResult(url, 'eth_getBlockByNumber', [head, false], signal)
+  if (block == null || typeof block !== 'object') return false
+  const number = (block as { number?: unknown }).number
+  return isHexQuantity(number) && BigInt(number) === BigInt(head)
+}
+
+/**
+ * Probe: the endpoint answers the block and state reads an anvil fork relays from
+ * its upstream, on the network named by `chainId`. A cheap `eth_chainId` answer says
+ * nothing about those reads, so the fork suites must not bind an upstream on it: a
+ * gateway that stalls a storage read makes every fork request wait out its timeout.
+ */
+export function evmForkProbe(
+  chainId: number,
+): (url: string, signal?: AbortSignal) => Promise<boolean> {
+  return async (url, signal = AbortSignal.timeout(20_000)) => {
+    const id = await probeRpcResult(url, 'eth_chainId', [], signal)
+    if (!isHexQuantity(id) || BigInt(id) !== BigInt(chainId)) return false
+    if (!(await evmHeadBlockProbe(url, signal))) return false
+    // an EOA slot is fine: this checks that state reads answer, not their value
+    const slot = await probeRpcResult(
+      url,
+      'eth_getStorageAt',
+      ['0x0000000000000000000000000000000000000000', '0x0', 'latest'],
+      signal,
+    )
+    return typeof slot === 'string' && /^0x[\da-f]*$/i.test(slot)
+  }
 }
 
 /**
@@ -211,6 +277,55 @@ export async function evmChainIdProbe(url: string): Promise<boolean> {
  */
 export function reachableRpcEndpoint(envName: RpcEnvName): Promise<string> {
   return raceRpcEndpoint(envName, evmChainIdProbe, { ordered: true, timeoutMs: 5_000, attempts: 1 })
+}
+
+/**
+ * The first EVM endpoint for `envName` that answers {@link evmForkProbe} for
+ * `chainId`, in configured order — for suites that start an anvil fork on it. The
+ * archive-capable preferred entry still wins when it answers the fork reads; two
+ * attempts absorb a gateway that rejects the first burst.
+ */
+export function reachableEvmForkEndpoint(envName: RpcEnvName, chainId: number): Promise<string> {
+  return raceRpcEndpoint(envName, evmForkProbe(chainId), {
+    ordered: true,
+    attempts: 2,
+    timeoutMs: 20_000,
+  })
+}
+
+/**
+ * Every endpoint configured for `envName` that answers {@link evmHeadBlockProbe}, in
+ * configured order — for suites that hand their whole list to a child process, which
+ * races endpoints and would otherwise bind one that answers `eth_chainId` and then
+ * stalls on the block reads the suite scans. When no configured endpoint passes, the
+ * network's public defaults are probed next (the same fallback {@link raceRpcEndpoint}
+ * uses). If every probe fails, all configured and public candidates are returned:
+ * a transient probe failure must not discard the suite's remaining fallbacks.
+ */
+export async function healthyEvmRpcEndpoints(envName: RpcEnvName): Promise<string[]> {
+  const healthyOnly = async (urls: string[]) => {
+    const results = await Promise.all(
+      urls.map(async (url) => {
+        // One signal bounds both attempts. The retry absorbs a first-request quota refusal.
+        const signal = AbortSignal.timeout(20_000)
+        if (await evmHeadBlockProbe(url, signal)) return true
+        if (signal.aborted) return false
+        await new Promise((resolve) => setTimeout(resolve, 1_000))
+        return evmHeadBlockProbe(url, signal)
+      }),
+    )
+    return urls.filter((_, index) => results[index])
+  }
+
+  const configured = rpcEndpoints(envName)
+  const healthy = await healthyOnly(configured)
+  if (healthy.length > 0) return healthy
+
+  // A dead keyed endpoint must not hide the keyless defaults this module ships.
+  const candidates = rpcCandidates(envName)
+  const defaults = candidates.filter((url) => !configured.includes(url))
+  const healthyDefaults = await healthyOnly(defaults)
+  return healthyDefaults.length > 0 ? healthyDefaults : candidates
 }
 
 /**
@@ -246,7 +361,7 @@ export function reachableRpcEndpoint(envName: RpcEnvName): Promise<string> {
  */
 export async function raceRpcEndpoint(
   envName: RpcEnvName,
-  probe: (url: string) => Promise<boolean>,
+  probe: (url: string, signal: AbortSignal) => Promise<boolean>,
   {
     timeoutMs = 20_000,
     attempts = 3,
@@ -261,22 +376,29 @@ export async function raceRpcEndpoint(
   const label = (url: string) =>
     publicDefaults.has(url) ? new URL(url).hostname : `configured-${candidates.indexOf(url) + 1}`
   let finished = false
+  const inFlight = new Set<AbortController>()
   const tryCandidate = async (url: string) => {
     for (let attempt = 0; attempt < attempts && !finished; attempt++) {
       const attemptStartedAt = performance.now()
       let timer: ReturnType<typeof setTimeout> | undefined
       let outcome: boolean | 'timeout'
+      const controller = new AbortController()
+      inFlight.add(controller)
       try {
         outcome = await Promise.race([
           Promise.resolve()
-            .then(() => probe(url))
+            .then(() => probe(url, controller.signal))
             .catch(() => false),
           new Promise<'timeout'>((resolve) => {
-            timer = setTimeout(() => resolve('timeout'), timeoutMs)
+            timer = setTimeout(() => {
+              controller.abort()
+              resolve('timeout')
+            }, timeoutMs)
           }),
         ])
       } finally {
         clearTimeout(timer)
+        inFlight.delete(controller)
       }
       const result = outcome === true ? 'ok' : outcome === false ? 'unhealthy' : outcome
       logTestTiming(
@@ -301,6 +423,8 @@ export async function raceRpcEndpoint(
     }
   } finally {
     finished = true
+    // A non-ordered race can settle while its losing probes still run.
+    for (const controller of inFlight) controller.abort()
   }
   const endpoint = selected ?? candidates[0]!
   logTestTiming(

@@ -135,10 +135,22 @@ export async function spawnCLI(
 }
 
 /**
- * {@link spawnCLI}, run once more when the CLI fails with a transient error (it prints
- * `note: this error may resolve on retry`, e.g. after a public RPC rate-limited it). The retry
+ * Output that names a transient upstream RPC failure: the CLI's own retry note, or a
+ * raw gateway/ethers error it does not classify (e.g. `ErrFailsafeTimeoutExceeded`).
+ */
+const TRANSIENT_RPC_OUTPUT_RE =
+  /this error may resolve on retry|failsafe[ -]?(?:timeout|retry)(?:[ -]?exceeded)?|could not coalesce error|operation timed out|request timed out|ECONNRESET|ETIMEDOUT|socket hang up|\b429\b|rate.?limit|fetch failed/i
+
+/**
+ * {@link spawnCLI}, run once more when the CLI fails with a transient error. The retry
  * waits the delay that the note suggests (5 s by default). Use it only for runs that must
  * succeed: an expected failure can be transient too, and would only run twice.
+ *
+ * Besides the CLI's own `note: this error may resolve on retry`, the output is matched
+ * for raw upstream RPC failures: a public gateway can answer with a non-CCIP error (an
+ * ethers `could not coalesce error`, a failsafe timeout) that the CLI does not classify,
+ * and the second run re-races the endpoint list, normally binding a healthier entry.
+ * A first-attempt timeout also retries. A second-attempt timeout rejects as usual.
  * @param args - CLI arguments.
  * @param timeout - Timeout of each attempt, in ms.
  * @returns The output of the last attempt.
@@ -147,9 +159,14 @@ export async function spawnCLIRetryingTransient(
   args: string[],
   timeout = 60000,
 ): ReturnType<typeof spawnCLI> {
-  const first = await spawnCLI(args, timeout)
+  const first = await spawnCLI(args, timeout).catch((err: unknown) => {
+    if (!(err instanceof Error) || !err.message.startsWith('CLI command timed out')) throw err
+    return { stdout: '', stderr: err.message, exitCode: null }
+  })
   const output = first.stdout + first.stderr
-  if (first.exitCode === 0 || !output.includes('this error may resolve on retry')) return first
+  const timedOut = first.exitCode === null && output.startsWith('CLI command timed out')
+  const transient = timedOut || TRANSIENT_RPC_OUTPUT_RE.test(output)
+  if (first.exitCode === 0 || !transient) return first
   const waitS = Number(/may resolve on retry \(wait (\d+)s\)/.exec(output)?.[1] ?? 5)
   await new Promise((resolve) => setTimeout(resolve, Math.min(waitS, 30) * 1_000))
   return spawnCLI(args, timeout)
