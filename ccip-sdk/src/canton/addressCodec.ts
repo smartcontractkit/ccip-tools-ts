@@ -1,8 +1,8 @@
+import type { InstrumentId } from '@chainlink/canton-contracts/splice-api-token-holding-v1-1.0.0/Splice/Api/Token/HoldingV1'
 import { getBytes, hexlify, id as keccak256Utf8, toUtf8String } from 'ethers'
 
 import { CCIPArgumentInvalidError, CCIPError, CCIPErrorCode } from '../errors/index.ts'
 import { getDataBytes, hashedUtf8Hex, isCantonPartyId } from '../utils.ts'
-import type { InstrumentId } from './bindings/splice-api-token-holding-v1-1.0.0/Splice/Api/Token/HoldingV1/index.d.ts'
 
 /*
  * Canton Types

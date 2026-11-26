@@ -137,40 +137,44 @@ export {
   formatCantonLinkFeeToken,
 } from './defaults.ts'
 
+import type { ITokenConfig } from '@chainlink/canton-contracts/ccip-api-v2-2.0.0/CCIP/APIV2/TokenAdminRegistry'
+import {
+  type ExecutorExtraArg,
+  type GenericExtraArgsV3,
+  PerPartyRouter,
+} from '@chainlink/canton-contracts/ccip-client-api-v2-2.0.0/CCIP/ClientV2'
+import type { FinalityConfig } from '@chainlink/canton-contracts/ccip-codec-v2-2.0.0/CCIP/CodecV2/FinalityConfig'
+import {
+  CCIPMessageSent,
+  ExecutionStateChanged,
+} from '@chainlink/canton-contracts/ccip-events-v2-2.0.0/CCIP/EventsV2/Events'
+import type { ICrossChainVerifier } from '@chainlink/canton-contracts/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/CrossChainVerifier'
+import type { IExecutor } from '@chainlink/canton-contracts/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/Executor'
+import type { ITokenPool } from '@chainlink/canton-contracts/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/TokenPool'
+import {
+  type Execute,
+  CCIPReceiver,
+} from '@chainlink/canton-contracts/ccip-receiver-v2-2.1.0/CCIP/CCIPReceiver'
+import {
+  type CreateRouter,
+  PerPartyRouterFactory,
+} from '@chainlink/canton-contracts/ccip-runtime-v2-2.1.1/CCIP/RuntimeV2/PerPartyRouter'
+import {
+  type Send,
+  CCIPSender,
+} from '@chainlink/canton-contracts/ccip-sender-v2-2.1.0/CCIP/CCIPSender'
+import {
+  Holding,
+  HoldingView,
+} from '@chainlink/canton-contracts/splice-api-token-holding-v1-1.0.0/Splice/Api/Token/HoldingV1'
+import type { ChoiceContext } from '@chainlink/canton-contracts/splice-api-token-metadata-v1-1.0.0/Splice/Api/Token/MetadataV1'
+import type { TransferFactory } from '@chainlink/canton-contracts/splice-api-token-transfer-instruction-v1-1.0.0/Splice/Api/Token/TransferInstructionV1'
+
 import {
   decodeContract,
   listActiveContractsByInterfaceId,
   listActiveContractsByTemplateId,
 } from './acs.ts'
-import type { ITokenConfig } from './bindings/ccip-api-v2-2.0.0/CCIP/APIV2/TokenAdminRegistry/module.js'
-import {
-  type ExecutorExtraArg,
-  type GenericExtraArgsV3,
-  PerPartyRouter,
-} from './bindings/ccip-client-api-v2-2.0.0/CCIP/ClientV2/module.js'
-import type { FinalityConfig } from './bindings/ccip-codec-v2-2.0.0/CCIP/CodecV2/FinalityConfig/module.js'
-import {
-  CCIPMessageSent,
-  ExecutionStateChanged,
-} from './bindings/ccip-events-v2-2.0.0/CCIP/EventsV2/Events/index.js'
-import type { ICrossChainVerifier } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/CrossChainVerifier/module.js'
-import type { IExecutor } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/Executor/module.js'
-import type { ITokenPool } from './bindings/ccip-extension-api-v2-2.0.0/CCIP/InterfacesV2/TokenPool/module.js'
-import {
-  type Execute,
-  CCIPReceiver,
-} from './bindings/ccip-receiver-v2-2.1.0/CCIP/CCIPReceiver/module.js'
-import {
-  type CreateRouter,
-  PerPartyRouterFactory,
-} from './bindings/ccip-runtime-v2-2.1.1/CCIP/RuntimeV2/PerPartyRouter/module.js'
-import { type Send, CCIPSender } from './bindings/ccip-sender-v2-2.1.0/CCIP/CCIPSender/module.js'
-import {
-  Holding,
-  HoldingView,
-} from './bindings/splice-api-token-holding-v1-1.0.0/Splice/Api/Token/HoldingV1/module.js'
-import type { ChoiceContext } from './bindings/splice-api-token-metadata-v1-1.0.0/Splice/Api/Token/MetadataV1/module.js'
-import type { TransferFactory } from './bindings/splice-api-token-transfer-instruction-v1-1.0.0/Splice/Api/Token/TransferInstructionV1/module.js'
 import { TokenStandardClientProvider } from './clients/tokenStandard/client.ts'
 
 // Authentication providers (OAuth 2.0: static, clientCredentials, authorizationCode protocol helpers)
