@@ -10,6 +10,7 @@ import { AbiCoder, dataLength } from 'ethers'
 import { DEFAULT_API_RETRY_CONFIG } from './chain.ts'
 import { CCIPHttpError, CCIPTimeoutError } from './errors/index.ts'
 import { networkInfo } from './networks.ts'
+import { CCIPVersion } from './types.ts'
 import {
   blockRangeGenerator,
   convertKeysToCamelCase,
@@ -26,6 +27,7 @@ import {
   jsonStringify,
   leToBigInt,
   linkAbortSignals,
+  memoizeBlockInfo,
   parseTypeAndVersion,
   passesTypeAndVersion,
   scaleDecimals,
@@ -587,7 +589,9 @@ describe('snakeToCamel', () => {
 
   it('should handle leading underscores', () => {
     assert.equal(snakeToCamel('_private'), 'Private')
-    assert.equal(snakeToCamel('__dunder'), '_Dunder')
+    // a `__` meta key (e.g. the Move enum tag `__variant__`) passes through unchanged
+    assert.equal(snakeToCamel('__dunder'), '__dunder')
+    assert.equal(snakeToCamel('__variant__'), '__variant__')
   })
 
   it('should handle trailing underscores', () => {
@@ -783,6 +787,15 @@ describe('decodeOnRampAddress', () => {
     const aptosAddress = '0x0000000000000000000000000000000000000000000000000000000000000001'
     const decoded = decodeOnRampAddress(aptosAddress, ChainFamily.Aptos)
     assert.equal(decoded, '0x1::onramp')
+    assert.equal(
+      decodeOnRampAddress(aptosAddress, ChainFamily.Aptos, CCIPVersion.V1_6),
+      '0x1::onramp',
+    )
+  })
+
+  it('should keep a 2.0 Aptos OnRamp (state address) without a module', () => {
+    const aptosAddress = '0x0000000000000000000000000000000000000000000000000000000000000001'
+    assert.equal(decodeOnRampAddress(aptosAddress, ChainFamily.Aptos, CCIPVersion.V2_0), '0x1')
   })
 
   it('should decode Solana addresses without ::onramp', () => {
@@ -1681,5 +1694,61 @@ describe('sleep abort hygiene', () => {
     await pending
     assert.ok(Date.now() - start < 5_000, 'sleep returned before its full duration')
     assert.equal(getEventListeners(controller.signal, 'abort').length, 0)
+  })
+})
+
+describe('memoizeBlockInfo', () => {
+  type Block = number | bigint | 'latest' | 'finalized'
+  const fake = () => {
+    const calls: Block[] = []
+    const state = { fail: false }
+    const fn = (block: Block) => {
+      calls.push(block)
+      if (state.fail) return Promise.reject(new Error('503 Service Unavailable'))
+      const number = typeof block === 'string' ? 100 : Number(block)
+      return Promise.resolve({ number, timestamp: number * 10 })
+    }
+    return { calls, fn, state }
+  }
+
+  it('caches a positive block number, and calls fn for every tag or depth', async () => {
+    const { calls, fn } = fake()
+    const getBlockInfo = memoizeBlockInfo(fn)
+    assert.deepEqual(await getBlockInfo(5), { number: 5, timestamp: 50 })
+    await getBlockInfo(5)
+    await getBlockInfo(5n)
+    await getBlockInfo('latest')
+    await getBlockInfo('latest')
+    await getBlockInfo(-3)
+    await getBlockInfo(-3)
+    assert.deepEqual(calls, [5, 5n, 'latest', 'latest', -3, -3])
+  })
+
+  it('serves a seeded positive block from .cache', async () => {
+    const { calls, fn } = fake()
+    const getBlockInfo = memoizeBlockInfo(fn)
+    getBlockInfo.cache.set([7], Promise.resolve({ number: 7, timestamp: 1 }))
+    assert.deepEqual(await getBlockInfo(7), { number: 7, timestamp: 1 })
+    assert.deepEqual(calls, [])
+  })
+
+  it('a failed tag call rejects only to its caller (no unhandled rejection)', async () => {
+    const { fn, state } = fake()
+    const getBlockInfo = memoizeBlockInfo(fn)
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      // With micro-memoize's forceUpdate, a success cached the tag; the next,
+      // failed call went through the forced path and left an unread cached
+      // wrapper that rejected unhandled.
+      await getBlockInfo('latest')
+      state.fail = true
+      await assert.rejects(getBlockInfo('latest'), /503/)
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.deepEqual(unhandled, [])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })

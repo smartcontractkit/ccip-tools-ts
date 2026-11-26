@@ -828,3 +828,50 @@ describe('GenericExtraArgsV3', () => {
     })
   })
 })
+
+describe('GenericExtraArgsV3 from Aptos (32-byte CCV and executor addresses)', () => {
+  const base: GenericExtraArgsV3 = {
+    gasLimit: 200_000n,
+    finality: 'finalized',
+    ccvs: [],
+    ccvArgs: [],
+    executor: '',
+    executorArgs: '0x',
+    tokenReceiver: '',
+    tokenArgs: '0x',
+  }
+  const ccv = '0xc7e784eb798e4d5612700e967d8ad4d8ac5c7ec561278db54ae9925ad89cce6d'
+  const executor = '0x810f3bc8e921eeab9761fcb1d3aa5b482745e158a64aa5828cf4fb093bb76dc6'
+  // vectors accepted by the Aptos testnet 2.0.0 Router `get_fee` view
+  const vectors: [string, GenericExtraArgsV3][] = [
+    ['0xa69dd4aa00030d400000000000000000000000', base],
+    [
+      '0xa69dd4aa00030d40000000000120c7e784eb798e4d5612700e967d8ad4d8ac5c7ec561278db54ae9925ad89cce6d000020810f3bc8e921eeab9761fcb1d3aa5b482745e158a64aa5828cf4fb093bb76dc60000000000',
+      { ...base, ccvs: [ccv], ccvArgs: ['0x'], executor },
+    ],
+  ]
+
+  it('should encode and decode the live vectors', () => {
+    for (const [hex, args] of vectors) {
+      assert.equal(encodeExtraArgs(args, ChainFamily.Aptos), hex)
+      assert.deepEqual(decodeExtraArgs(hex, ChainFamily.Aptos), {
+        ...args,
+        _tag: 'GenericExtraArgsV3',
+      })
+    }
+  })
+
+  it('should left-pad the EVM sentinel executor to 32 bytes', () => {
+    const encoded = encodeExtraArgs({ ...base, executor: NO_EXECUTION_ADDRESS }, ChainFamily.Aptos)
+    assert.equal(
+      encoded,
+      '0xa69dd4aa00030d40000000000020000000000000000000000000eba517d2000000000000000000000000000000000000000000',
+    )
+  })
+
+  it('should decode 32-byte addresses without a chain family', () => {
+    const decoded = decodeExtraArgs(vectors[1]![0]) as GenericExtraArgsV3
+    assert.deepEqual(decoded.ccvs, [ccv])
+    assert.equal(decoded.executor, executor)
+  })
+})

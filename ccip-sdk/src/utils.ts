@@ -12,6 +12,7 @@ import {
   toBeArray,
   toBigInt,
 } from 'ethers'
+import { type Cache, memoize } from 'micro-memoize'
 import yaml from 'yaml'
 
 // Re-export the codec helpers moved to ./shared/codec.ts (kept here for back-compat;
@@ -36,7 +37,7 @@ import { getRetryDelay, shouldRetry } from './errors/utils.ts'
 import { ChainFamily } from './networks.ts'
 import { util } from './shared/codec.ts'
 import { getChainStatic, getChainStatics, supportedChains } from './supported-chains.ts'
-import type { Logger, WithLogger } from './types.ts'
+import type { CCIPVersion, Logger, WithLogger } from './types.ts'
 
 /** How far back the bracketing walk reaches on its first probe. Only a starting
  * guess: the walk then interpolates with the observed block time, so this just
@@ -218,14 +219,21 @@ export function isSupportedTxHash(txHash: unknown, family?: ChainFamily): txHash
 }
 
 /**
- * Version of decodeAddress which is aware of custom cross-chain OnRamp formats
+ * Version of decodeAddress which is aware of custom cross-chain OnRamp formats: a 1.6 Aptos or Sui
+ * OnRamp is a package, and gets its module appended. A 2.0 OnRamp (`version`) stays as remote
+ * chains and messages reference it, e.g. by its state address on Aptos, which has no modules.
  **/
 export function decodeOnRampAddress(
   address: BytesLike,
   family: ChainFamily = ChainFamily.EVM,
+  version?: CCIPVersion,
 ): string {
   let decoded = decodeAddress(address, family)
-  if ((family === ChainFamily.Aptos || family === ChainFamily.Sui) && !decoded.includes('::'))
+  if (
+    (family === ChainFamily.Aptos || family === ChainFamily.Sui) &&
+    !decoded.includes('::') &&
+    !(version && version >= '2.0.0')
+  )
     decoded += '::onramp'
   return decoded
 }
@@ -461,9 +469,12 @@ export function bytesToBuffer(bytes: BytesLike | readonly number[]): Buffer {
 }
 
 /**
- * Converts snake_case strings to camelCase
+ * Converts snake_case strings to camelCase.
+ * A name that starts with `__` (a meta key such as the Move enum tag `__variant__`) is returned
+ * unchanged.
  */
 export function snakeToCamel(str: string): string {
+  if (str.startsWith('__')) return str
   return str.replace(/_([a-zA-Z])/g, (_, letter: string) => letter.toUpperCase())
 }
 
@@ -501,6 +512,30 @@ export function convertKeysToCamelCase(
     converted[camelKey] = convertKeysToCamelCase(value, mapValues, camelKey)
   }
   return converted
+}
+
+/**
+ * Memoizes a chain's `getBlockInfo`: a positive block number is cached (10 min,
+ * 100 entries); a tag (`latest`, `finalized`, …) or a depth (`<= 0`) always calls `fn`.
+ *
+ * It does not use micro-memoize's `forceUpdate` for the uncached calls: a forced call
+ * caches a wrapper of the new promise that nothing reads (forced keys are never read
+ * from the cache) and returns the unwrapped promise. The wrapper rethrows a rejection,
+ * so every failed `getBlockInfo('latest')` was also an unhandled rejection.
+ *
+ * @param fn - The chain's own (unmemoized, bound) `getBlockInfo`.
+ * @returns `fn` with the cache in front of the positive block numbers; `.cache` is the
+ *   cache of those, so a caller can seed it.
+ */
+export function memoizeBlockInfo<B extends number | bigint | string, R>(
+  fn: (block: B) => Promise<R>,
+): ((block: B) => Promise<R>) & { cache: Cache<(block: B) => Promise<R>> } {
+  const cached = memoize(fn, { async: true, maxArgs: 1, maxSize: 100, expires: 600e3 })
+  const memoized = (block: B): Promise<R> =>
+    (typeof block === 'number' || typeof block === 'bigint') && block > 0
+      ? cached(block)
+      : fn(block)
+  return Object.assign(memoized, { cache: cached.cache })
 }
 
 /**

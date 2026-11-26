@@ -844,8 +844,27 @@ Use `.check()` for custom validation with helpful error messages:
 
 1. Run quality gates locally
 1. Write tests for new functionality
-1. Update CHANGELOG.md
+1. Update `CHANGELOG.md` when the change needs it (see [Changelog entries](#changelog-entries))
 1. Keep commits focused and atomic
+
+### Changelog entries
+
+Add a `CHANGELOG.md` entry only for important features and API changes that affect the main use cases of users. Do not add an entry for smaller methods or functions, even when the package exports them.
+
+Add an entry for:
+
+- A new feature or a new chain family.
+- A change to the behavior, signature, or output of an existing public API.
+- A breaking change or a deprecation that users must act on.
+- A user-visible bug fix.
+
+Skip the entry for:
+
+- New helper methods, functions, or types that support an existing feature.
+- Internal refactors with no behavior change.
+- Changes to tests, docs, comments, or build tooling.
+
+Put the entry under `[Unreleased]` at the top of the file. Follow the format of the existing entries.
 
 ## Signed commits
 
