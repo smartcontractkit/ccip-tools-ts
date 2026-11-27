@@ -1175,6 +1175,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       }
 
       // Token pool disclosures
+      this.logger.debug(
+        `CantonChain.generateUnsignedSendMessage: token pool send request for ${tokenPoolAddress.toInstanceAddress().toString()}`,
+        oapiMessage,
+      )
       const tokenPoolSendDisclosuresResponse = await this.edsClientProvider
         .tokenPoolClientFor(tokenPoolAddress.owner)
         .POST('/ccip/v1/external/tokenPool/{address}/send', {
@@ -2525,6 +2529,8 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         tokenTransferHoldingCids.push(...explicitTokenTransferHoldingCids)
       } else {
         // Select holdings from lowest-to-highest amount in order to minimize dust
+        // Only our own unlocked holdings can be spent as transfer inputs (the active party can
+        // also see holdings it doesn't own, e.g. as the instrument admin)
         const holdings = (await this.listTokenHoldings(tokenTransfer.instrumentId))
           // filter out holdings not owned by the active party, listTokenHoldings returns all holdings visible to the active party
           .filter((holding) => holding.view.owner === this.activeParty)

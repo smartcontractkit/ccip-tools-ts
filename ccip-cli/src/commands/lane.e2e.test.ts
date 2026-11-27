@@ -389,7 +389,8 @@ describe('e2e command lane EVM <-> Solana (v1.6 and v2.0)', () => {
 describe('e2e command lane EVM <-> TON (v1.6)', () => {
   useResourceForDescribe(['ton-testnet', 'sepolia'])
   const LANE_RPCS = [...TON_TESTNET_RPCS, ...SEPOLIA_RPCS]
-  const TON_ONRAMP = 'EQA-CUZI_USus4w0_Erf-wTj5uhaAR7XldEimU0w0WAJGGod'
+  // Directory-listed production testnet OnRamp, not the former in-development 1.7 fixture.
+  const TON_ONRAMP = 'EQDioi9PI32Wo1oBwkUp0pj1AhwvAHiKiZCfgrr0iDqu3lTA'
   const EVM_ONRAMP_TON = '0xa36871bde0f98b84066405462e4a9709fb71c905'
 
   it('should show lane config TON -> Sepolia (v1.6)', { timeout: 300000 }, async () => {
@@ -400,6 +401,8 @@ describe('e2e command lane EVM <-> TON (v1.6)', () => {
       LANE_RPCS,
       '--format',
       'json',
+      '--lane-version',
+      '1.6',
     )
     const result = await spawnCLI(args, 270000)
 
@@ -407,6 +410,7 @@ describe('e2e command lane EVM <-> TON (v1.6)', () => {
 
     const envelope = JSON.parse(result.stdout)
     assert.match(envelope.onRamp, new RegExp(TON_ONRAMP.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.equal(envelope.version, '1.6.0')
     assert.match(envelope.onRampConfig.typeAndVersion, /1\.6\.0/)
     assert.ok(envelope.onRampConfig.router, 'onRampConfig should have router')
     assert.ok(
