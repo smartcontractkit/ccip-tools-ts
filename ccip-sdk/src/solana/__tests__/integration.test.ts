@@ -423,13 +423,12 @@ describe('Solana Devnet CCIP v2 Integration', { skip, timeout: 300_000 }, () => 
 
   before(async () => {
     // CI's shared egress IP trips public endpoints' keyless quotas run to run:
-    // race each network's defaults with a fixture-data probe instead of binding
-    // to the first entry — a throttled endpoint stalled this suite past its 300s
-    // ceiling (each slow EVM op aborts at EVMChain's 90s request bound; devnet
-    // signature scans crawl through pacing retries).
+    // probe each network's fixture data instead of binding to the first entry.
+    // Sepolia keeps configured order: a gateway can pass the probe, then drop a receipt.
+    // Tenderly and 0xRPC have served these fixtures consistently; PublicNode has not.
     const [devnetRpc, sepolia] = await Promise.all([
       raceRpcEndpoint('RPC_SOLANA_DEVNET', solanaDevnetHealthy),
-      raceRpcEndpoint('RPC_SEPOLIA', sepoliaHealthy),
+      raceRpcEndpoint('RPC_SEPOLIA', sepoliaHealthy, { ordered: true, attempts: 2 }),
     ])
     sepoliaRpc = sepolia
     solanaChain = await SolanaChain.fromUrl(devnetRpc, {

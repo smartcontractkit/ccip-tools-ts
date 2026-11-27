@@ -17,7 +17,7 @@ import { Instance } from 'prool'
 import { createPublicClient, http } from 'viem'
 
 import '../aptos/index.ts' // register Aptos chain family for cross-family message decoding
-import { raceRpcEndpoint, reachableRpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { raceRpcEndpoint, reachableEvmForkEndpoint } from '../../../scripts/test-endpoints.ts'
 import '../ton/index.ts' // register TON chain family for cross-family message decoding
 import {
   type ResourceHandle,
@@ -221,9 +221,9 @@ describe('EVM Fork Tests', { skip, timeout: 600_000 }, () => {
       // Without the second arg, prool extracts timeout from the first arg (Anvil CLI params),
       // sets a 60s timer, and after stop() resets startResolver, the timer fires on the new
       // unlistened resolver → unhandled rejection → test file fails even when tests pass.
-      // Bind the first configured endpoint that answers: a dead configured endpoint
-      // would otherwise stall every fork read until the request timeout.
-      const sepoliaRpc = await reachableRpcEndpoint('RPC_SEPOLIA')
+      // Bind the first configured endpoint that answers the fork's block and state
+      // reads: a dead or stalling endpoint would otherwise fail every fork read.
+      const sepoliaRpc = await reachableEvmForkEndpoint('RPC_SEPOLIA', SEPOLIA_CHAIN_ID)
       sepoliaInstance = Instance.anvil(
         { forkUrl: sepoliaRpc, chainId: SEPOLIA_CHAIN_ID, port: 8646, ...forkOpts },
         {},
