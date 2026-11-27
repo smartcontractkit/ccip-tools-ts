@@ -1,5 +1,6 @@
+import type { FinalityConfig } from '@chainlink/canton-contracts/ccip-codec-v2-2.0.0/CCIP/CodecV2/FinalityConfig'
+
 import type { FinalityRequested } from '../extra-args.ts'
-import type { FinalityConfig } from './bindings/ccip-codec-v2-2.0.0/CCIP/CodecV2/FinalityConfig/module.js'
 
 /** Returns true when a CCIPReceiver's finality config accepts messages with `finality`. */
 export function receiverFinalityMatches(

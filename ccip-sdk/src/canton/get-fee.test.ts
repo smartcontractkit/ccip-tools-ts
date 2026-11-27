@@ -6,9 +6,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import type { Send } from '@chainlink/canton-contracts/ccip-sender-v2-2.1.0/CCIP/CCIPSender'
 import { encodeBase64 } from 'ethers'
 
-import type { Send } from './bindings/ccip-sender-v2-2.1.0/CCIP/CCIPSender/module.js'
 import { CantonChain } from './index.ts'
 
 const OWNER = 'sender::1220ab'
