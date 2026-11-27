@@ -1,3 +1,4 @@
+import './quiet-template-registration.ts'
 import type { AccountsChangedEvent } from '@canton-network/core-wallet-dapp-rpc-client'
 import type * as damlTypes from '@daml/types'
 import { type BytesLike, dataLength, hexlify, keccak256 } from 'ethers'

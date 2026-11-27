@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import './quiet-template-registration.ts'
 import { CCIPSender } from '@chainlink/canton-contracts/ccip-sender-v2-2.1.0/CCIP/CCIPSender'
 
 import { CCIPErrorCode } from '../errors/index.ts'
