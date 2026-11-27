@@ -111,6 +111,9 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
     destNetwork.chainSelector,
     laneVersion ? { version: laneVersion } : undefined,
   )
+  // a config can name the OnRamp's own address, when the input can be another form of it (e.g.
+  // the package of an Aptos 2.0 OnRamp)
+  onRamp = (onRampConfig as { onRamp?: string }).onRamp ?? onRamp
   // the lane version: both lanes of a Solana 2.0 Router report the same contract typeAndVersion,
   // so its default lane config reports the lane it read as `laneVersion`
   const version =
@@ -130,7 +133,11 @@ async function getLane(ctx: Ctx, argv: Parameters<typeof handler>[0]) {
       const { version: _accountVersion, ...configRows } = prettyFormat(
         onRampConfig,
         sourceNetwork.family,
-        { offRamp: destNetwork.family, offramp: destNetwork.family },
+        {
+          offRamp: destNetwork.family,
+          offramp: destNetwork.family,
+          offRampAddress: destNetwork.family,
+        },
       ) as Record<string, unknown>
       // the lane version replaces the config's own `version` row (e.g. a Solana account layout
       // version), which identifies neither the lane nor the contract

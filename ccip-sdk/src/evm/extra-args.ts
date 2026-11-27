@@ -1,15 +1,4 @@
-import {
-  type BytesLike,
-  concat,
-  dataSlice,
-  encodeBase58,
-  getAddress,
-  hexlify,
-  toBeArray,
-  toBigInt,
-  toNumber,
-  zeroPadValue,
-} from 'ethers'
+import { type BytesLike, concat, dataSlice, encodeBase58, zeroPadValue } from 'ethers'
 
 import {
   type EVMExtraArgsV1,
@@ -23,12 +12,11 @@ import {
   GenericExtraArgsV3Tag,
   SVMExtraArgsV1Tag,
   SuiExtraArgsV1Tag,
-  decodeFinalityRequested,
-  encodeFinality,
 } from '../extra-args.ts'
 import { ChainFamily } from '../networks.ts'
 import { DEFAULT_GAS_LIMIT } from '../shared/constants.ts'
-import { decodeAddress, getAddressBytes, getDataBytes } from '../utils.ts'
+import { decodeExtraArgsV3, encodeExtraArgsV3 } from '../shared/extra-args-v3.ts'
+import { getAddressBytes, getDataBytes } from '../utils.ts'
 import { defaultAbiCoder } from './const.ts'
 import { resultToObject } from './types.ts'
 
@@ -39,230 +27,6 @@ const SVMExtraArgsV1ABI =
   'tuple(uint32 computeUnits, uint64 accountIsWritableBitmap, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] accounts)'
 const SuiExtraArgsV1ABI =
   'tuple(uint256 gasLimit, bool allowOutOfOrderExecution, bytes32 tokenReceiver, bytes32[] receiverObjectIds)'
-
-/**
- * Encodes GenericExtraArgsV3 using tightly packed binary format.
- *
- * Binary format:
- * - tag (4 bytes): 0xa69dd4aa
- * - gasLimit (4 bytes): uint32 big-endian
- * - finality (4 bytes): uint32 big-endian (see FinalityCodec / encodeFinality)
- * - ccvsLength (1 byte): uint8
- * - For each CCV:
- *   - ccvAddressLength (1 byte): 0 or 20
- *   - ccvAddress (0 or 20 bytes)
- *   - ccvArgsLength (2 bytes): uint16 big-endian
- *   - ccvArgs (variable)
- * - executorLength (1 byte): 0 or 20
- * - executor (0 or 20 bytes)
- * - executorArgsLength (2 bytes): uint16 big-endian
- * - executorArgs (variable)
- * - tokenReceiverLength (1 byte): uint8
- * - tokenReceiver (variable)
- * - tokenArgsLength (2 bytes): uint16 big-endian
- * - tokenArgs (variable)
- */
-function encodeExtraArgsV3(args: GenericExtraArgsV3): string {
-  const parts: BytesLike[] = []
-
-  // Tag (4 bytes)
-  parts.push(GenericExtraArgsV3Tag)
-
-  // gasLimit (4 bytes, uint32 big-endian)
-  parts.push(toBeArray(args.gasLimit, 4))
-
-  // finality (4 bytes, uint32 big-endian)
-  parts.push(toBeArray(encodeFinality(args.finality), 4))
-
-  // ccvsLength (1 byte)
-  parts.push(new Uint8Array([args.ccvs.length]))
-
-  // For each CCV
-  for (let i = 0; i < args.ccvs.length; i++) {
-    const ccvAddress = args.ccvs[i]!
-    const ccvArgsBytes = getDataBytes(args.ccvArgs[i] ?? '0x')
-
-    if (ccvAddress && ccvAddress !== '' && ccvAddress !== '0x') {
-      // ccvAddressLength = 20
-      parts.push(new Uint8Array([20]))
-      // ccvAddress (20 bytes)
-      parts.push(decodeAddress(ccvAddress, ChainFamily.EVM))
-    } else {
-      // ccvAddressLength = 0
-      parts.push(new Uint8Array([0]))
-    }
-
-    // ccvArgsLength (2 bytes, uint16 big-endian)
-    parts.push(toBeArray(ccvArgsBytes.length, 2))
-
-    // ccvArgs (variable)
-    if (ccvArgsBytes.length > 0) {
-      parts.push(ccvArgsBytes)
-    }
-  }
-
-  // executorLength (1 byte)
-  if (args.executor && args.executor !== '0x') {
-    parts.push(new Uint8Array([20]))
-    parts.push(getAddressBytes(args.executor))
-  } else {
-    parts.push(new Uint8Array([0]))
-  }
-
-  // Convert BytesLike fields to Uint8Array
-  const executorArgsBytes = getDataBytes(args.executorArgs)
-
-  // executorArgsLength (2 bytes, uint16 big-endian)
-  parts.push(toBeArray(executorArgsBytes.length, 2))
-
-  // executorArgs (variable)
-  if (executorArgsBytes.length > 0) {
-    parts.push(executorArgsBytes)
-  }
-
-  const tokenReceiverBytes = getAddressBytes(args.tokenReceiver)
-  // tokenReceiverLength (1 byte)
-  parts.push(new Uint8Array([tokenReceiverBytes.length]))
-
-  // tokenReceiver (variable)
-  if (tokenReceiverBytes.length > 0) {
-    parts.push(tokenReceiverBytes)
-  }
-
-  const tokenArgsBytes = getDataBytes(args.tokenArgs)
-  // tokenArgsLength (2 bytes, uint16 big-endian)
-  parts.push(toBeArray(tokenArgsBytes.length, 2))
-
-  // tokenArgs (variable)
-  if (tokenArgsBytes.length > 0) {
-    parts.push(tokenArgsBytes)
-  }
-
-  return hexlify(concat(parts))
-}
-
-/**
- * Decodes GenericExtraArgsV3 from tightly packed binary format.
- * @param data - Bytes to decode (without the tag prefix).
- * @returns Decoded GenericExtraArgsV3 or undefined if parsing fails.
- */
-function decodeExtraArgsV3(data: Uint8Array): GenericExtraArgsV3 | undefined {
-  let offset = 0
-
-  // gasLimit (4 bytes, uint32 big-endian)
-  if (offset + 4 > data.length) return undefined
-  const gasLimit = toBigInt(data.subarray(offset, offset + 4))
-  offset += 4
-
-  // finality (4 bytes, uint32 big-endian)
-  if (offset + 4 > data.length) return undefined
-  const finality = decodeFinalityRequested(toNumber(data.subarray(offset, offset + 4)))
-  offset += 4
-
-  // ccvsLength (1 byte)
-  if (offset + 1 > data.length) return undefined
-  const ccvsLength = data[offset]!
-  offset += 1
-
-  const ccvs: string[] = []
-  const ccvArgs: string[] = []
-
-  // For each CCV
-  for (let i = 0; i < ccvsLength; i++) {
-    // ccvAddressLength (1 byte)
-    if (offset + 1 > data.length) return undefined
-    const ccvAddrLen = data[offset]!
-    offset += 1
-
-    // ccvAddress (0 or 20 bytes)
-    if (ccvAddrLen === 20) {
-      if (offset + 20 > data.length) return undefined
-      ccvs.push(getAddress(hexlify(data.slice(offset, offset + 20))))
-      offset += 20
-    } else if (ccvAddrLen === 0) {
-      ccvs.push('')
-    } else {
-      return undefined // Invalid address length
-    }
-
-    // ccvArgsLength (2 bytes, uint16 big-endian)
-    if (offset + 2 > data.length) return undefined
-    const ccvArgsLen = toNumber(data.subarray(offset, offset + 2))
-    offset += 2
-
-    // ccvArgs (variable)
-    if (offset + ccvArgsLen > data.length) return undefined
-    ccvArgs.push(hexlify(data.slice(offset, offset + ccvArgsLen)))
-    offset += ccvArgsLen
-  }
-
-  // executorLength (1 byte)
-  if (offset + 1 > data.length) return undefined
-  const executorLen = data[offset]!
-  offset += 1
-
-  // executor (0 or 20 bytes)
-  let executor = ''
-  if (executorLen === 20) {
-    if (offset + 20 > data.length) return undefined
-    executor = getAddress(hexlify(data.slice(offset, offset + 20)))
-    offset += 20
-  } else if (executorLen !== 0) {
-    return undefined // Invalid executor length
-  }
-
-  // executorArgsLength (2 bytes, uint16 big-endian)
-  if (offset + 2 > data.length) return undefined
-  const executorArgsLen = toNumber(data.subarray(offset, offset + 2))
-  offset += 2
-
-  // executorArgs (variable)
-  if (offset + executorArgsLen > data.length) return undefined
-  const executorArgs = hexlify(data.slice(offset, offset + executorArgsLen))
-  offset += executorArgsLen
-
-  // tokenReceiverLength (1 byte)
-  if (offset + 1 > data.length) return undefined
-  const tokenReceiverLen = data[offset]!
-  offset += 1
-
-  // tokenReceiver (variable)
-  if (offset + tokenReceiverLen > data.length) return undefined
-  const tokenReceiverBytes = data.slice(offset, offset + tokenReceiverLen)
-  offset += tokenReceiverLen
-
-  // Convert tokenReceiver bytes to string
-  let tokenReceiver: string
-  if (tokenReceiverLen === 0) {
-    tokenReceiver = ''
-  } else if (tokenReceiverLen === 20) {
-    // 20 bytes = EVM address, return checksummed
-    tokenReceiver = getAddress(hexlify(tokenReceiverBytes))
-  } else {
-    // Other lengths: return as hex string
-    tokenReceiver = hexlify(tokenReceiverBytes)
-  }
-
-  // tokenArgsLength (2 bytes, uint16 big-endian)
-  if (offset + 2 > data.length) return undefined
-  const tokenArgsLen = toNumber(data.subarray(offset, offset + 2))
-  offset += 2
-
-  // tokenArgs (variable)
-  if (offset + tokenArgsLen > data.length) return undefined
-  const tokenArgs = hexlify(data.slice(offset, offset + tokenArgsLen))
-
-  return {
-    gasLimit,
-    finality,
-    ccvs,
-    ccvArgs,
-    executor,
-    executorArgs,
-    tokenReceiver,
-    tokenArgs,
-  }
-}
 
 /**
  * Decodes extra arguments from a CCIP message.
@@ -289,11 +53,8 @@ export function decodeExtraArgs(
       const args = defaultAbiCoder.decode([EVMExtraArgsV2ABI], dataSlice(data, 4))
       return { ...(resultToObject(args[0]) as EVMExtraArgsV2), _tag: 'EVMExtraArgsV2' }
     }
-    case GenericExtraArgsV3Tag: {
-      const parsed = decodeExtraArgsV3(data.slice(4))
-      if (!parsed) return undefined
-      return { ...parsed, _tag: 'GenericExtraArgsV3' }
-    }
+    case GenericExtraArgsV3Tag:
+      return decodeExtraArgsV3(data, ChainFamily.EVM)
     case SVMExtraArgsV1Tag: {
       const args = defaultAbiCoder.decode([SVMExtraArgsV1ABI], dataSlice(data, 4))
       const parsed = resultToObject(args[0]) as SVMExtraArgsV1
@@ -323,7 +84,7 @@ export function encodeExtraArgs(args: ExtraArgs | undefined): string {
   if (!args) return '0x'
   if ('finality' in args) {
     // GenericExtraArgsV3 - tightly packed binary encoding
-    return encodeExtraArgsV3(args)
+    return encodeExtraArgsV3(args, ChainFamily.EVM)
   } else if ('computeUnits' in args) {
     return concat([
       SVMExtraArgsV1Tag,

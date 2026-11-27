@@ -258,9 +258,13 @@ describe(
           { limit: 5 },
         )
 
-        // May have 0 results if no messages are currently ready for manual exec
+        // A verified message can be ready before its first execution attempt.
         for (const msg of page.data) {
-          assert.equal(msg.status, 'FAILED', 'Manual exec messages should have FAILED status')
+          assert.partialDeepStrictEqual(
+            msg,
+            { readyForManualExecution: true },
+            `Message ${msg.messageId} should be ready for manual execution`,
+          )
         }
       })
 

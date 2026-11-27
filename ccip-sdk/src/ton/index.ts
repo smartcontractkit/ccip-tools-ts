@@ -59,6 +59,7 @@ import {
   bytesToBuffer,
   decodeAddress,
   decodeOnRampAddress,
+  memoizeBlockInfo,
   parseTypeAndVersion,
   passesTypeAndVersion,
 } from '../utils.ts'
@@ -251,13 +252,7 @@ export class TONChain extends Chain<typeof ChainFamily.TON> {
       expires: 5e3,
     })
 
-    this.getBlockInfo = memoize(this.getBlockInfo.bind(this), {
-      async: true,
-      maxArgs: 1,
-      maxSize: 100,
-      expires: 600e3,
-      forceUpdate: ([k]) => (typeof k !== 'number' && typeof k !== 'bigint') || k <= 0,
-    })
+    this.getBlockInfo = memoizeBlockInfo(this.getBlockInfo.bind(this))
 
     this.typeAndVersion = memoize(this.typeAndVersion.bind(this), {
       maxArgs: 1,

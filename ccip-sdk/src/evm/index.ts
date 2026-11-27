@@ -134,6 +134,7 @@ import {
   getBlockNumberAtOrAfter,
   getDataBytes,
   linkAbortSignals,
+  memoizeBlockInfo,
   parseTypeAndVersion,
   resolveTokenDecimals,
 } from '../utils.ts'
@@ -494,13 +495,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
     this.provider = provider
     destroyOnAbort(this.abort, this.provider)
 
-    const getBlockInfo = memoize(this.getBlockInfo.bind(this), {
-      async: true,
-      maxArgs: 1,
-      maxSize: 100,
-      expires: 600e3,
-      forceUpdate: ([k]) => (typeof k !== 'number' && typeof k !== 'bigint') || k <= 0,
-    })
+    const getBlockInfo = memoizeBlockInfo(this.getBlockInfo.bind(this))
     this.getBlockInfo = getBlockInfo
 
     /** ethers doesn't support logs' new `blockTimestamp` property; to workaround having to do
@@ -1440,7 +1435,7 @@ export class EVMChain extends Chain<typeof ChainFamily.EVM> {
         const onRamps = []
         for (const onRamp of sourceChainConfig.onRamps) {
           try {
-            onRamps.push(decodeOnRampAddress(onRamp, sourceFamily))
+            onRamps.push(decodeOnRampAddress(onRamp, sourceFamily, CCIPVersion.V2_0))
           } catch {
             // ignore
           }

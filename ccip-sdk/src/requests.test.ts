@@ -15,6 +15,8 @@ import {
   getMessagesInBatch,
   getMessagesInRange,
   getMessagesInTx,
+  normalizeDeep,
+  resolveLane,
 } from './requests.ts'
 import { SuiChain } from './sui/index.ts'
 import { TONChain } from './ton/index.ts'
@@ -1429,5 +1431,33 @@ describe('getMessageVersion', () => {
       offRampAddress: `0x${'22'.repeat(20)}`,
     } as unknown as Parameters<typeof getMessageVersion>[0]
     assert.equal(getMessageVersion(message), CCIPVersion.V2_0)
+  })
+})
+
+describe('normalizeDeep', () => {
+  it('leaves hashes unchanged, though their name matches an address field', () => {
+    const hash = `0x${'ab'.repeat(32)}`
+    const normalized = normalizeDeep(
+      { allowed_on_ramp_hashes: [hash] },
+      { sourceFamily: ChainFamily.EVM },
+    )
+    assert.deepEqual(normalized, { allowedOnRampHashes: [hash] })
+  })
+})
+
+describe('resolveLane', () => {
+  it('takes the OnRamp of an Aptos 2.0 message from onRampAddress, not from the log', async () => {
+    const onRampAddress = `0x${'21'.repeat(32)}`
+    const message = {
+      sourceChainSelector: networkInfo('aptos-testnet').chainSelector,
+      destChainSelector: networkInfo(11155111).chainSelector,
+      onRampAddress,
+      offRampAddress: `0x${'6d'.repeat(20)}`,
+    } as unknown as CCIPMessage
+    const source = { network: networkInfo('aptos-testnet') } as unknown as Chain
+    const log = { address: `0x${'10'.repeat(32)}::onramp` } as unknown as ChainLog
+    const lane = await resolveLane(source, message, log)
+    assert.equal(lane.onRamp, onRampAddress)
+    assert.equal(lane.version, CCIPVersion.V2_0)
   })
 })

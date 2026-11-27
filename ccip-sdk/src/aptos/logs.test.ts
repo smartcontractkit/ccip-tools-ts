@@ -17,6 +17,8 @@ import {
   type Aptos,
   type Client,
   type ClientRequest,
+  AptosApiError,
+  AptosApiType,
   AptosConfig,
   Network,
 } from '@aptos-labs/ts-sdk'
@@ -798,5 +800,127 @@ void describe('streamAptosLogs since hint', () => {
       logs.map((l) => l.blockNumber),
       [100, 101, 102, 103],
     )
+  })
+})
+
+/** The error a pruning fullnode gives (HTTP 410 `version_pruned`) for a version it no longer keeps. */
+function prunedError(version: number): AptosApiError {
+  const url = `https://fake.aptos.internal/v1/transactions/by_version/${version}`
+  return new AptosApiError({
+    apiType: AptosApiType.FULLNODE,
+    aptosRequest: { url, method: 'GET' },
+    aptosResponse: {
+      status: 410,
+      statusText: 'Gone',
+      data: { message: `Ledger version(${version}) has been pruned`, error_code: 'version_pruned' },
+      url,
+      headers: {},
+      config: {},
+      request: null,
+      response: null,
+    },
+  } as unknown as ConstructorParameters<typeof AptosApiError>[0])
+}
+
+void describe('streamAptosLogs on a pruning node', () => {
+  void it('continues from the oldest event a pruning node keeps', async () => {
+    const OLDEST = 2
+    const events = Array.from({ length: 4 }, (_, i) => ({
+      version: String(100 + i),
+      sequence_number: String(i),
+      type: `${ADDRESS}::CommitReportAccepted`,
+      data: { i },
+    }))
+    const calls: { url: string; params: unknown }[] = []
+    const served = makeFakeClient({ commit_report_accepted_events: events }, calls)
+    // a pruning node rejects a start below the oldest event it keeps, and names that one
+    const client: Client = {
+      async provider<Req, Res>(req: ClientRequest<Req>) {
+        const start = (req.params as { start?: number } | undefined)?.start
+        if (start == null) {
+          // the latest events, all of them kept
+          calls.push({ url: decodeURIComponent(req.url), params: req.params })
+          return {
+            status: 200,
+            statusText: 'OK',
+            data: events.slice(OLDEST) as unknown as Res,
+            headers: {},
+            config: req,
+            request: null,
+            response: null,
+          }
+        }
+        if (start < OLDEST) {
+          calls.push({ url: decodeURIComponent(req.url), params: req.params })
+          return {
+            status: 410,
+            statusText: 'Gone',
+            data: {
+              message: `Events at sequence number(${start}) have been pruned, the oldest available sequence number is ${OLDEST}`,
+              error_code: 'version_pruned',
+              vm_error_code: null,
+            } as unknown as Res,
+            headers: {},
+            config: req,
+            request: null,
+            response: null,
+          }
+        }
+        return served.provider<Req, Res>(req)
+      },
+    }
+    const provider = makeFakeProvider({})
+    ;(provider as { config: AptosConfig }).config = new AptosConfig({
+      network: Network.MAINNET,
+      fullnode: 'https://fake.aptos.internal',
+      client,
+    })
+
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        {
+          address: ADDRESS,
+          topics: ['CommitReportAccepted'],
+          startBlock: 1,
+        },
+      ),
+    )
+
+    assert.deepEqual(
+      logs.map((l) => l.blockNumber),
+      [102, 103],
+    )
+    assert.ok(
+      calls.some(({ params }) => (params as { start?: number }).start === 0),
+      'the pruned start was asked first',
+    )
+  })
+  void it('places a listed event whose version the node pruned before the startTime floor', async () => {
+    const events = Array.from({ length: 4 }, (_, i) => ({
+      version: String(100 + i),
+      sequence_number: String(i),
+      type: `${ADDRESS}::CommitReportAccepted`,
+      data: { i },
+    }))
+    const provider = makeFakeProvider({ commit_report_accepted_events: events })
+    // a load-balanced endpoint: the event list came from an archival node, this lookup from a
+    // pruning one
+    const byVersion = provider.getTransactionByVersion.bind(provider)
+    provider.getTransactionByVersion = (async (args: { ledgerVersion: number }) => {
+      if (args.ledgerVersion === 100) throw prunedError(args.ledgerVersion)
+      return byVersion(args)
+    }) as Aptos['getTransactionByVersion']
+
+    const logs = await collect(
+      streamAptosLogs(
+        { provider },
+        { address: ADDRESS, topics: ['CommitReportAccepted'], startTime: 101.5 },
+      ),
+    )
+
+    const versions = logs.map((l) => l.blockNumber)
+    assert.ok(!versions.includes(100), 'the pruned version is not emitted')
+    assert.deepEqual(versions.slice(-2), [102, 103])
   })
 })

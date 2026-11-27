@@ -1,7 +1,9 @@
 import { type Aptos, AccountAddress } from '@aptos-labs/ts-sdk'
 
 import type { CCIPMessage_V1_6_EVM } from '../evm/messages.ts'
-import type { ExecutionInput } from '../types.ts'
+import { decodeMessageV1Raw } from '../messages.ts'
+import type { CCIPMessage, CCIPVersion, ExecutionInput } from '../types.ts'
+import { getDataBytes } from '../utils.ts'
 import { serializeExecutionReport } from './types.ts'
 
 /**
@@ -52,6 +54,45 @@ export async function generateUnsignedExecuteReport(
       functionArguments: [serialized],
     },
     options: { maxGasAmount: opts?.txGasLimit ?? opts?.gasLimit },
+  })
+
+  return transaction.bcsToBytes()
+}
+
+/**
+ * Executes a CCIP 2.0 message in offramp: `execute` takes the message as it was emitted, and the
+ * results of its verifiers; any account can call it
+ *
+ * @param provider - Aptos provider instance
+ * @param payer - async Account
+ * @param offRamp - Offramp module (`<package>::offramp`)
+ * @param input - encoded message and its verifications
+ * @param opts - options like gasLimit override; the transaction's gas defaults to the message's
+ * @returns exec txHash
+ */
+export async function generateUnsignedExecuteV2(
+  provider: Aptos,
+  payer: string,
+  offRamp: string,
+  { encodedMessage, verifications }: ExecutionInput<CCIPMessage<typeof CCIPVersion.V2_0>>,
+  opts?: { gasLimit?: number; txGasLimit?: number },
+) {
+  const transaction = await provider.transaction.build.simple({
+    sender: AccountAddress.fromString(payer),
+    data: {
+      function: `${offRamp}::execute` as `${string}::${string}::${string}`,
+      functionArguments: [
+        getDataBytes(encodedMessage),
+        verifications.map(({ destAddress }) => AccountAddress.from(destAddress)),
+        verifications.map(({ ccvData }) => getDataBytes(ccvData)),
+        opts?.gasLimit ?? 0, // gas_limit_override
+      ],
+    },
+    options: {
+      maxGasAmount:
+        opts?.txGasLimit ??
+        (Number(decodeMessageV1Raw(encodedMessage).executionGasLimit) || undefined),
+    },
   })
 
   return transaction.bcsToBytes()

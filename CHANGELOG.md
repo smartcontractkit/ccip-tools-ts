@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- SDK, CLI: support Aptos CCIP 2.0 lanes, next to 1.6
+- SDK (EVM): `getLogs` treats `maximum [from, to] blocks distance: N` (mova, JSON-RPC `-32000`) as a block-range error and pages with at most N blocks. Before, it failed every call with its default 10000-block page. A depth limit, such as `fromBlock is too far from the latest block`, is still not a range error, because a smaller page does not fix it
+- SDK (EVM, Solana, TON): a failed `getBlockInfo` for a tag (`latest`, `finalized`) or a depth is no longer also an unhandled promise rejection. micro-memoize's `forceUpdate` cached a wrapper of each forced call that nothing read, and that wrapper rethrew the failure; after one successful call for a tag, every failed one leaked. `getBlockInfo` now caches only positive block numbers and calls the RPC for tags and depths, as before
+
 ## [1.18.0] - 2026-11-20
 
 - SDK: export `encodeAddressToAny` and `isCantonPartyId` from the package root. `encodeAddressToAny` encodes an address of any chain family the way CCIP messages carry it, e.g. a Canton party as `keccak256(partyId)`; `isCantonPartyId` checks the `hint::1220<64 hex>` party form it hashes
