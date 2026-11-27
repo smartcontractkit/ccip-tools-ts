@@ -1138,3 +1138,63 @@ describe('Aptos failed execution reconstruction', () => {
     assert.equal(error.function, `${ADDRESS}::manually_execute`)
   })
 })
+
+describe('Aptos failed 2.0 execution reconstruction', () => {
+  // OffRamp 2.0.0 package on aptos-testnet
+  const V2_OFFRAMP = '0xc02937630416456dbd9ca4b54d186e213f1f25f8ec57d4dc592ab778c56620f3::offramp'
+  const V2_MESSAGE_ID = '0xbad01a1fffff9ceb45ff179dbd3dfad56c239c4487d61731fedc0cf36ee0db6b'
+  const V2_VM_STATUS =
+    'Move abort in 0x1::from_bcs: EINVALID_UTF8(0x10001): UTF8 check failed in conversion from bytes to string'
+  const V2_TX_HASH = '0x1d1f6b81c0735823a3460d80abba1e22c0183e5132860d62d458b201cb506634'
+  // the encoded MessageV1 of the failed call (its keccak256 is V2_MESSAGE_ID)
+  const ENCODED_MESSAGE =
+    '0x01de41ba4fc9d91ad90a5053ee33c1a91500000000000000040004c2b600030d400000000095e41fa56ad068dc59dec9283d06c3c2e211a35b636ca99a9eb1d30ddb1ae46b2000000000000000000000000082c5bace65956959076ee14074c7551b345e48352062f92b897b1bd2351a59a229ac895f95909d621ab22e12ac71a7b62792dd7d8620000000000000000000000000f1073ece452b9ca3b9a71014db3c8ea7cb510e07208492fcf6d9905bb0f89d155a64d94983cf84a062798337561c4b1c2e87955f86000000c70100000000000000000000000000000000000000000000000000038d7ea4c68000200000000000000000000000009388c0436d77112c49c94cad913b918dbb40cc1520000000000000000000000000ce009f314e8c1f3be6c36d0365b466db4386ed5020ea06209e4f7d5d9923144bd6bdcc992dc149a69488b6a500db4b8cb3d3e25608208492fcf6d9905bb0f89d155a64d94983cf84a062798337561c4b1c2e87955f8600200000000000000000000000000000000000000000000000000000000000000012000a68656c6c6f2d63636970'
+  /** Aborted `offramp::execute` of aptos-testnet tx version 466258314, trimmed. */
+  const failedV2 = {
+    type: TransactionResponseType.User,
+    version: '466258314',
+    hash: V2_TX_HASH,
+    gas_used: '741',
+    success: false,
+    vm_status: V2_VM_STATUS,
+    payload: {
+      type: 'entry_function_payload',
+      function: `${V2_OFFRAMP}::execute`,
+      type_arguments: [],
+      arguments: [
+        ENCODED_MESSAGE,
+        ['0xc7e784eb798e4d5612700e967d8ad4d8ac5c7ec561278db54ae9925ad89cce6d'],
+        ['0xe9a05a200080b4c23da0c6fd914d911a786f7cba75322c91f84bc2ffd2460b6f'],
+        '0',
+      ],
+    },
+    events: [],
+    timestamp: '1794578798490599',
+  } as unknown as UserTransactionResponse
+
+  it('builds the failed log from the encoded MessageV1 argument', () => {
+    const log = getAptosExecutionFailureLog(failedV2)
+
+    assert.ok(log)
+    assert.equal(log.address, V2_OFFRAMP)
+    assert.deepEqual(log.topics, ['ExecutionStateChanged'])
+    assert.equal(log.blockNumber, 466258314)
+    assert.equal(log.transactionHash, V2_TX_HASH)
+    assert.deepEqual(log.data, {
+      message_id: V2_MESSAGE_ID,
+      sequence_number: '4',
+      source_chain_selector: networkInfo('ethereum-testnet-sepolia').chainSelector.toString(),
+      state: ExecutionState.Failed,
+      gas_used: '741',
+      return_data: {
+        vm_status: V2_VM_STATUS,
+        function: `${V2_OFFRAMP}::execute`,
+        gas_used: '741',
+        location: '0x1::from_bcs',
+        abort_code: '65537',
+        abort_name: 'EINVALID_UTF8',
+        dest_chain_selector: networkInfo('aptos-testnet').chainSelector.toString(),
+      },
+    })
+  })
+})

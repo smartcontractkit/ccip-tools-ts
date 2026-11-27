@@ -4,9 +4,9 @@ import { describe, it } from 'node:test'
 import { CCIPAPIClient, MessageStatus } from '@chainlink/ccip-sdk/src/index.ts'
 import { TON_RETENTION_ERROR_RE } from '@chainlink/ccip-sdk/src/ton/utils.ts'
 
+import { healthyEvmRpcEndpoints } from '../../../scripts/test-endpoints.ts'
 import { useResourceForDescribe } from '../../../scripts/useResource.ts'
 import {
-  APTOS_SKIP,
   APTOS_TESTNET_RPCS,
   BASE_MAINNET_RPCS,
   BASE_SEPOLIA_RPCS,
@@ -24,7 +24,7 @@ import {
 // invocation is pointed only at the endpoints of its own lane (see
 // e2e-helpers.test.ts) — so this suite no longer queues other suites on the
 // sepolia/fuji hub locks for its whole file lifetime. It still uses sepolia
-// (dest of the Solana->EVM and Aptos->EVM fixtures) and fuji (source of the
+// (dest of the Solana->EVM fixture, and both Aptos ones) and fuji (source of the
 // Solana v2 one), which have no live alternative counterpart, but only while
 // those blocks actually run. `show` also resolves 32-byte ids through the
 // default CCIP API, and the format variants pick their fixture through it at
@@ -312,65 +312,57 @@ describe('e2e command show EVM', () => {
     })
   })
 
-  // TODO: restore once CCIP is redeployed on aptos-testnet. The testnet restarted ~2026-10-08
-  // and the old package 0xc748…ee45 has no modules; as of 2026-10-23 the CCIP API and DB
-  // list no aptos-testnet ramp created, or message sent, after the restart.
-  describe('EVM to Aptos', { skip: APTOS_SKIP }, () => {
-    useResourceForDescribe(['bsc-testnet', 'aptos-testnet'])
+  describe('EVM to Aptos', () => {
+    useResourceForDescribe(['sepolia', 'aptos-testnet'])
 
     it(
-      'should show complete CCIP transaction details EVM to Aptos',
+      'should show complete CCIP transaction details EVM to Aptos (v2.0)',
+      // the receipt scan binary-searches the Aptos start version by timestamp; under the
+      // archival endpoint's per-IP rate limit (HTTP 429) each step retries
       { timeout: 240000 },
       async () => {
-        // Fixture seeded periodically from CCIP API v2 messages
-        // (sourceChainSelector=13264668187771770619, destChainSelector=743186221051783445).
-        // Source is bsc-testnet: the source side is a single tx-by-hash read,
-        // so it costs nothing to serve and leaves the sepolia endpoints alone.
-        const TX_HASH = '0x407ffe6bf58d39e08c786a7b31a407d758effb8657372c330a07a796137816a7'
-        const MESSAGE_ID = '0xac0a5e71cd2e1d637d3b6af558bb255a7f6196cc7954c2b7146b8e055f9a9fe7'
-        const SENDER = '0x89810cb91a5fe67dDf3483182f08e1559A5699De'
-        const RECEIVER = '0xc7dfb38f07910cba7157db3ead1471ebc5a87f71a5aaad3921637f5371da69d8'
-        const ONRAMP = '0x28A025d34c830BF212f5D2357C8DcAB32dD92A20'
-        const OFFRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
+        // Aptos testnet CCIP 2.0.0 development deployment: refresh this fixture after a redeploy.
+        // Neither the CCV indexer nor the CCIP API covers this lane, so `show` reports the
+        // verifications as unavailable and goes on to the receipts.
+        const TX_HASH = '0x651668f0de83521c4b1186aaac18752310462fc7c59076f8cae5950616de1f5f'
+        const MESSAGE_ID = '0x6ff0adcef484c80ee36f3c5e354aadaa325a6859e9309f85089d6a7b2fc37ab8'
+        const SENDER = '0xf1073eCE452B9ca3b9a71014db3C8EA7cb510e07'
+        const RECEIVER = '0x8492fcf6d9905bb0f89d155a64d94983cf84a062798337561c4b1c2e87955f86'
+        const ONRAMP = '0x82c5bace65956959076ee14074c7551b345e4835'
+        // the OffRamp's state address (in the message), and its module (emits the receipt)
+        const OFFRAMP_STATE = '0x62f92b897b1bd2351a59a229ac895f95909d621ab22e12ac71a7b62792dd7d86'
+        const OFFRAMP = '0xc02937630416456dbd9ca4b54d186e213f1f25f8ec57d4dc592ab778c56620f3'
 
-        const args = buildShowArgs(TX_HASH, [...BSC_TESTNET_RPCS, ...APTOS_TESTNET_RPCS])
+        const args = buildShowArgs(TX_HASH, [...SEPOLIA_RPCS, ...APTOS_TESTNET_RPCS])
         const result = await spawnCLI(args, 210000)
 
         assert.equal(result.exitCode, 0, `${result.stdout}\n${result.stderr}`)
         const output = result.stdout
 
         // Lane information
-        assert.match(output, /name.*binance_smart_chain-testnet.*aptos-testnet/i)
-        assert.match(output, /chainId.*97.*aptos:2/)
-        assert.match(output, /chainSelector.*13264668187771770619n?.*743186221051783445n?/)
-        assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+        assert.match(output, /name.*ethereum-testnet-sepolia.*aptos-testnet/i)
+        assert.match(output, /chainId.*11155111.*aptos:2/)
+        assert.match(output, /chainSelector.*16015286601757825753n?.*743186221051783445n?/)
+        assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*2\\.0\\.0`, 'i'))
 
         // Request information
         assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
         assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
         assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
         assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
-        assert.match(output, /sequenceNumber.*2867n?/)
-        assert.match(output, /nonce.*0.*allow out-of-order/)
-        assert.match(output, /gasLimit.*0n?/)
+        assert.match(output, /sequenceNumber.*\b8\b/)
         assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-        assert.match(output, /logIndex.*7\b/)
-        assert.match(output, /blockNumber.*127636236/)
-        assert.match(output, /fee.*0\.000351598679631162\s+WBNB/)
-        assert.match(output, /tokens.*0\.0014\s+CCIP-BnM/)
-        assert.match(output, /data.*0x'?/)
-        assert.match(output, /allowOutOfOrderExecution.*true\b/)
+        assert.match(output, new RegExp(`offRampAddress.*${OFFRAMP_STATE}`, 'i'))
 
-        // The API-metadata path short-circuits the commit/receipt scans (old
-        // fixtures' event history is pruned on public nodes); the receipt table
-        // itself still prints and stays fully assertable
+        // Receipts information
+        assert.match(output, /Receipts.*dest/i)
         assert.match(output, /state.*success/i)
         assert.match(output, new RegExp(`contract.*${OFFRAMP}::offramp`, 'i'))
         assert.match(
           output,
-          /transactionHash.*0xb6a16526932bbf8401c9e92b0d641ee799556bf613b433eefb5e9631f19d9c11/i,
+          /transactionHash.*0xd6dc368bb182d5d0bc270ada3d2774d9585de39662b7258418ae01472a3f0cc9/i,
         )
-        assert.match(output, /blockNumber.*10855148519/)
+        assert.match(output, /blockNumber.*567359658/)
       },
     )
   })
@@ -567,27 +559,34 @@ describe('e2e command show Solana', () => {
   )
 })
 
-// TODO: restore once CCIP is redeployed on aptos-testnet. The testnet restarted ~2026-10-08
-// and the old package 0xc748…ee45 has no modules; as of 2026-10-23 the CCIP API and DB
-// list no aptos-testnet ramp created, or message sent, after the restart.
-describe('e2e command show Aptos', { skip: APTOS_SKIP }, () => {
+describe('e2e command show Aptos', () => {
   useResourceForDescribe(['aptos-testnet', 'sepolia'])
 
-  // Fixture seeded periodically from CCIP API v2 messages
-  // (sourceChainSelector=743186221051783445, destChainSelector=16015286601757825753)
-  const TX_HASH = '0x034540a867b525b4f5b80ee70b964b112277e3bc4f97772e44f29bbd4522d4b1'
-  const MESSAGE_ID = '0xddbb8b48fa12ce0e64c21fad6fbeb9f2a0a67e2ed2a24429a351bc4faa07b567'
-  const SENDER = '0x275b828b4c4aede0c53b59ec594d12dfb86c5f01f8300395d0ee8a869aacf8cc'
-  const RECEIVER = '0x9d087fC03ae39b088326b67fA3C788236645b717'
-  const ONRAMP = '0xc748085bd02022a9696dfa2058774f92a07401208bbd34cfd0c6d0ac0287ee45'
-  const OFFRAMP = '0x0820f975ce90EE5c508657F0C58b71D1fcc85cE0'
+  // Aptos testnet CCIP 2.0.0 development deployment: refresh this fixture after a redeploy.
+  // Neither the CCV indexer nor the CCIP API covers this lane, so `show` reports the
+  // verifications as unavailable and goes on to the receipts.
+  const TX_HASH = '0x54cc3836d00da88bfa603a27428d9311dae0cebc8604d34ac6c7279f6e99b5b5'
+  const MESSAGE_ID = '0x16b4714f77f31dfbe51a80cdd8c49940e2d6570a3201bed156fad3055b4127a6'
+  const SENDER = '0x311cea5ace5299669444abd99fc787ddb0894e297ca0f21331aa4e0c5950ec5e'
+  const RECEIVER = '0x1b03FB65877cdb7dAbdB73e72B11Ba1651aC7548'
+  // the OnRamp state address, which the message names
+  const ONRAMP = '0x21cb562592180cdf573cd142dd96321bd47d78f32e34ea277725cee9a23b97a1'
+  const OFFRAMP = '0x6D817BB162b36be1Cf33b55977a9Fc8BD18a342c'
 
   it(
-    'should show complete CCIP transaction details Aptos to EVM',
-    { timeout: 240000 },
+    'should show complete CCIP transaction details Aptos to EVM (v2.0)',
+    // Two 210s CLI attempts, their retry delay, and endpoint probes must fit this budget.
+    { timeout: 540000 },
     async () => {
-      const args = buildShowArgs(TX_HASH, [...APTOS_TESTNET_RPCS, ...SEPOLIA_RPCS])
-      const result = await spawnCLI(args, 210000)
+      // Probe Sepolia before the CLI races its list: a public gateway can answer
+      // `eth_chainId` and then failsafe-timeout on this lane's block scan, which won
+      // the race in CI and failed the run after 30 s. The retry then covers a gateway
+      // that degrades after the probe; the CLI re-races the list on the second run.
+      const args = buildShowArgs(TX_HASH, [
+        ...APTOS_TESTNET_RPCS,
+        ...(await healthyEvmRpcEndpoints('RPC_SEPOLIA')),
+      ])
+      const result = await spawnCLIRetryingTransient(args, 210000)
 
       assert.equal(result.exitCode, 0, `${result.stdout}\n${result.stderr}`)
       const output = result.stdout
@@ -596,43 +595,27 @@ describe('e2e command show Aptos', { skip: APTOS_SKIP }, () => {
       assert.match(output, /name.*aptos-testnet.*ethereum-testnet-sepolia/i)
       assert.match(output, /chainId.*aptos:2.*11155111/)
       assert.match(output, /chainSelector.*743186221051783445n?.*16015286601757825753n?/)
-      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*1\\.6\\.0`, 'i'))
+      assert.match(output, new RegExp(`onRamp/version.*${ONRAMP}.*2\\.0\\.0`, 'i'))
 
       // Request information
       assert.match(output, new RegExp(`messageId.*${MESSAGE_ID}`, 'i'))
       assert.match(output, new RegExp(`origin.*${SENDER}`, 'i'))
       assert.match(output, new RegExp(`sender.*${SENDER}`, 'i'))
-      assert.match(output, new RegExp(`receiver.*${RECEIVER}`))
-      assert.match(output, /sequenceNumber.*164n?/)
-      assert.match(output, /nonce.*0.*allow out-of-order/)
-      assert.match(output, /gasLimit.*0n?/)
+      assert.match(output, new RegExp(`receiver.*${RECEIVER}`, 'i'))
+      assert.match(output, /sequenceNumber.*\b6\b/)
       assert.match(output, new RegExp(`transactionHash.*${TX_HASH}`, 'i'))
-      assert.match(output, /logIndex.*8\b/)
-      assert.match(output, /blockNumber.*10547904420/)
+      assert.match(output, /blockNumber.*552229822/)
       assert.match(output, /fee.*\bAPT/)
-      assert.match(output, /tokens.*0\.001\s+CCIP-BnM/)
-      assert.match(output, /data.*0x'?/)
-      assert.match(output, /allowOutOfOrderExecution.*true\b/)
+      assert.match(output, new RegExp(`offRampAddress.*${OFFRAMP}`, 'i'))
 
-      // The API-metadata path short-circuits the commit/receipt scans (old
-      // fixtures' event history is pruned on public nodes); the receipt table
-      // itself still prints and stays fully assertable. Provider lag can also
-      // leave the receipts section empty under its heading — tolerate that,
-      // but not a wrong receipt.
-      assert.match(output, /Receipts.*dest|No execution receipt/i)
-      // Provider shards disagree on which historic receipt row they serve:
-      // require A receipt row when one is rendered, only pin the hash when the
-      // successful one shows up
-      if (/\bstate\b|No execution receipt/i.test(output)) {
-        assert.match(output, /state.*(success|failed)|No execution receipt/i)
-        assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
-        if (/state.*success/i.test(output)) {
-          assert.match(
-            output,
-            /transactionHash.*0xfc7ba4cbdeca8c322d0ced6aa2f0668a96263312287fde2e532d27493cb0a6f8/i,
-          )
-        }
-      }
+      // Receipts information
+      assert.match(output, /Receipts.*dest/i)
+      assert.match(output, /state.*success/i)
+      assert.match(output, new RegExp(`contract.*${OFFRAMP}`, 'i'))
+      assert.match(
+        output,
+        /transactionHash.*0x4e430474c0ba795d62787a28f63f23e5d0c53c74062c0678cb8a695b92d44b51/i,
+      )
     },
   )
 })

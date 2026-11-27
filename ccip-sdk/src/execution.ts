@@ -8,7 +8,6 @@ import {
   shouldRetry,
 } from './errors/index.ts'
 import { Tree, getLeafHasher, proofFlagsToBits } from './hasher/index.ts'
-import { ChainFamily } from './networks.ts'
 import { type CCIPMessage, type Lane, type WithLogger, CCIPVersion } from './types.ts'
 import { decodeAddress, decodeOnRampAddress } from './utils.ts'
 
@@ -131,27 +130,22 @@ export const discoverOffRamp = memoize(
     { logger = console }: WithLogger = {},
   ): Promise<string> {
     try {
-      onRamp = decodeOnRampAddress(onRamp, source.network.family)
+      onRamp = decodeOnRampAddress(onRamp, source.network.family, version)
     } catch {
       // pass
     }
     const isV2 = version >= CCIPVersion.V2_0
 
     // OnRamp v2.0 has `offRamp` config; only a 2.0 lane's config gives a 2.0 OffRamp
-    const onRampConfig: { typeAndVersion: string; offramp?: string; offRamp?: string } =
-      await source.getOnRampConfig(onRamp, dest.network.chainSelector, { version })
-    if (isV2 && (onRampConfig.offramp || onRampConfig.offRamp)) {
-      let decoded = decodeAddress(
-        onRampConfig.offramp || onRampConfig.offRamp!,
-        dest.network.family,
-      )
-      if (
-        (dest.network.family === ChainFamily.Aptos || dest.network.family === ChainFamily.Sui) &&
-        !decoded.includes('::')
-      )
-        decoded += '::offramp'
-      return decoded
-    }
+    const onRampConfig: {
+      typeAndVersion: string
+      offramp?: string
+      offRamp?: string
+      offRampAddress?: string
+    } = await source.getOnRampConfig(onRamp, dest.network.chainSelector, { version })
+    const configOffRamp =
+      onRampConfig.offramp || onRampConfig.offRamp || onRampConfig.offRampAddress
+    if (isV2 && configOffRamp) return decodeAddress(configOffRamp, dest.network.family)
 
     // fallback to pairing routers offramps
     const sourceRouter = await source.getRouterForOnRamp(onRamp, dest.network.chainSelector)
