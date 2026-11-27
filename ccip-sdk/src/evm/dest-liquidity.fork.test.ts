@@ -31,7 +31,7 @@ import { Instance } from 'prool'
 import '../aptos/index.ts' // register chain families for cross-family message decoding
 import '../solana/index.ts'
 import '../ton/index.ts'
-import { rpcEndpoint } from '../../../scripts/test-endpoints.ts'
+import { reachableEvmForkEndpoint } from '../../../scripts/test-endpoints.ts'
 import { useResource } from '../../../scripts/useResource.ts'
 import { CCIPDestExecutionRevertError } from '../errors/index.ts'
 import { interfaces } from './const.ts'
@@ -46,11 +46,9 @@ await useResource(['sepolia', 'fuji'])
 
 // ── Chain constants ──
 
-const SEPOLIA_RPC = rpcEndpoint('RPC_SEPOLIA')
 const SEPOLIA_CHAIN_ID = 11155111
 const SEPOLIA_SELECTOR = 16015286601757825753n
 
-const FUJI_RPC = rpcEndpoint('RPC_FUJI')
 const FUJI_CHAIN_ID = 43113
 const FUJI_SELECTOR = 14767482510784806043n
 
@@ -121,15 +119,21 @@ describe(
     let fujiInstance: ReturnType<typeof Instance.anvil> | undefined
 
     before(async () => {
+      // Bind an upstream that is healthy right now, not whichever endpoint happens to be
+      // first: a stalled first entry makes every fork read wait out its request timeout.
+      const [sepoliaRpc, fujiRpc] = await Promise.all([
+        reachableEvmForkEndpoint('RPC_SEPOLIA', SEPOLIA_CHAIN_ID),
+        reachableEvmForkEndpoint('RPC_FUJI', FUJI_CHAIN_ID),
+      ])
       // 15s request timeout: anvil does not retry a hung upstream read (see fork.test.ts)
       const forkOpts = { retries: 8, timeout: 15_000, forkRetryBackoff: 1_000 } as const
       // ports offset from fork.test.ts so both files can run in the same `node --test` run
       sepoliaInstance = Instance.anvil(
-        { forkUrl: SEPOLIA_RPC, chainId: SEPOLIA_CHAIN_ID, port: 8656, ...forkOpts },
+        { forkUrl: sepoliaRpc, chainId: SEPOLIA_CHAIN_ID, port: 8656, ...forkOpts },
         {},
       )
       fujiInstance = Instance.anvil(
-        { forkUrl: FUJI_RPC, chainId: FUJI_CHAIN_ID, port: 8655, ...forkOpts },
+        { forkUrl: fujiRpc, chainId: FUJI_CHAIN_ID, port: 8655, ...forkOpts },
         {},
       )
       await Promise.all([startForkWithRetries(sepoliaInstance), startForkWithRetries(fujiInstance)])
@@ -161,10 +165,11 @@ describe(
       }
 
       it('MINTER_ROLE revoked on the fork => classified as authority, checkExecute throws', async () => {
-        assert.ok(fujiChain)
-        const provider = fujiChain.provider as JsonRpcProvider
+        const chain = fujiChain
+        assert.ok(chain)
+        const provider = chain.provider as JsonRpcProvider
         const checkExecute = () =>
-          fujiChain!.checkExecute({
+          chain.checkExecute({
             offRamp: V2_LANE.destOffRamp,
             message: {
               sourceChainSelector: SEPOLIA_SELECTOR,
@@ -184,12 +189,16 @@ describe(
           ],
           await provider.getSigner(V2_LANE.operator),
         )
+        // revoking an unheld role / granting a held one is a no-op, so a transient
+        // send can retry the whole call
         const send = async (method: 'revokeRole' | 'grantRole') =>
-          (
-            (await token.getFunction(method)(MINTER_ROLE, V2_LANE.destPool)) as {
-              wait: () => Promise<unknown>
-            }
-          ).wait()
+          withForkRetry(async () =>
+            (
+              (await token.getFunction(method)(MINTER_ROLE, V2_LANE.destPool)) as {
+                wait: (confirms?: number, timeout?: number) => Promise<unknown>
+              }
+            ).wait(1, 15_000),
+          )
         await send('revokeRole')
         try {
           assert.equal(await token.getFunction('hasRole')(MINTER_ROLE, V2_LANE.destPool), false)
@@ -198,7 +207,7 @@ describe(
           const simErr = await withForkRetry(() =>
             rejectionOf(
               simulateReleaseOrMint({
-                provider: fujiChain!.provider,
+                provider: chain.provider,
                 pool: V2_LANE.destPool,
                 offRamp: V2_LANE.destOffRamp,
                 input,
@@ -239,59 +248,65 @@ describe(
         // liquidity on the previousPool. Drain the previousPool's token balance on the fork: the
         // releaseOrMint simulation (the oracle the balance heuristic defers to) must then revert,
         // blocking with a typed, transient error.
-        assert.ok(sepoliaChain)
-        const provider = sepoliaChain.provider as JsonRpcProvider
+        const chain = sepoliaChain
+        assert.ok(chain)
+        const provider = chain.provider as JsonRpcProvider
         const LNM = '0x466D489b6d36E7E3b824ef491C225F5830E81cC1'
         const REGISTRY = '0x95F29FEE11c5C55d26cCcf1DB6772DE953B37B82'
         const ROUTER = '0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59'
-        const { tokenPool } = await sepoliaChain.getRegistryTokenConfig(REGISTRY, LNM)
+        const { tokenPool } = await withForkRetry(() => chain.getRegistryTokenConfig(REGISTRY, LNM))
         assert.ok(tokenPool)
-        const { previousPool } = await sepoliaChain.getTokenPoolConfig(tokenPool)
+        const { previousPool } = await withForkRetry(() => chain.getTokenPoolConfig(tokenPool))
         assert.ok(previousPool, 'LnM AndProxy has a previousPool (holds the liquidity)')
-        const offRamps = await sepoliaChain.getOffRampsForRouter(ROUTER, FUJI_SELECTOR)
+        const offRamps = await withForkRetry(() =>
+          chain.getOffRampsForRouter(ROUTER, FUJI_SELECTOR),
+        )
         const offRamp = offRamps.at(-1)!
         const message = {
           sourceChainSelector: FUJI_SELECTOR,
           receiver: '0x1111111111111111111111111111111111111111',
           tokenAmounts: [{ token: LNM, amount: 10n ** 16n }] as const,
         }
-        // sanity: with liquidity in place, the (drained-holder-aware) preflight passes
-        assert.equal(await sepoliaChain.checkExecute({ offRamp, message }), true)
+        // sanity: with liquidity in place, the (drained-holder-aware) preflight passes.
+        // A fork read can fail transiently while anvil relays it to the upstream.
+        assert.equal(await withForkRetry(() => chain.checkExecute({ offRamp, message })), true)
         // drain: zero the previousPool's token balance via storage override
-        const slot = await findBalancesSlot(LNM, provider)
+        const slot = await withForkRetry(() => findBalancesSlot(LNM, provider))
         await provider.send('anvil_setStorageAt', [
           LNM,
           solidityPackedKeccak256(['uint256', 'uint256'], [previousPool, slot]),
           toBeHex(0n, 32),
         ])
-        await assert.rejects(
-          () => sepoliaChain!.checkExecute({ offRamp, message }),
-          (err: CCIPDestExecutionRevertError) => {
-            assert.ok(err instanceof CCIPDestExecutionRevertError, String(err))
-            // the raw revert is carried for the caller to parse (legacy pools revert with plain
-            // ERC20 Error(string) reasons here, which read non-transient — same verdict class the
-            // pre-existing CCIPInsufficientBalanceError heuristic produced)
-            assert.ok(err.context['revert'], 'raw revert carried')
-            return true
-          },
+        const err = await withForkRetry(() =>
+          rejectionOf(
+            chain.checkExecute({ offRamp, message }),
+            'checkExecute should block the drained lane',
+          ),
         )
+        assert.ok(err instanceof CCIPDestExecutionRevertError, String(err))
+        // the raw revert is carried for the caller to parse (legacy pools revert with plain
+        // ERC20 Error(string) reasons here, which read non-transient — same verdict class the
+        // pre-existing CCIPInsufficientBalanceError heuristic produced)
+        assert.ok(err.context['revert'], 'raw revert carried')
       })
 
       it('fee-charging source pool (fee config set on the fork) => post-fee destTokenAmount surfaced', async () => {
-        assert.ok(sepoliaChain)
-        const provider = sepoliaChain.provider as JsonRpcProvider
+        const chain = sepoliaChain
+        assert.ok(chain)
+        const provider = chain.provider as JsonRpcProvider
         const srcPool = new Contract(
           V2_LANE.srcPool,
           interfaces.TokenPool_v2_0,
           provider,
         ) as Contract & { owner(): Promise<string> }
-        const owner = await srcPool.owner()
+        const owner = await withForkRetry(() => srcPool.owner())
         await provider.send('anvil_impersonateAccount', [owner])
         await provider.send('anvil_setBalance', [owner, '0x1000000000000000000'])
         // configure a 1% finality transfer fee for the Fuji lane, like a fee-charging v2 pool
         const asOwner = srcPool.connect(await provider.getSigner(owner)) as Contract
-        await (
-          (await asOwner.getFunction('applyTokenTransferFeeConfigUpdates')(
+        // setting the same config again is idempotent, so the whole send can retry
+        await withForkRetry(async () => {
+          const tx = (await asOwner.getFunction('applyTokenTransferFeeConfigUpdates')(
             [
               {
                 destChainSelector: FUJI_SELECTOR,
@@ -307,21 +322,29 @@ describe(
               },
             ],
             [], // disableTokenTransferFeeConfigs
-          )) as { wait: () => Promise<unknown> }
-        ).wait()
+          )) as { wait: (confirms?: number, timeout?: number) => Promise<unknown> }
+          // A bounded wait lets withForkRetry retry an unconfirmed fork transaction.
+          await tx.wait(1, 15_000)
+        })
         await provider.send('anvil_stopImpersonatingAccount', [owner])
 
+        // This scenario requires the simulated pool balance. Discover and cache the token's
+        // balance slot under fork retry instead of letting the production fallback omit it.
+        await withForkRetry(() => findBalancesSlot(V2_LANE.srcToken, provider))
+
         // the OnRamp writes lockOrBurn's post-fee destTokenAmount into the emitted message —
-        // simulateLockOrBurn must surface exactly that
+        // simulateLockOrBurn must surface exactly that (a fork read can fail transiently)
         const amount = 10n ** 18n
-        const result = await sepoliaChain.simulateLockOrBurn({
-          onRamp: V2_LANE.srcOnRamp,
-          destChainSelector: FUJI_SELECTOR,
-          token: V2_LANE.srcToken,
-          amount,
-          originalSender: V2_LANE.operator,
-          receiver,
-        })
+        const result = await withForkRetry(() =>
+          chain.simulateLockOrBurn({
+            onRamp: V2_LANE.srcOnRamp,
+            destChainSelector: FUJI_SELECTOR,
+            token: V2_LANE.srcToken,
+            amount,
+            originalSender: V2_LANE.operator,
+            receiver,
+          }),
+        )
         assert.equal(result.destTokenAmount, (amount * 9900n) / 10000n)
         assert.equal(result.sourcePoolAddress, V2_LANE.srcPool)
       })
