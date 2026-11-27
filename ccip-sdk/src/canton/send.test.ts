@@ -9,10 +9,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
+import './quiet-template-registration.ts'
+import { CCIPSender } from '@chainlink/canton-contracts/ccip-sender-v2-2.1.0/CCIP/CCIPSender'
+
 import { CCIPErrorCode } from '../errors/index.ts'
 import type { AnyMessage } from '../types.ts'
 import { RawInstanceAddress, parsePartyId } from './addressCodec.ts'
-import { CCIPSender } from './bindings/ccip-sender-v2-2.1.0/CCIP/CCIPSender/module.js'
 import { CantonChain } from './index.ts'
 
 const silentLogger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} }

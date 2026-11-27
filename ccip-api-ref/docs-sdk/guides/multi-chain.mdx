@@ -318,7 +318,7 @@ const request = await source.sendMessage({
 })
 ```
 
-On Canton source, `router` is the **CCIPSender instance id** (e.g. `ccipsender`), not a contract address. `getFee()` returns `0n` — fees are computed on-ledger during send.
+On Canton source, `router` is the **CCIPSender instance id** (e.g. `ccipsender`), not a contract address. `getFee()` quotes the fee by exercising the on-ledger `CCIPSender.GetFee` choice via a prepare-only interactive submission — nothing is signed or committed.
 
 </TabItem>
 <TabItem value="evm-to-canton" label="EVM → Canton">
@@ -428,7 +428,7 @@ Canton source sends use `CantonExtraArgsV1` (not on-wire encoded bytes):
 
 ### Fee Model
 
-`getFee()` returns `0n` on Canton — fees are computed on-ledger during the send transaction. Fee tokens are instrument IDs (native Amulet or CCIP LINK).
+`getFee()` quotes the real fee on Canton: it exercises the `CCIPSender.GetFee` choice through a **prepare-only** interactive submission — the participant interprets the command and returns the computed fee without anything being signed, sequenced or committed (no wallet prompt, no traffic cost, no ledger effect). The fee covers CCV, token-pool, network and executor costs, denominated in the fee token's smallest units (10 decimals). Fee tokens are instrument IDs (native Amulet or CCIP LINK).
 
 ### Unsigned Transactions
 

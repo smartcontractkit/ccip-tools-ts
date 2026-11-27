@@ -4,6 +4,7 @@ import { describe, it } from 'node:test'
 import { CCIPAPIClient, MessageStatus } from '@chainlink/ccip-sdk/src/index.ts'
 import { TON_RETENTION_ERROR_RE } from '@chainlink/ccip-sdk/src/ton/utils.ts'
 
+import { healthyEvmRpcEndpoints } from '../../../scripts/test-endpoints.ts'
 import { useResourceForDescribe } from '../../../scripts/useResource.ts'
 import {
   APTOS_TESTNET_RPCS,
@@ -574,11 +575,18 @@ describe('e2e command show Aptos', () => {
 
   it(
     'should show complete CCIP transaction details Aptos to EVM (v2.0)',
-    // the Aptos archival endpoint rate-limits per IP (HTTP 429): its reads retry
-    { timeout: 240000 },
+    // Two 210s CLI attempts, their retry delay, and endpoint probes must fit this budget.
+    { timeout: 540000 },
     async () => {
-      const args = buildShowArgs(TX_HASH, [...APTOS_TESTNET_RPCS, ...SEPOLIA_RPCS])
-      const result = await spawnCLI(args, 210000)
+      // Probe Sepolia before the CLI races its list: a public gateway can answer
+      // `eth_chainId` and then failsafe-timeout on this lane's block scan, which won
+      // the race in CI and failed the run after 30 s. The retry then covers a gateway
+      // that degrades after the probe; the CLI re-races the list on the second run.
+      const args = buildShowArgs(TX_HASH, [
+        ...APTOS_TESTNET_RPCS,
+        ...(await healthyEvmRpcEndpoints('RPC_SEPOLIA')),
+      ])
+      const result = await spawnCLIRetryingTransient(args, 210000)
 
       assert.equal(result.exitCode, 0, `${result.stdout}\n${result.stderr}`)
       const output = result.stdout

@@ -71,5 +71,30 @@ export function createLedgerApiClientFromProvider(provider: CantonRpcProvider) {
 
       return response as JsGetActiveContractsResponse[]
     },
+
+    /**
+     * Prepare an interactive submission without executing or signing it.
+     *
+     * The participant only interprets the commands — read authorization is
+     * sufficient — and returns the interpreted `preparedTransaction` (base64
+     * protobuf) plus its hash for external signing. Nothing is sequenced: no
+     * signature is requested, no traffic is consumed, and the ledger is
+     * unchanged. The interpreted transaction's Exercise nodes already contain
+     * the computed choice results.
+     */
+    async prepareSubmission(
+      request: JsPrepareSubmissionRequest,
+    ): Promise<JsPrepareSubmissionResponse> {
+      const response = await provider.request({
+        method: 'ledgerApi',
+        params: {
+          requestMethod: 'post',
+          resource: '/v2/interactive-submission/prepare',
+          body: request,
+        },
+      })
+
+      return response as JsPrepareSubmissionResponse
+    },
   }
 }
