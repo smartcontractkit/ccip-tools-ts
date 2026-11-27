@@ -3777,6 +3777,41 @@ export class CCIPSolanaV2LaneUnavailableError extends CCIPError {
 }
 
 /**
+ * Thrown when a Solana receiver's `ReceiverRegistry` account (under the router, seeds
+ * `[receiver_registry, receiver]`) exists but isn't a valid registry: wrong discriminator or an
+ * unknown schema version. A 2.0 OffRamp rejects messages to such a receiver.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await solanaChain.estimateReceiveExecution({ offRamp, message })
+ * } catch (error) {
+ *   if (error instanceof CCIPSolanaReceiverRegistryInvalidError) {
+ *     console.log(`Bad registry ${error.context.registry} for ${error.context.receiver}`)
+ *   }
+ * }
+ * ```
+ */
+export class CCIPSolanaReceiverRegistryInvalidError extends CCIPError {
+  override readonly name = 'CCIPSolanaReceiverRegistryInvalidError'
+  /** Creates a Solana receiver registry invalid error. */
+  constructor(
+    context: { registry: string; receiver: string; reason: string },
+    options?: CCIPErrorOptions,
+  ) {
+    super(
+      CCIPErrorCode.SOLANA_RECEIVER_REGISTRY_INVALID,
+      `Invalid ReceiverRegistry ${context.registry} for receiver ${context.receiver}: ${context.reason}`,
+      {
+        ...options,
+        isTransient: false,
+        context: { ...options?.context, ...context },
+      },
+    )
+  }
+}
+
+/**
  * Thrown when fee result from router is invalid.
  *
  * @example

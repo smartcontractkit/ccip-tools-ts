@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { getBytes } from 'ethers'
+import { PublicKey } from '@solana/web3.js'
+import { concat, getBytes } from 'ethers'
 
+import { CCIPExtraArgsInvalidError } from '../errors/index.ts'
 import { SuiExtraArgsV1Tag } from '../extra-args.ts'
 import { decodeMoveExtraArgs } from '../shared/bcs-codecs.ts'
 import { encodeSuiExtraArgsV1 } from '../sui/types.ts'
 import {
   SVMTokenReceiverUsage,
+  decodeSVMExecutorArgsV1,
   decodeSolanaSuiExtraArgsV1,
   encodeSVMExecutorArgsV1,
   encodeSolanaGenericExtraArgsV3,
@@ -357,5 +360,58 @@ describe('encodeSVMExecutorArgsV1', () => {
         encodeSVMExecutorArgsV1({ accounts: Array(256).fill('11111111111111111111111111111111') }),
       /at most 255/,
     )
+  })
+})
+
+describe('decodeSVMExecutorArgsV1', () => {
+  const writable = 'GVuEzxzvpVQr9RTwNguw4AcZSZmGiP9EWaRPkp8x6Xrx'
+  const readonly = '11111111111111111111111111111112'
+
+  it('decodes the packed layout encodeSVMExecutorArgsV1 writes', () => {
+    const args = {
+      useAta: SVMTokenReceiverUsage.UseAsIs,
+      accountIsWritableBitmap: 0b01n,
+      accounts: [writable, readonly],
+    }
+    assert.deepEqual(decodeSVMExecutorArgsV1(encodeSVMExecutorArgsV1(args)), args)
+    assert.deepEqual(decodeSVMExecutorArgsV1(encodeSVMExecutorArgsV1({})), {
+      useAta: SVMTokenReceiverUsage.DeriveAtaAndCreate,
+      accountIsWritableBitmap: 0n,
+      accounts: [],
+    })
+  })
+
+  // the program's `SVMDestBlob` borsh layout: LE tag, then the struct with a u32 LE vec length
+  it('decodes the Borsh layout', () => {
+    const borsh = concat([
+      '0x4d3c2b1a',
+      '0x01', // DeriveAtaDontCreate
+      '0x0200000000000000', // bitmap u64 LE = 2
+      '0x02000000', // accounts u32 LE
+      new PublicKey(readonly).toBytes(),
+      new PublicKey(writable).toBytes(),
+    ])
+    assert.deepEqual(decodeSVMExecutorArgsV1(borsh), {
+      useAta: SVMTokenReceiverUsage.DeriveAtaDontCreate,
+      accountIsWritableBitmap: 2n,
+      accounts: [readonly, writable],
+    })
+  })
+
+  it('rejects what the OffRamp rejects', () => {
+    const packed = getBytes(encodeSVMExecutorArgsV1({ accounts: [writable] }))
+    const withTag = (tag: string) => concat([tag, packed.subarray(4)])
+    const withUseAta = (useAta: number) =>
+      concat([packed.subarray(0, 4), new Uint8Array([useAta]), packed.subarray(5)])
+    for (const invalid of [
+      '0x', // empty
+      packed.subarray(0, 13), // shorter than the base size
+      withTag('0x1a2b3c4e'), // unknown tag
+      withUseAta(3), // unknown token receiver usage
+      packed.subarray(0, -1), // truncated account
+      concat([packed, '0x00']), // trailing byte
+      concat([withTag('0x4d3c2b1a'), '0x00']), // packed body under the Borsh tag
+    ])
+      assert.throws(() => decodeSVMExecutorArgsV1(invalid), CCIPExtraArgsInvalidError)
   })
 })

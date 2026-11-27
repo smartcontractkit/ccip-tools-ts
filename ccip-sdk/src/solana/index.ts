@@ -21,6 +21,7 @@ import {
   isHexString,
   randomBytes,
   toBigInt,
+  zeroPadValue,
 } from 'ethers'
 import { type Memoized, memoize } from 'micro-memoize'
 import type { PickDeep } from 'type-fest'
@@ -127,12 +128,14 @@ import {
 } from './exec-v2.ts'
 import { generateUnsignedExecuteReport } from './exec.ts'
 import {
+  type SVMTokenReceiverUsage,
+  decodeSVMExecutorArgsV1,
   decodeSolanaGenericExtraArgsV3,
   decodeSolanaSuiExtraArgsV1,
   encodeSVMExecutorArgsV1,
   encodeSolanaExtraArgs,
 } from './extra-args.ts'
-import { estimateExecComputeUnits } from './gas.ts'
+import { type SolanaReceiverVersion, estimateExecComputeUnits, getReceiverVersion } from './gas.ts'
 import { getV16SolanaLeafHasher } from './hasher.ts'
 import { IDL as CCIP_OFFRAMP_IDL } from './idl/1.6.0/CCIP_OFFRAMP.ts'
 import { IDL as CCIP_ROUTER_IDL } from './idl/1.6.0/CCIP_ROUTER.ts'
@@ -1784,7 +1787,9 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
         input,
         forceBuffer: opts.forceBuffer,
         forceLookupTable: opts.forceLookupTable,
-        computeUnits: opts.txGasLimit ?? opts.gasLimit,
+        // only the transaction's limit: `gasLimit` is the receiver callback's budget, which a
+        // signed 2.0 message fixes, and is far below what the whole `execute_v2` consumes
+        computeUnits: opts.txGasLimit,
       })
     }
     while (!hash) {
@@ -1911,10 +1916,15 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
               getDestTokenAmount({ dest: this, tokenAmount }),
             ),
           ),
-          tokenReceiver: 'tokenReceiver' in message ? message.tokenReceiver : undefined,
+          // a 2.0 message signs its token receiver in its token transfer
+          tokenReceiver:
+            'tokenReceiver' in message
+              ? message.tokenReceiver
+              : message.tokenAmounts.find((ta) => 'tokenReceiver' in ta)?.tokenReceiver,
           accounts: 'accounts' in message ? message.accounts : undefined,
           accountIsWritableBitmap:
             'accountIsWritableBitmap' in message ? message.accountIsWritableBitmap : undefined,
+          destBlob: 'destBlob' in message ? message.destBlob : undefined,
         },
       }
     } else {
@@ -1933,10 +1943,45 @@ export class SolanaChain extends Chain<typeof ChainFamily.Solana> {
     }
 
     const router = await this.getRouterForOffRamp(opts_.offRamp, opts_.message.sourceChainSelector)
+    // a 2.0 OffRamp calls `ccip_receive_v2` on receivers registered as v2 with the router; a 1.6
+    // OffRamp always calls `ccip_receive`
+    let receiverVersion: SolanaReceiverVersion = 1
+    let tokenReceiverUsage: SVMTokenReceiverUsage | undefined
+    let message = opts_.message
+    if (!new PublicKey(message.receiver).equals(PublicKey.default)) {
+      const [, offRampVersion] = await this.typeAndVersion(opts_.offRamp)
+      if (offRampVersion >= CCIPVersion.V2_0) {
+        receiverVersion = await getReceiverVersion(this.connection, router, message.receiver)
+        // a 2.0 message carries the sender as the source OnRamp encoded it, which the OffRamp
+        // hands to the receiver: 32 bytes for a shorter address (`abi.encode(address)` from EVM)
+        const senderBytes = getAddressBytes(message.sender ?? '0x')
+        if (senderBytes.length > 0 && senderBytes.length < 32)
+          message = { ...message, sender: zeroPadValue(senderBytes, 32) }
+        // the OffRamp takes the receiver's accounts and the token delivery mode from the signed
+        // `destBlob`, which is the message's `executorArgs` before it's sent
+        const destBlob =
+          message.destBlob || ('executorArgs' in message ? message.executorArgs : undefined)
+        if (destBlob && getDataBytes(destBlob).length) {
+          const { useAta, accounts, accountIsWritableBitmap } = decodeSVMExecutorArgsV1(destBlob)
+          message = { ...message, accounts, accountIsWritableBitmap }
+          tokenReceiverUsage = useAta
+        }
+        // and the token receiver from its token transfer, once sent
+        const signedTokenReceiver =
+          'tokenAmounts' in message
+            ? message.tokenAmounts?.find((ta) => 'tokenReceiver' in ta && ta.tokenReceiver)
+            : undefined
+        if (signedTokenReceiver && 'tokenReceiver' in signedTokenReceiver)
+          message = { ...message, tokenReceiver: signedTokenReceiver.tokenReceiver }
+      }
+    }
     return estimateExecComputeUnits({
       connection: this.connection,
       router,
       ...opts_,
+      message,
+      receiverVersion,
+      tokenReceiverUsage,
       logger: this.logger,
     })
   }

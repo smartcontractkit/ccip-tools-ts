@@ -2129,7 +2129,8 @@ export abstract class Chain<F extends ChainFamily = ChainFamily> {
         'feeValueJuels' in opts.input.message || // v1.6
         'strict' in opts.input.message) // <=v1.5 with all required fields (API /messages lack some)
     ) {
-      opts_ = opts
+      // a copy: the gasLimit estimated below goes in the returned opts only, not the caller's
+      opts_ = { ...opts }
     } else if (!this.apiClient) {
       throw new CCIPApiClientNotAvailableError()
     } else if (

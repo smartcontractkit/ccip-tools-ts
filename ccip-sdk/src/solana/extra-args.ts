@@ -1,8 +1,10 @@
+import { PublicKey } from '@solana/web3.js'
 import { type BytesLike, concat, getBytes, hexlify, toBeArray } from 'ethers'
 
 import {
   CCIPArgumentInvalidError,
   CCIPExtraArgsEncodingUnsupportedError,
+  CCIPExtraArgsInvalidError,
   CCIPExtraArgsParseError,
 } from '../errors/index.ts'
 import {
@@ -285,4 +287,47 @@ export function encodeSVMExecutorArgsV1({
     new Uint8Array([accounts.length]),
     ...accounts.map((account) => getAddressBytes(account)),
   ])
+}
+
+/**
+ * Decodes `SVMExecutorArgsV1`: a 2.0 message's `executorArgs` to Solana, which the OnRamp signs
+ * as the message's `destBlob`. Reads both encodings the OffRamp does: packed, as
+ * {@link encodeSVMExecutorArgsV1} writes it (big-endian tag), and Borsh (little-endian tag; u64 LE
+ * bitmap, u32 LE accounts count).
+ * @param executorArgs - The encoded `executorArgs` or `destBlob`.
+ * @returns How to deliver the tokens, and the receiver's accounts and their writable bitmap.
+ * @throws {@link CCIPExtraArgsInvalidError} if it isn't a well-formed `SVMExecutorArgsV1`, which
+ *   the OffRamp rejects too
+ */
+export function decodeSVMExecutorArgsV1(executorArgs: BytesLike): {
+  useAta: SVMTokenReceiverUsage
+  accountIsWritableBitmap: bigint
+  accounts: string[]
+} {
+  const bytes = getBytes(executorArgs)
+  const invalid = () => new CCIPExtraArgsInvalidError('SVM', hexlify(bytes))
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  // tag(4) + useATA(1) + bitmap(8) + accounts count(1, packed; 4, borsh)
+  if (bytes.length < 14) throw invalid()
+  const tag = hexlify(bytes.subarray(0, 4))
+  const borsh = tag === hexlify(getBytes(SVMExecutorArgsV1Tag).reverse())
+  if (!borsh && tag !== SVMExecutorArgsV1Tag) throw invalid()
+  const useAta = bytes[4]!
+  if (!(Object.values(SVMTokenReceiverUsage) as number[]).includes(useAta)) throw invalid()
+  const accountIsWritableBitmap = view.getBigUint64(5, borsh)
+  let offset = 13
+  let count: number
+  if (borsh) {
+    if (bytes.length < 17) throw invalid()
+    count = view.getUint32(offset, true)
+    offset += 4
+  } else {
+    count = bytes[offset++]!
+  }
+  // both encodings must be consumed exactly
+  if (bytes.length - offset !== count * 32) throw invalid()
+  const accounts = []
+  for (let i = 0; i < count; i++, offset += 32)
+    accounts.push(new PublicKey(bytes.subarray(offset, offset + 32)).toBase58())
+  return { useAta: useAta as SVMTokenReceiverUsage, accountIsWritableBitmap, accounts }
 }

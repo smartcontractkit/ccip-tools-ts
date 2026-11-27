@@ -313,6 +313,10 @@ exec callback. Tokens gas limit override estimation is not supported for estimat
 `--force-lookup-table` creates a lookup table for all the accounts used in the message, to fit in
 the transaction.
 
+A CCIP 2.0 message signs its receiver's compute budget, and the Solana OffRamp has no override for
+it: `--estimate-gas-limit` only reports the estimate, and warns if it exceeds the signed budget.
+`--tx-gas-limit` sets the execute transaction's compute budget, not the receiver's.
+
 If a solana message fails serialization, it's recommended to try with buffer first, then with lookup
 table. The former gets auto-cleared upon successful execution, while the latter needs a grace period
 to be cleared.

@@ -6,6 +6,8 @@ import {
   type AccountMeta,
   type Connection,
   type VersionedTransaction,
+  ComputeBudgetInstruction,
+  ComputeBudgetProgram,
   Keypair,
   PublicKey,
   SystemProgram,
@@ -751,6 +753,37 @@ describe('SolanaChain CCIP 2.0 execution', () => {
       fromBuffer.instructions[fromBuffer.mainIndex!]!.data.subarray(0, 9),
       Buffer.concat([EXECUTE_V2_DISCRIMINATOR, Buffer.from([0])]),
     )
+  })
+
+  it("limits execute_v2's compute units by txGasLimit only, never the receiver's gasLimit", async () => {
+    const payer = randomKey()
+    const resolved = [{ pubkey: payer, isSigner: true, isWritable: true }]
+    const input = {
+      encodedMessage,
+      verifications: [{ destAddress: required.toBase58(), ccvData: '0x01' }],
+    }
+    // the cluster's computeUnitLimit of each sent execute_v2 tx; none when left to the default
+    const limitsSent = async (opts: { gasLimit?: number; txGasLimit?: number }) => {
+      const { connection, sent } = fakeOfframp(offRamp, { resolved })
+      const execOpts = { offRamp: offRamp.toBase58(), input, wallet: walletFor(payer), ...opts }
+      const before = { ...execOpts }
+      // getTransaction isn't faked: execute fails reading the receipt, after sending
+      await assert.rejects(chain(connection).execute(execOpts))
+      assert.deepEqual(execOpts, before) // the caller's opts are left alone
+      return sent.map((ixs) =>
+        ixs
+          .map(({ data, programId }) => ({ data, keys: [], programId }))
+          .filter(
+            (ix) =>
+              ix.programId.equals(ComputeBudgetProgram.programId) &&
+              ComputeBudgetInstruction.decodeInstructionType(ix) === 'SetComputeUnitLimit',
+          )
+          .map((ix) => ComputeBudgetInstruction.decodeSetComputeUnitLimit(ix).units),
+      )
+    }
+    // a receiver budget far below what execute_v2 needs doesn't cap the transaction
+    assert.deepEqual(await limitsSent({ gasLimit: 5_000 }), [[]])
+    assert.deepEqual(await limitsSent({ gasLimit: 5_000, txGasLimit: 900_000 }), [[900_000]])
   })
 
   it('only buffers CCIP 2.0 execution inputs ahead of execution', async () => {

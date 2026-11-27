@@ -192,6 +192,8 @@ export const DEFAULT_RECOVERY_HINTS: Partial<Record<CCIPErrorCode, string>> = {
     'Account resolution did not complete. Check that the program is a CCIP 2.0 router/offramp and that the instruction data is valid for it.',
   SOLANA_V2_LANE_UNAVAILABLE:
     'GenericExtraArgsV3 (finality, ccvs, executor, tokenReceiver, ...) can only be sent over a CCIP 2.0 lane. Use legacy extraArgs (gasLimit, allowOutOfOrderExecution) to send over the 1.6 lane, or have the lane configured for 2.0, with its sender allowlist disabled.',
+  SOLANA_RECEIVER_REGISTRY_INVALID:
+    "The receiver's router registry account isn't a valid ReceiverRegistry, so the OffRamp would reject messages to this receiver. Check the receiver's registration with the router.",
   SOLANA_EXECUTION_BUFFER_INCOMPLETE:
     'Sign and send the instructions from generateUnsignedExecuteBuffer (one buffering instruction per transaction) to fill the execution inputs buffer, then generate the execution again.',
   SOLANA_REF_ADDRESSES_NOT_FOUND: 'Reference addresses account not found. Wait and retry.',
