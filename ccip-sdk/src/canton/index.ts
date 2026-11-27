@@ -1090,6 +1090,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       }
 
       // Token pool disclosures
+      this.logger.debug(
+        `CantonChain.generateUnsignedSendMessage: token pool send request for ${tokenPoolAddress.toInstanceAddress().toString()}`,
+        oapiMessage,
+      )
       const tokenPoolSendDisclosuresResponse = await this.edsClientProvider
         .tokenPoolClientFor(tokenPoolAddress.owner)
         .POST('/ccip/v1/external/tokenPool/{address}/send', {
@@ -2428,7 +2432,10 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
         tokenTransferHoldingCids.push(...explicitTokenTransferHoldingCids)
       } else {
         // Select holdings from lowest-to-highest amount in order to minimize dust
+        // Only our own unlocked holdings can be spent as transfer inputs (the active party can
+        // also see holdings it doesn't own, e.g. as the instrument admin)
         const holdings = (await this.listTokenHoldings(tokenTransfer.instrumentId))
+          .filter((holding) => !holding.view.lock && holding.view.owner === this.activeParty)
           .map((holding) => ({
             contractId: holding.contractId,
             units: parseCantonDecimalAmountUnits(holding.view.amount),
@@ -2477,6 +2484,7 @@ export class CantonChain extends Chain<typeof ChainFamily.Canton> {
       // Pass all holdings, sorted from lowest-to-highest amount in order to minimize dust
       const transferCids = new Set(tokenTransferHoldingCids)
       feeTokenHoldingCids = (await this.listTokenHoldings(feeTokenInstrumentId))
+        .filter((holding) => !holding.view.lock && holding.view.owner === this.activeParty)
         .map((holding) => ({
           contractId: holding.contractId,
           units: parseCantonDecimalAmountUnits(holding.view.amount),
