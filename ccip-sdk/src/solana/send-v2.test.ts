@@ -6,6 +6,7 @@ import {
   type AccountMeta,
   type Connection,
   type VersionedTransaction,
+  AddressLookupTableAccount,
   ComputeBudgetProgram,
   Keypair,
   PublicKey,
@@ -128,6 +129,8 @@ function routerConnection(
     other = { err: { InstructionError: [1, { Custom: 9999 }] } } as SimulationResult,
     // whether the router also has a 1.6 lane (`dest_chain_state`) to SEPOLIA
     v16Lane = true,
+    // contents of the lookup tables the connection serves (empty if not listed)
+    lookupTableAddresses = {} as Record<string, PublicKey[]>,
   } = {},
 ) {
   const simulateTransaction = mock.fn(async (tx: VersionedTransaction) => {
@@ -157,7 +160,15 @@ function routerConnection(
     }
   })
   const getAddressLookupTable = mock.fn(async (key: PublicKey) => ({
-    value: { key, state: { addresses: [] } },
+    value: new AddressLookupTableAccount({
+      key,
+      state: {
+        deactivationSlot: 2n ** 64n - 1n,
+        lastExtendedSlot: 0,
+        lastExtendedSlotStartIndex: 0,
+        addresses: lookupTableAddresses[key.toBase58()] ?? [],
+      },
+    }),
   }))
   const connection = {
     simulateTransaction,
@@ -452,11 +463,17 @@ describe('selectSendLane', () => {
 describe('getFeeV2', () => {
   const message: AnyMessage = { receiver: RECEIVER, data: '0x1337', extraArgs: LANE_DEFAULTS_V3 }
 
-  it('simulates the resolved get_fee_v2 on a heap frame, with the fixed send lookup table', async () => {
+  it('simulates the resolved get_fee_v2 on a heap frame, compiled with the resolved lookup tables', async () => {
     const resolvedLut = randomKey()
+    const lookedUp = randomKey()
     const { connection, simulateTransaction, getAddressLookupTable } = routerConnection(
       STAGING_ROUTER,
-      { fee: 42n, lookupTablesToSave: [resolvedLut] },
+      {
+        fee: 42n,
+        saved: [{ pubkey: lookedUp, isSigner: false, isWritable: false }],
+        lookupTablesToSave: [resolvedLut],
+        lookupTableAddresses: { [resolvedLut.toBase58()]: [lookedUp] },
+      },
     )
     const fee = await getFeeV2(
       { connection, logger: silent },
@@ -480,14 +497,22 @@ describe('getFeeV2', () => {
         STAGING_ROUTER.toBase58(),
       ],
     )
+    // only the tables resolution returned, and the quote tx really loads accounts through them
     assert.deepEqual(
       getAddressLookupTable.mock.calls.map((call) => call.arguments[0].toBase58()),
-      [resolvedLut.toBase58(), STAGING_SEND_LOOKUP_TABLE],
+      [resolvedLut.toBase58()],
     )
+    assert.deepEqual(
+      quoteTx!.message.addressTableLookups.map(({ accountKey }) => accountKey.toBase58()),
+      [resolvedLut.toBase58()],
+    )
+    assert.ok(!quoteTx!.message.staticAccountKeys.some((key) => key.equals(lookedUp)))
   })
 
-  it("doesn't add a lookup table for routers without a known one", async () => {
-    const router = randomKey()
+  it("adds no lookup table resolution didn't return, even for a router ID shared across clusters", async () => {
+    // prod testnet (devnet) and mainnet share this router ID; a table hardcoded per router ID
+    // (the devnet one) used to be added on mainnet, where it doesn't exist
+    const router = new PublicKey('Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C')
     const { connection, getAddressLookupTable } = routerConnection(router)
     await getFeeV2({ connection, logger: silent }, { router, destChainSelector: SEPOLIA, message })
     assert.equal(getAddressLookupTable.mock.calls.length, 0)
@@ -510,9 +535,11 @@ describe('SolanaChain send lane routing', () => {
       { pubkey: randomKey(), isSigner: false, isWritable: false },
       { pubkey: sender, isSigner: true, isWritable: true },
     ]
+    // as the staging router's resolution does, it returns the deployment's send lookup table
     const { connection, simulateTransaction } = routerConnection(STAGING_ROUTER, {
       saved,
       fee: 77n,
+      lookupTablesToSave: [new PublicKey(STAGING_SEND_LOOKUP_TABLE)],
     })
 
     const unsigned = await chain(connection).generateUnsignedSendMessage(

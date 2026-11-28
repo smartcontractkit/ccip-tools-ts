@@ -155,7 +155,7 @@ describe('Solana CCT onboarding on CCIP 2.0 (devnet fork)', { skip, timeout: 1_2
       pda('config', router),
       pda(laneSeed('dest_chain_state_v2', selector), router),
       pda(laneSeed('dest_chain_state', selector), router),
-      // the router's fixed ccip_send v2 lookup table (CCIP_SEND_V2_LOOKUP_TABLES in send-v2.ts)
+      // the router's fixed ccip_send v2 lookup table, which its account resolution returns
       new PublicKey('43j7AWfB2STvzwKxik64fD12Swdz56rNTA5VQnCWwEXL'),
       feeQuoterProgram,
       programData(feeQuoterProgram),

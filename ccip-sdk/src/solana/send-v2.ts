@@ -2,7 +2,6 @@ import { Buffer } from 'buffer'
 
 import type { IdlTypes } from '@coral-xyz/anchor'
 import {
-  type AddressLookupTableAccount,
   type Connection,
   ComputeBudgetProgram,
   PublicKey,
@@ -24,12 +23,7 @@ import { type AnyMessage, type WithLogger, CCIPVersion } from '../types.ts'
 import { bytesToBuffer, toLeArray } from '../utils.ts'
 import { sighash, sizedCoder } from './coder.ts'
 import { IDL as CCIP_ROUTER_V2_IDL } from './idl/2.0.0/CCIP_ROUTER.ts'
-import {
-  MAX_HEAP_FRAME_BYTES,
-  fetchLookupTables,
-  resolveCcipSendV2,
-  resolveGetFeeV2,
-} from './resolution.ts'
+import { MAX_HEAP_FRAME_BYTES, resolveCcipSendV2, resolveGetFeeV2 } from './resolution.ts'
 import { generateApproveIxs } from './send.ts'
 import type { UnsignedSolanaTx } from './types.ts'
 import { SIMULATION_PAYER, customInstructionErrorCode, simulateTransaction } from './utils.ts'
@@ -54,17 +48,6 @@ const INSTRUCTION_FALLBACK_NOT_FOUND = 101 // the router doesn't have 2.0 suppor
 const ACCOUNT_NOT_INITIALIZED = 3012 // no `dest_chain_state_v2` account for the lane
 // `dest_chain_state_v2` is still system-owned, but was prefunded (anyone can send lamports to it)
 const ACCOUNT_OWNED_BY_WRONG_PROGRAM = 3007
-
-// WIP: account resolution doesn't return the deployment's fixed ccip_send lookup table yet (an
-// upstream oversight, to be fixed in the router), and 2.0 token transfers only fit a v0
-// transaction with it. Until it's discoverable, it's hardcoded here per 2.0 router; remove this
-// once resolution returns it.
-const CCIP_SEND_V2_LOOKUP_TABLES: Readonly<Record<string, string>> = {
-  // CCIP 2.0 staging deployment on Solana devnet
-  CcipP6NhMw34e7hNJXmNytvzmSYrwQ1TcFgfQAxJhNqm: '61yGrR9h9YU7wq5b3LiYSdePou1iAg5giaVMBig8fK6m',
-  // CCIP 2.0 prod testnet on Solana devnet (CLD `CcipSendLookupTable` 2.0.0)
-  Ccip842gzYHhvdDkSyi2YVCoAWPbYJoApMFzSxQroE9C: '43j7AWfB2STvzwKxik64fD12Swdz56rNTA5VQnCWwEXL',
-}
 
 const MAX_UINT32 = 0xffff_ffffn
 
@@ -270,17 +253,6 @@ export async function selectSendLane(
   return { version: CCIPVersion.V1_6, message }
 }
 
-// Resolved lookup tables, plus the deployment's fixed one, if known
-async function withSendLookupTables(
-  connection: Connection,
-  router: PublicKey,
-  lookupTables: AddressLookupTableAccount[],
-): Promise<AddressLookupTableAccount[]> {
-  const fixed = CCIP_SEND_V2_LOOKUP_TABLES[router.toBase58()]
-  if (!fixed || lookupTables.some(({ key }) => key.toBase58() === fixed)) return lookupTables
-  return [...lookupTables, ...(await fetchLookupTables(connection, [new PublicKey(fixed)]))]
-}
-
 /**
  * Quotes a message over a CCIP 2.0 lane, simulating the router's resolved `get_fee_v2`.
  * @param ctx - Context with the Solana connection and logger.
@@ -305,7 +277,7 @@ export async function getFeeV2(
   const simResult = await simulateTransaction(ctx, {
     payerKey: SIMULATION_PAYER,
     instructions: [requestHeapFrameIx(), instruction],
-    addressLookupTableAccounts: await withSendLookupTables(ctx.connection, router, lookupTables),
+    addressLookupTableAccounts: lookupTables,
   })
   const returnData = simResult.returnData
   if (!returnData?.data[0] || returnData.programId !== router.toBase58()) {
@@ -348,6 +320,6 @@ export async function generateUnsignedCcipSendV2(
     family: ChainFamily.Solana,
     mainIndex: approveIxs.length + 1,
     instructions: [...approveIxs, requestHeapFrameIx(), instruction],
-    lookupTables: await withSendLookupTables(ctx.connection, router, lookupTables),
+    lookupTables,
   }
 }
