@@ -264,7 +264,7 @@ Solana transactions have size limits. For large messages:
 | 2    | `--force-lookup-table`      | Creates address lookup table for accounts |
 | 3    | `--clear-leftover-accounts` | Cleans up from aborted attempts           |
 
-After successful execution, buffers auto-clear. Lookup tables require a grace period before deletion.
+After successful execution, buffers auto-clear. A lookup table created for the execution is deactivated, and requires a grace period (~513 slots) before deletion. Leftovers of earlier attempts are only looked for with `--clear-leftover-accounts`, which scans the wallet's recent transactions after a successful execution; this can be slow on a rate-limited RPC.
 
 ## Canton Considerations
 
