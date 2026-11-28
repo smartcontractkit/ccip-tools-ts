@@ -57,3 +57,6 @@ export const CCIP_PUBLIC_LABEL = 'ccip-public'
 
 /** Transfer-meta key the registry reads to select the receiver account (→ holding label). */
 export const CIP112_RECEIVER_ID_META_KEY = 'cip-112/receiver.id'
+
+/** Transfer-meta key the registry reads to select the sender account (→ label on the sender's change). */
+export const CIP112_SENDER_ID_META_KEY = 'cip-112/sender.id'
